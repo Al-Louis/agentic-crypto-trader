@@ -1,0 +1,43 @@
+# Secrets & keys — NEVER commit (self-custody stays local)
+.env
+.env.*
+!/.env.example
+*.key
+*.pem
+*.keystore
+wallet.json
+mnemonic*
+keystore/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# venv (created via `python -m venv .venv`) is ignored above
+
+# Data / runs / models (may be large)
+data/raw/
+data/*.parquet
+runs/
+models/
+*.log
+logs/
+
+# Vendored SDK clones — keep provenance (_SOURCE.md), drop the third-party source.
+# (trust-wallet-agent-kit is doc-only markdown, so it stays tracked.)
+.obsidian-vault/References/bnb-ai-agent-sdk/*
+!.obsidian-vault/References/bnb-ai-agent-sdk/_SOURCE.md
+.obsidian-vault/References/coinmarketcap-cli/*
+!.obsidian-vault/References/coinmarketcap-cli/_SOURCE.md
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

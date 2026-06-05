@@ -1,0 +1,69 @@
+# Trust Wallet Developer Documentation
+
+[Trust Wallet](https://trustwallet.com) is a self-custody, multi-chain crypto wallet used by millions of people worldwide. It supports 100+ blockchains and millions of assets, giving users full control of their keys while providing a seamless experience for storing, sending, receiving, and swapping crypto — as well as connecting to dApps across web3.
+
+This documentation covers everything for developers: building on top of Trust Wallet, listing your project, and integrating Trust Wallet's open-source libraries.
+
+---
+
+## Trust Wallet Agent SDK
+
+### [Agent SDK](agent-sdk/agent-sdk.md)
+Programmatic access to Trust Wallet's multichain infrastructure — balance queries, token prices, swaps, transaction history, and more — through a CLI and an MCP server for AI agents.
+
+- [Quickstart](agent-sdk/quickstart.md)
+- [CLI Reference](agent-sdk/cli-reference.md)
+- [Authentication](agent-sdk/authentication.md)
+- [Key Management](agent-sdk/key-management.md)
+
+---
+
+## Build on Trust Wallet
+
+### [TrustConnect SDK](trustconnect/trustconnect.md)
+The free, open-source wallet connection SDK for every chain. Connect dApps to Trust Wallet across EVM, Solana, and Bitcoin with a modular React hooks API and fully customizable UI.
+
+- [Quickstart](trustconnect/quickstart.md)
+- [EVM (EIP-155)](trustconnect/evm.md)
+- [Solana](trustconnect/solana.md)
+- [Bitcoin (BIP-122)](trustconnect/bitcoin.md)
+
+### [Developing for Trust Wallet](develop-for-trust/develop-for-trust.md)
+An introduction to web3 development with Trust Wallet. Covers the Provider API, WalletConnect, deep linking, and the browser extension.
+
+- [Browser Extension](develop-for-trust/browser-extension/browser-extension.md)
+- [Mobile (WalletConnect)](develop-for-trust/mobile/mobile.md)
+- [Deep Linking](develop-for-trust/deeplinking/deeplinking.md)
+
+### [Barz — Smart Wallet](barz-smart-wallet/barz-smart-wallet.md)
+Barz is Trust Wallet's ERC-4337 compatible smart contract wallet. Learn how to integrate it into your project for a modular, upgradeable smart wallet experience.
+
+---
+
+## List Your Project
+
+### [Listing a New dApp](dapps/listing-guide.md)
+Submit your dApp for listing in the Trust Wallet browser. Covers the listing requirements and submission process.
+
+### [Listing a New Asset](assets/new-asset.md)
+Add your token or coin to the Trust Wallet asset repository. Covers logo requirements, token information, and the pull request process.
+
+### [Staking Validators](assets/staking-validator.md)
+List your validator in the Trust Wallet app so users can discover and delegate to it directly.
+
+---
+
+## Libraries
+
+### [Wallet Core](wallet-core/wallet-core.md)
+Trust Wallet's open-source, cross-platform cryptographic library. Supports 130+ blockchains with native bindings for iOS (Swift), Android (Kotlin/Java), Go, WebAssembly, and more.
+
+---
+
+## Tooling
+
+### [MCP Servers](mcp/mcp.md)
+Trust Wallet publishes two MCP servers for AI coding assistants: a [Docs MCP](mcp/docs-mcp.md) for searching developer documentation, and an [API Gateway MCP](mcp/api-gateway.md) for querying live blockchain data (prices, swaps, security checks, and more).
+
+### [Claude Code Skills](claude-code-skills/claude-code-skills.md)
+Domain-specific Claude Code skills for Trust Wallet libraries, enabling AI-assisted development with knowledge of Trust Wallet's APIs and conventions.

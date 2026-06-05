@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "trader": {
+      "command": ".venv\\Scripts\\python.exe",
+      "args": ["-m", "trader.mcp_server"]
+    }
+  }
+}
