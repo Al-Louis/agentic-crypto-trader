@@ -15,24 +15,38 @@ tool-surface design. SDK docs are mirrored under `.obsidian-vault/References/`.
 - **Secrets:** local `.env` (git-ignored). Keys never committed; self-custody signing stays
   local ([[Security and Encryption]]).
 
-## Project layout
+## Project layout (as built — 2026-06-06)
 
 ```
 agentic-crypto-trader/
 ├── CLAUDE.md            # scope + pipeline (auto-loaded)
-├── .mcp.json            # registers the `trader` MCP server
-├── pyproject.toml       # pip/hatchling project
-├── .env.example         # required config surface (copy to .env)
+├── pyproject.toml       # pip/hatchling; [data] extra = pandas, pyarrow, ta, ccxt
+├── .env.example         # CMC_API_KEY (used) · BSCSCAN (Etherscan, ETH-only) · TWAK (later)
 ├── src/trader/
-│   ├── execution/       # TWAK self-custody signing + BSC submission
-│   ├── data/            # CMC Agent Hub (data + x402) + BscScan
-│   ├── strategy/        # swappable decision core (interface)
-│   ├── risk/            # guardrails: allowlist, caps, slippage, drawdown stop
-│   ├── agent/           # read→decide→sign→confirm loop
-│   ├── monitoring/      # wallet/tx watching + PnL
-│   └── mcp_server/      # the project MCP server (tools per [[MCP Server]])
-└── tests/
+│   ├── config.py        # ✅ .env loader (CMC key, etc.)
+│   ├── data/            # ✅ universe + OHLCV: dexscreener · geckoterminal (OHLCV) ·
+│   │                    #    cmc (contract resolution) · goplus (rug gate) · eligible ·
+│   │                    #    select · downloader (resumable Parquet) · anchor (ccxt BTC/BNB)
+│   ├── features/        # ✅ indicators (71-col + leakage guard) · factor (BTC/BNB residual)
+│   ├── sim/             # ✅ metrics · broker (AMM cost) · backtest · strategies · resample · ic
+│   ├── execution/       # ⬜ stub — TWAK self-custody signing + BSC submission (Phase 2)
+│   ├── strategy/        # ⬜ stub — the validated candidate lands here (vol-tilt + regime overlay)
+│   ├── risk/            # ⬜ stub — guardrails: allowlist, caps, slippage, drawdown stop
+│   ├── agent/           # ⬜ stub — read→decide→sign→confirm loop
+│   ├── monitoring/      # ⬜ stub — wallet/tx watching + PnL
+│   └── mcp_server/      # 🟡 skeleton — health + eligible_tokens stub (catalog in [[MCP Server]])
+├── scripts/             # research CLIs: screen · resolve · select · forensics ·
+│                        #   download_ohlcv · download_anchor · build_factor_features ·
+│                        #   ic_analysis · run_backtest · resample_eval · tail_sweep · oos_validate
+├── data/                # generated caches, git-ignored: ohlcv/ · anchor/ · features/ · *.json
+└── tests/               # ~89 pytest functions
 ```
+
+> **As-built note.** The research stack (`data/` → `features/` → `sim/`) is plain Python modules
+> + `scripts/` CLIs, **not yet [[MCP Server]] tools** — that catalog remains the planned wrapper.
+> The decision core (`strategy/`) is empty; the evidence-backed candidate (daily-rebalanced
+> vol-top8 + a regime overlay — see [[Trading Strategies]]) lands there next. Live execution
+> /custody (`execution/`, `risk/`, `agent/`) is the deferred Phase-2 on-chain spike.
 
 ## The four surfaces (reference)
 
