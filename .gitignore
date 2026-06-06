@@ -25,6 +25,9 @@ build/
 # Data / runs / models (may be large)
 data/raw/
 data/*.parquet
+data/ohlcv/
+data/universe_screen.*
+data/proposed20.json
 runs/
 models/
 *.log

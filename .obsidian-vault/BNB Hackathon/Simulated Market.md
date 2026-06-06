@@ -88,12 +88,49 @@ These are not generic — they must mirror exactly how the live week scores ([[B
 
 `prepare_dataset` builds a clean, causally-validated dataset per eligible token:
 
-1. **Source OHLCV** via `cmc_history` (CMC Agent Hub) for tokens from `eligible_tokens`.
-   Replaces TradeSim's ccxt/CEX ingestion.
-2. **Clean** — duplicate removal, gap handling, OHLC-consistency, flash-move flagging.
-3. **Enrich** — ~28 technical indicators (the TradeSim registry), each passing the causal
-   test.
-4. **Store** — Parquet, partitioned (token/interval/period), as in [[TradeSim]].
+1. **Resolve & screen** — map each `eligible_tokens` symbol to its canonical BSC contract
+   (CMC contract address; **symbol search alone is unreliable — see below**), then screen
+   on-chain via **DexScreener** (liquidity, 24h volume, turnover, pool age).
+2. **Source OHLCV** via **GeckoTerminal** (CoinGecko on-chain), keyed by the token's
+   deepest-liquidity pool address — `day`/`hour`/`minute`, ≤1000 candles/request, ~6mo
+   history. Replaces TradeSim's ccxt/CEX ingestion and the earlier `cmc_history` plan
+   (DexScreener has **no** OHLCV; CMC history is tier-gated and CEX-centric). **BscScan
+   swap-event reconstruction** is the unlimited-depth / forensic fallback.
+3. **Clean** — duplicate removal, gap handling, OHLC-consistency, flash-move flagging.
+4. **Enrich** — ~28 technical indicators (the TradeSim registry) plus BSC second-order
+   features (BTC/BNB residual, lead-lag, liquidity), each passing the causal test.
+5. **Store** — Parquet, partitioned (token/interval/period), as in [[TradeSim]]; the
+   download is **cached and resumable** (GeckoTerminal rate-limits hard — see below).
+
+### Data sourcing — spike findings (2026-06-06)
+
+A screening spike (`scripts/screen_universe.py`, `trader.data.dexscreener` /
+`trader.data.geckoterminal`) ran the full eligible list and validated the stack end to end
+(`data/universe_screen.*`). Headline results:
+
+- **Coverage.** 130/148 symbols resolved to a BSC pair; 88 tradeable (liq ≥ $50k); 15
+  stables. 18 unresolved/error (single-letter tickers `M`/`H`/`U`, `LTC`, `BARD`, …).
+- **Resolution is unreliable — 35% ambiguous.** 46/130 had a runner-up pair within 25%
+  liquidity (same ticker, different contract). `DOGE` resolved to a dead pair ($24/day
+  volume); even `ETH` was ambiguous. **→ CMC contract-address resolution is mandatory** in
+  production; symbol search is a screening heuristic only.
+- **Rank by turnover, not liquidity.** Liquidity-magnitude ranking surfaces *fakes*: KOGE
+  ($54.7M liq, **0.4%** turnover), DUCKY ($36.6M, 0.3%), a price-frozen SMILEK, and the dead
+  DOGE pair all rank *above* ETH (turnover 326%). 22/78 tradeable tokens show <5% turnover —
+  parked/facade liquidity. **Selection ranks on real 24h volume + turnover (vol/liq), with
+  liquidity as an exitability floor**; the forensic gate ([[Security and Encryption]];
+  `twak risk` / `check_token_security`) then filters wash-traded volume. Turnover filters
+  *parked* liquidity, forensics filters *manufactured* volume — two different lies.
+- **History source confirmed.** GeckoTerminal daily returns a clean ~181-day (6-month)
+  series for established tokens; depth = `min(6mo, listing age)`, so newer tokens have weeks,
+  not months — reinforcing the shared/universal policy in [[AI Training]].
+- **1-minute is available but sparse** — only minutes-with-trades exist (a liquid token
+  returned ~400 traded-minutes/day of a possible 1,440). Front-run/sweep micro-features
+  ([[Trading Strategies]]) are feasible only on the liquid subset and must handle gaps.
+- **Rate limit is the binding constraint.** The free tier returns HTTP 429 after ~6–8 rapid
+  calls regardless of the documented 30/min, so bulk history needs a **slow, resumable,
+  cached (Parquet)** downloader with backoff — a one-time cost. A keyed CoinGecko plan
+  removes the bottleneck if speed is needed.
 
 `simulate_trade` ([[MCP Server]], custody side) is the bridge to live: a dry-run of a single
 trade returning projected fill, route, slippage, cost, and a guardrail pass/fail — the same
@@ -125,9 +162,9 @@ comparison set and `simulate_trade` as the live-cost bridge. A `/workflows` loop
 
 ## Open questions
 
-- **Pool-depth data source.** Where does live BSC reserve/liquidity data come from — CMC
-  on-chain stats, BscScan, or the aggregator's quote endpoint? Needed to calibrate AMM
-  slippage. Unverified.
+- **Pool-depth data source.** DexScreener now gives per-pair **liquidity (USD)** for free
+  (validated in the spike) — a usable first cut for sizing. Reserve-level depth for precise
+  AMM price-impact still TBD: CMC on-chain stats, BscScan, or the aggregator's quote endpoint.
 - **Quote fidelity.** Can `simulate_trade` pull *real* Amber/Rango quotes offline, or must
   the sim approximate price impact from reserves? Determines how trustworthy costs are.
 - **Hourly grid vs candle interval.** Scoring is hourly; CMC history interval may differ.
