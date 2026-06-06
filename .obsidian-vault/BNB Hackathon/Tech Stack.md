@@ -43,6 +43,22 @@ agentic-crypto-trader/
 | **BNB AI Agent SDK** (runtime + identity) | `bnbagent` (Python); ERC-8004/8183 — **not execution** | `.env` | `References/bnb-ai-agent-sdk/` |
 | **BscScan** (on-chain analytics) | BscScan REST API | `BSCSCAN_API_KEY` | bscscan.com/apis |
 
+> **Data sources — as built (2026-06-06 spike).** The on-chain data story diverged from
+> this original sketch once tested (see [[Simulated Market]]):
+> - **OHLCV history** → **GeckoTerminal** (CoinGecko on-chain, *keyless*) by pool address;
+>   DexScreener has no history, CMC history is CEX-centric/tier-gated. Cached to resumable
+>   Parquet (`trader.data.downloader`).
+> - **Screening** → **DexScreener** (*keyless*): liquidity / volume / turnover / pool age.
+> - **Contract resolution** → **CMC** `cryptocurrency/map`+`info` (`CMC_API_KEY`): symbol →
+>   canonical BSC contract, fixing the 35% symbol-search ambiguity (`trader.data.cmc`).
+> - **Forensics / rug gate** → **GoPlus** Security API (*keyless*, BSC `chain_id=56`):
+>   honeypot, mintable, holder count, buy/sell tax, LP. **Replaces BscScan** here.
+> - **⚠ BscScan/Etherscan caveat.** Etherscan unified all chains under one **V2** key, but
+>   the **free tier covers Ethereum only — BSC requires a paid plan** (`"Free API access is
+>   not supported for this chain"`). The standalone `api.bscscan.com` V1 endpoint is
+>   deprecated. So `BSCSCAN_API_KEY` (an Etherscan key) is ETH-only on free; BSC on-chain
+>   reads route via **GoPlus** + a **public BSC RPC** (`BSC_RPC_URL`), both free.
+
 ---
 
 ## Phase 2 — Stack spike (the critical first build)
