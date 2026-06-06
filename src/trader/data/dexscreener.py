@@ -60,13 +60,41 @@ def bsc_matches(raw: dict, symbol: str) -> list[dict]:
 
 
 def summarize(symbol: str, raw: dict, now_ms: float | None = None) -> dict:
-    """Reduce a search response to one row for `symbol`.
+    """Reduce a search response to one row for `symbol` (symbol-search path).
 
     Picks the deepest-liquidity BSC pair as canonical; flags ambiguity when a
     runner-up pair has comparable liquidity (likely a same-ticker different
     contract — a real shitcoin hazard).
     """
     matches = sorted(bsc_matches(raw, symbol), key=_liq, reverse=True)
+    return _build_row(symbol, matches, now_ms)
+
+
+def token_pairs(address: str, chain: str = "bsc", timeout: int = 20) -> list[dict]:
+    """Pairs for a specific token *contract* (the v1 token-pairs API).
+
+    Used after CMC resolves the canonical BSC contract — keys off the right
+    address instead of guessing by ticker. Returns a list of pair dicts.
+    """
+    q = urllib.parse.quote(address)
+    data = _get_json(f"{BASE}/token-pairs/v1/{chain}/{q}", timeout=timeout)
+    return data if isinstance(data, list) else (data.get("pairs") or [])
+
+
+def summarize_token_pairs(symbol: str, pairs: list[dict],
+                          now_ms: float | None = None) -> dict:
+    """Reduce contract-resolved pairs to one row (deepest-liquidity BSC pool).
+
+    Ambiguity is already resolved by the contract address, so this just screens
+    the right token's pools — `ambiguous` here means multiple *pools* for the
+    same token, not a ticker collision.
+    """
+    bsc = sorted((p for p in pairs if p.get("chainId") == "bsc"), key=_liq, reverse=True)
+    return _build_row(symbol, bsc, now_ms)
+
+
+def _build_row(symbol: str, matches: list[dict], now_ms: float | None = None) -> dict:
+    """Reduce a ranked list of BSC pairs (deepest first) to one screen row."""
     if not matches:
         return {"symbol": symbol, "status": "unresolved", "n_bsc": 0}
 
