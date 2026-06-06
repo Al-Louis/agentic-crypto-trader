@@ -37,3 +37,20 @@ def xs_momentum(hist: pd.DataFrame, lookback: int = 24, k: int = 5) -> pd.Series
 def xs_reversal(hist: pd.DataFrame, lookback: int = 24, k: int = 5) -> pd.Series:
     """Long the bottom-k by trailing return (the IC-suggested mean reversion)."""
     return _ranked(hist, lookback, k, ascending=True)
+
+
+def static_subset(symbols):
+    """Weights-fn factory: equal weight over a **fixed** subset, held (ignores history).
+
+    The low-turnover way to take a concentration / volatility / beta tilt — entry-timing
+    re-ranking is dead here (it churns thin pools), so the lever is *which fixed set to hold*.
+    """
+    sset = list(dict.fromkeys(symbols))
+
+    def weights(hist: pd.DataFrame) -> pd.Series:
+        last = hist.iloc[-1]
+        avail = [c for c in sset if c in hist.columns and pd.notna(last.get(c))]
+        n = len(avail)
+        return pd.Series({s: 1.0 / n for s in avail}) if n else pd.Series(dtype=float)
+
+    return weights

@@ -75,3 +75,15 @@ def test_momentum_and_reversal_pick_opposite_ends():
     rev = S.xs_reversal(hist, lookback=10, k=2)
     assert set(mom.index) == {"A", "B"}
     assert set(rev.index) == {"C", "D"}
+
+
+def test_static_subset_holds_fixed_set_equal_weight():
+    hist = pd.DataFrame({"A": [1.0], "B": [1.0], "C": [1.0]})
+    w = S.static_subset(["A", "C"])(hist)
+    assert set(w.index) == {"A", "C"} and abs(w.sum() - 1.0) < 1e-12
+
+
+def test_static_subset_drops_unavailable_symbols():
+    hist = pd.DataFrame({"A": [1.0], "B": [float("nan")]})
+    w = S.static_subset(["A", "B"])(hist)     # B has no current value
+    assert set(w.index) == {"A"}
