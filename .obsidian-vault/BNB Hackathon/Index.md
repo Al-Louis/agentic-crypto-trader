@@ -14,12 +14,14 @@ This is the map of content (MOC) for my entry into the [[BNB Hack - AI Trading A
 - [[MCP Server]] - Isolated project MCP server: tool catalog, safety tiers, build phasing
 - [[Market Conditions]] - Macro/micro trends, market sentiment
 - [[Trading Strategies]] - Technical indicators, wallet monitoring, asset comparison
+- [[Token Universe]] - The 20 tradeable tokens, selection methodology, and the theory behind them
 - [[Simulated Market]] - Historical exchange data, back-testing environment
 - [[AI Training]] - RL/ML agent training, reward tuning, curriculum
 - [[Security and Encryption]] - Wallet addresses, encryption methods, best practices
 - [[Real-time Monitoring]] - Monitoring wallets, trade executions, fund transfers
 - [[Social Media Scanner]] - X.com scanner for breaking news such as hacks or adoption
 - [[Remote Capabilities]] - Training AI from host computer, results dashboards, CI/CD
+- [[Build Log]] - Chronological record of what's been built and the key decisions behind it
 
 ## Rules / Requirements
 

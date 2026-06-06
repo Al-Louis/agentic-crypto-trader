@@ -4,6 +4,64 @@ The decision core is an **open design space** — not yet committed. This note m
 strategy families, how each maps to available data surfaces, and the competition constraints that
 shape every viable option. See [[Project Overview]] for the overall objective; [[Market Conditions]]
 and [[Simulated Market]] for regime/backtest detail; [[AI Training]] for RL mechanics.
+The tradeable token set and its selection theory live in [[Token Universe]].
+
+---
+
+## The edge thesis — beyond the indicators
+
+Anyone can read a book and compute RSI/MACD. The market *reacts* to those indicators
+precisely because everyone uses them — so a book-indicator strategy is a **crowded** one,
+and crowded edges decay. The real edge is **second-order (reflexivity):** the standard
+indicator is not a signal, it is a **map of where the crowd's orders are parked** (a
+Schelling point); the edge is trading the *reaction* to those focal points. The developed
+edges below are all **engineered features a learned core can weight** — RL won't discover a
+10-minute lead-lag from raw candles, but it can learn to combine hand-built signals.
+
+### "Bitcoin is King" — a factor model
+Each alt is modeled against the market driver: **`r_alt = α + β·r_btc + ε`**. β is how much
+the alt amplifies BTC (β≈2 ⇒ BTC −3% → alt −6%). The residual **ε** — the part BTC does
+*not* explain — is the **idiosyncratic signal**: a positive residual while BTC bleeds is
+hidden strength (accumulation). Refinements: a **two-factor BTC + BNB** model (BNB is the
+chain's reserve asset; R² measures how factor-driven vs dev-controlled a token is);
+**time-varying, asymmetric *downside* β** (correlations → 1 in a crash — the number that
+disqualifies you); and **lead-lag** (BTC leads alts by minutes — the catch-up is the
+tradeable form). The cross-sectional **residual rank** across the universe is the *selection*
+signal — which alts to hold.
+
+### Front-runners — alts that lead BTC
+Certain tokens *front-run* BTC's reversals (sell into the bottom, diverge, then turn up
+minutes before BTC). Formally a **lead-lag with the alt leading** (cross-correlation /
+Granger). Used as an **early regime-flip trigger** — one reliable front-runner rotates the
+whole book risk-on a few minutes early. **Caveats (the most overfit-prone idea):**
+rediscover blind in data, never encode remembered tokens; lead relationships **decay** →
+test persistence; only multi-minute leads survive on-chain latency.
+
+### Stop hunts — liquidity grabs
+In high volatility, price is driven into the obvious liquidity pool (stops just below a
+swing low) on a velocity spike, triggering a cascade, then snaps back. The tradeable object
+is the **sweep-and-reclaim**; the reclaim is the *whole* signal (it separates a hunt from a
+real breakdown). **Reactive execution loses the on-chain latency race** — so we play it as a
+**resting limit order at a pre-computed sweep price** (derived from the alt's β to BTC),
+which both beats the latency problem *and* is honestly backtestable.
+
+### The unifying principle
+The **regime read selects the mode:** trending + broad breadth → momentum/rotation; high-vol
++ at-support + velocity spike → mean-reversion (fade the flush). And the line for on-chain
+realizability: **an edge expressible as a pre-computed price survives (resting order); an
+edge that needs reacting to a live print does not.**
+
+### Discipline — creative entries, conservative survival
+Non-consensus alpha is higher-variance, and the 30% drawdown gate punishes variance with
+*death*, not a dent — so the exotic edge rides on top of a survival-first sizing base. The
+simulator's freedom is freedom to *explore*, not to *believe*: wild in hypothesis generation,
+brutal at acceptance (out-of-sample across many week-slices, honest fills, persistence tests).
+That discipline is what turns "intuition that goes against logic" into edge, not mirage
+([[Simulated Market]]). And the market itself sets the posture: these are dev-controlled,
+low-float, often wash-traded tokens — a **negative-sum** game after costs — so the edge is
+not fearlessness but **superior risk *discrimination*:** bold on the recoverable moves that
+scare retail, first out the door on the structural tail (rug/honeypot — gated in
+[[Token Universe]] / [[Security and Encryption]]).
 
 ---
 

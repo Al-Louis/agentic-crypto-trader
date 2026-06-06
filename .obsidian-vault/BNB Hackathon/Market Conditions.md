@@ -101,6 +101,26 @@ on-chain volume — not from CMC's aggregate CEX volume, which can be an order o
 larger than the BSC DEX pool we actually route through. The honest liquidity number is the one
 `simulate_trade` returns against real pool depth.
 
+### Empirical: liquidity ≠ safety on BSC (2026-06-06 spike)
+
+Measured across the eligible universe, **liquidity magnitude is actively misleading** as a
+quality or tradeability signal — it surfaces *parked* pools. The honest read is **turnover**
+(24h volume ÷ liquidity):
+
+| token | liquidity | 24h volume | turnover |
+|---|--:|--:|--:|
+| KOGE | $54.7M | $200k | **0.4%** |
+| ETH (Binance-Peg) | $16.0M | **$93** | **0.0%** |
+| TRX | $3.45M | $349 | 0.0% |
+| — vs — XRP | $1.24M | $621k | **50%** |
+
+**ETH on BSC trades $93/day against $16M of liquidity** — a held peg, untradeable. 22 of 78
+tradeable tokens showed <5% turnover (facade liquidity). Consequence for regime/risk: the
+*liquidity regime* of a token must be read from **turnover and real DEX depth**, never pool
+size — and the most-liquid BSC tokens are memes, not blue-chips, so liquidity also fails as a
+risk proxy (risk-tiering uses **CMC rank** instead). See [[Token Universe]]. The factor read
+that drives entries (**BTC + BNB** betas / residual) lives in [[Trading Strategies]].
+
 ## The CEX-signal vs on-chain-reality gap
 
 A recurring trap worth stating explicitly:
