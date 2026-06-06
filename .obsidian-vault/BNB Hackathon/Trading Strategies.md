@@ -125,6 +125,21 @@ The scoring rules and execution realities impose hard limits before any return o
 The risk-first posture implied here: **survive the week, then optimize return**. A strategy
 that clips 5% while staying under 15% drawdown beats one that peaks at 40% and gets DQ'd.
 
+> **⚠ Tournament objective + cost-aware backtest (2026-06-06).** Two empirical results sharpen
+> this posture (`trader.sim.{broker,backtest,resample}`):
+> - **Entry alpha is dead here; only low turnover survives.** Through the AMM cost broker,
+>   cross-sectional momentum and reversal churn the thin pools to death (200–290× turnover,
+>   >100% cost drag) and lose money; the IC-suggested reversal is **confirmed untradeable**.
+>   Only **low-turnover** books (Buy&Hold, rebalanced equal-weight) survive costs.
+> - **It's a leaderboard, so median return loses — optimize the upper tail.** A 7-day-window
+>   resampling shows low-turnover books almost never breach the 30% gate over a *week*
+>   (P(DQ)≈0%, median weekly maxDD ~7%), but a typical week is a coin-flip (median +0.7%, p5
+>   −9%, p95 +18%). The prize rewards a **top-5 finish**, not the median, so **survival is
+>   necessary but not sufficient**: the real target is **maximizing P(big positive week) subject
+>   to a low P(DQ)** — which favors *some* concentration / upside variance, not minimum variance.
+>   (Caveat: the sample is bull-conditioned; a bear live week raises DQ risk, so survival logic
+>   stays as insurance.) See [[Market Conditions]] single-week variance.
+
 ---
 
 ## Candidate strategy families

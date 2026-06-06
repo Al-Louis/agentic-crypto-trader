@@ -161,6 +161,10 @@ baseline.** One flattering window is not evidence.
   drive a per-trade liquidity gate in the live loop? (Shared blocker — [[Real-time Monitoring]].)
 - **Regime-label ground truth.** We have no labeled regimes; any classifier is unsupervised
   and unvalidated against a held-out future. Keep buckets crude and explainable.
-- **Single-week variance, quantified.** We should put a number on it — what's the spread of
-  outcomes for our strategy across many simulated one-week windows? Owned with
-  [[Simulated Market]] / `rl-ml-trainer`.
+- **Single-week variance — quantified (2026-06-06).** Answered for the baselines via 7-day-window
+  resampling (`trader.sim.resample`): a passive low-turnover book over the eligible 20 has a
+  **median weekly return ~+0.7%** (p5 −9%, p95 +18%), **median weekly max-drawdown ~7%**, and
+  **P(DQ)≈0%** over a week — the DQ gate is *not* the weekly binding constraint for a diversified
+  low-turnover book (the 62%/34% drawdowns seen earlier were 7-*month*, not weekly). The week is
+  ≈ a coin-flip; the leaderboard reward lives in the **upper tail** — see the [[Trading Strategies]]
+  tournament objective. Caveat: bull-conditioned sample; a bear live week shifts this down.

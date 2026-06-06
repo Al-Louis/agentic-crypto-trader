@@ -75,10 +75,21 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   horizon (mean-reversion, not continuation; ≈ naive momentum). Factor model → *risk* tool,
   not a selection alpha. Reinforces the post-mortem ([[Trading Strategies]]).
 
+### Cost-aware backtest + 7-day resampling
+
+- Built the **AMM cost broker** + **cross-sectional backtester** + **7-day-window resampler**
+  (`trader.sim.{broker,backtest,resample}`).
+- **Entry alpha is dead here**: momentum/reversal churn thin pools (200–290× turnover, >100%
+  cost drag) and lose; the IC reversal is confirmed untradeable. Only **low-turnover** survives.
+- **DQ is not the weekly binding constraint** for diversified low-turnover (P(DQ)≈0% over a
+  week; the 62%/34% drawdowns were 7-*month*, not weekly). A week ≈ a coin-flip (median +0.7%).
+- **Tournament reframing**: the prize rewards a top-5 finish, not the median — so optimize the
+  **upper tail (P(big week) s.t. low P(DQ))**, not minimum variance ([[Trading Strategies]]).
+
 ### In flight / next
 
-- **Cost-aware AMM broker + honest baseline backtest** — does anything beat Buy&Hold after
-  realistic thin-pool slippage? (does the reversal even survive costs?)
+- **Upper-tail / P(top-finish) sweep** — concentration (k) × volatility/beta tilt, maximizing
+  P(big week) under a DQ cap (the competition-winning objective).
 - **1-minute** subset for the liquid names (front-run / sweep features).
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.
