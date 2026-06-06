@@ -3,9 +3,12 @@
 The contest scores a single **7-day** window, so a strategy's 7-month return/drawdown is the
 wrong statistic. This samples many random 7-day windows (each with a trailing warmup so the
 strategy's weights stay causal), runs each through the cost-aware backtester, and returns the
-**distribution** of weekly return and weekly max-drawdown — most importantly **P(breach the
-30% DQ gate)**, the real disqualification risk (vault "Simulated Market": the single-week
-variance question).
+**distribution** of weekly return and weekly max-drawdown plus **P(breach a DQ gate)**.
+
+Two disqualifiers are modelled (vault "BNB Hack - AI Trading Agent Edition"):
+  - **Drawdown DQ** — weekly max-drawdown > 30%.
+  - **Activity DQ** — fewer than 1 trade/day. A strategy must rebalance at least daily
+    (`rebalance_every ≤ 24`); **buy-and-hold trades once and is disqualified for inactivity.**
 
 Windows overlap (≈7 months of data ⇒ only ~30 *independent* weeks), so the distribution is
 smooth but autocorrelated — read it as a shape, not n independent draws.
@@ -40,6 +43,7 @@ def evaluate_windows(returns: pd.DataFrame, weights_fn, liquidity: dict,
     """Per-window metrics: `[ret, maxdd, dq, profit]` for `n_samples` random 7-day windows."""
     rng = np.random.default_rng(seed)
     starts = sample_window_starts(len(returns), window, warmup, n_samples, rng)
+    required_trade_days = max(1, window // 24)            # >=1 trade/day over the window
     rows = []
     for s in starts:
         sl = returns.iloc[s - warmup: s + window]
@@ -48,7 +52,10 @@ def evaluate_windows(returns: pd.DataFrame, weights_fn, liquidity: dict,
         eq = out["equity"].to_numpy()
         ret = eq[-1] / capital - 1.0
         mdd = PerformanceMetrics._max_drawdown(eq)        # warmup is flat at capital (1st peak)
-        rows.append({"ret": ret, "maxdd": mdd, "dq": mdd > dq_threshold, "profit": ret > 0})
+        dd_dq = mdd > dq_threshold
+        act_dq = out["n_rebalances"] < required_trade_days  # buy&hold trades once -> DQ
+        rows.append({"ret": ret, "maxdd": mdd, "dd_dq": bool(dd_dq), "act_dq": bool(act_dq),
+                     "dq": bool(dd_dq or act_dq), "profit": ret > 0})
     return pd.DataFrame(rows)
 
 
@@ -65,6 +72,8 @@ def summarize(df: pd.DataFrame, label: str) -> dict:
         "maxdd_med": float(df["maxdd"].median()),
         "maxdd_p95": float(df["maxdd"].quantile(0.95)),
         "p_dq": float(df["dq"].mean()),
+        "p_dd_dq": float(df["dd_dq"].mean()) if "dd_dq" in df else float("nan"),
+        "p_act_dq": float(df["act_dq"].mean()) if "act_dq" in df else float("nan"),
         "p_profit": float(df["profit"].mean()),
         "ret_med_survived": float(survived["ret"].median()) if len(survived) else float("nan"),
     }

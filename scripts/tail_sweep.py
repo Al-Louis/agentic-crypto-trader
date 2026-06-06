@@ -2,8 +2,10 @@
 
 It's a leaderboard (top-5 win), so median return loses; we want the strategy with the best
 *upper tail* that still rarely breaches the 30% gate. Since entry-timing alpha is dead here
-(it churns thin pools), the lever is **which fixed subset to buy-and-hold**: concentration
-(k) and a volatility / beta tilt. Each candidate is resampled over many 7-day windows.
+(it churns thin pools), the lever is **which fixed subset to hold** (concentration k +
+volatility/beta tilt). Held with a **daily rebalance** to satisfy the ≥1-trade/day rule —
+NOT buy-and-hold, which would be disqualified for inactivity. Each candidate is resampled
+over many 7-day windows (both the drawdown and activity DQ gates apply).
 
 Caveat: subsets are defined from full-sample token stats (vol/beta) — a mild in-sample
 selection bias for the analysis; a live entry would fix the subset from pre-window stats.
@@ -24,7 +26,6 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from trader.sim.backtest import NEVER  # noqa: E402
 from trader.sim.resample import evaluate_windows  # noqa: E402
 from trader.sim.strategies import static_subset  # noqa: E402
 
@@ -77,7 +78,7 @@ def main() -> None:
     for name, subset in candidates.items():
         if not subset:
             continue
-        df = evaluate_windows(returns, static_subset(subset), liq, rebalance_every=NEVER,
+        df = evaluate_windows(returns, static_subset(subset), liq, rebalance_every=24,
                               n_samples=args.samples, capital=args.capital, seed=42)
         big = df["ret"] > args.bar
         tourney = float((big & ~df["dq"]).mean())             # P(contender week AND not DQ'd)

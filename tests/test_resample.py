@@ -38,6 +38,19 @@ def test_deep_selloff_triggers_dq():
     assert df["profit"].mean() == 0.0
 
 
+def test_buy_and_hold_is_activity_disqualified():
+    from trader.sim.backtest import NEVER
+    ret = pd.DataFrame(0.002, index=range(1200), columns=["A", "B"])   # uptrend, no drawdown
+    bh = evaluate_windows(ret, S.equal_weight, {"A": 1e12, "B": 1e12},
+                          rebalance_every=NEVER, n_samples=30, seed=4)
+    daily = evaluate_windows(ret, S.equal_weight, {"A": 1e12, "B": 1e12},
+                             rebalance_every=24, n_samples=30, seed=4)
+    assert bh["act_dq"].mean() == 1.0      # 1 trade over the week -> activity DQ
+    assert bh["dq"].mean() == 1.0          # disqualified despite zero drawdown
+    assert daily["act_dq"].mean() == 0.0   # daily rebalance satisfies >=1 trade/day
+    assert daily["dq"].mean() == 0.0
+
+
 def test_summarize_fields():
     ret = pd.DataFrame(0.001, index=range(800), columns=["A", "B"])
     df = evaluate_windows(ret, S.equal_weight, {"A": 1e12, "B": 1e12}, n_samples=30, seed=3)
