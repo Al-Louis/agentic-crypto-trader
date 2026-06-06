@@ -1,0 +1,39 @@
+"""Baseline cross-sectional weight functions for the backtester.
+
+Each takes the trailing returns panel (`hist`, causal — through the decision bar) and
+returns target weights. The honest bar to beat is Buy & Hold; the rest probe whether any
+simple cross-sectional tilt survives AMM costs.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+
+
+def _available(hist: pd.DataFrame) -> list[str]:
+    """Symbols with a valid most-recent return (tradeable at the decision bar)."""
+    last = hist.iloc[-1]
+    return [c for c in hist.columns if pd.notna(last[c])]
+
+
+def equal_weight(hist: pd.DataFrame) -> pd.Series:
+    """Equal weight across currently-tradeable symbols (Buy&Hold if rebalanced once)."""
+    syms = _available(hist)
+    n = len(syms)
+    return pd.Series({s: 1.0 / n for s in syms}) if n else pd.Series(dtype=float)
+
+
+def _ranked(hist: pd.DataFrame, lookback: int, k: int, ascending: bool) -> pd.Series:
+    score = hist.iloc[-lookback:].sum().dropna().sort_values(ascending=ascending)
+    picks = score.head(k).index
+    return pd.Series({s: 1.0 / len(picks) for s in picks}) if len(picks) else pd.Series(dtype=float)
+
+
+def xs_momentum(hist: pd.DataFrame, lookback: int = 24, k: int = 5) -> pd.Series:
+    """Long the top-k by trailing `lookback`-bar return (continuation)."""
+    return _ranked(hist, lookback, k, ascending=False)
+
+
+def xs_reversal(hist: pd.DataFrame, lookback: int = 24, k: int = 5) -> pd.Series:
+    """Long the bottom-k by trailing return (the IC-suggested mean reversion)."""
+    return _ranked(hist, lookback, k, ascending=True)
