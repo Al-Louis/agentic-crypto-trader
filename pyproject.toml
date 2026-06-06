@@ -14,8 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-# Data layer: GeckoTerminal OHLCV -> resumable Parquet cache (trader.data.downloader)
-data = ["pandas>=2.2", "pyarrow>=15"]
+# Data + features: OHLCV cache, indicator pipeline (ported from TradeSim)
+data = ["pandas>=2.2", "pyarrow>=15", "ta>=0.11"]
 
 [project.scripts]
 trader-mcp = "trader.mcp_server.__main__:main"
