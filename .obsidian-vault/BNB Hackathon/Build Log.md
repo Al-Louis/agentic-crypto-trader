@@ -96,12 +96,17 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   contender rate at **1% P(DQ)**; volatility tilt ≫ beta tilt; daily rebalance also cuts
   drawdown, so compliance is free. ([[Trading Strategies]] tournament objective.)
 
+- **OOS-validated the vol tilt** (`scripts/oos_validate.py`, 60/40 split): vol-rank persists
+  (Spearman +0.66); train-selected vol-top8 **doubles the contender rate on held-out test
+  windows** (42% vs all-20's 21%, 0% DQ), ~no skill lost OOS. The tilt is real.
+
 ### In flight / next
 
-- **Out-of-sample validation** of the vol-tilt subset (train/test split — is it a fluke?).
 - **Regime overlay** — risk-on/off gate (hold vol-top8 in bull, rotate to stables in bear),
-  attacking the bull-conditioning of the sweep.
+  attacking the bull-conditioning (a bear week is still untested). The last major piece of the
+  strategy core.
 - **1-minute** subset for the liquid names (front-run / sweep features).
+- **Walk-forward** OOS (multiple splits) for extra robustness.
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.
 

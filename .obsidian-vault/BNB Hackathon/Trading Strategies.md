@@ -146,7 +146,13 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 >   both gates): daily-rebalanced equal-weight of the ~8 highest-volatility eligible tokens
 >   (`vol-top8`)** — a 26% chance of a >+15% week at only **1% P(DQ)** (p95 +40%); `vol-top5` is
 >   the more aggressive sibling (26% / 9% DQ, median +5%). **Volatility tilt ≫ beta tilt.**
->   Pending out-of-sample validation + a regime overlay (the vol tilt is a bull bet).
+> - **Out-of-sample validated (2026-06-06).** On a 60/40 chronological split, the vol *ranking*
+>   persists (Spearman train→test +0.66, 5/8 top-8 overlap), and a **train-selected** vol-top8
+>   **doubles the contender rate on the held-out test split** (TOURNEY 42% vs all-20's 21%, 0%
+>   DQ) — matching the test-selected ceiling, i.e. ~no skill lost OOS. The tilt is real, not an
+>   in-sample fluke. Remaining caveat: one split and both periods are bull-ish — **a bear week is
+>   still untested**, so a **regime overlay** (hold vol-top8 risk-on, rotate to stables risk-off)
+>   is the next piece. Live, select the vol set from recent pre-competition data.
 
 ---
 
