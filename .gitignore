@@ -26,8 +26,9 @@ build/
 data/raw/
 data/*.parquet
 data/ohlcv/
-data/universe_screen.*
-data/proposed20.json
+data/anchor/
+data/*.json
+data/*.csv
 
 # TradeSim reference seed (large: models/data/frontend; lessons captured in the vault)
 /tradesim_handoff_seed/
