@@ -27,6 +27,7 @@ data/raw/
 data/*.parquet
 data/ohlcv/
 data/anchor/
+data/features/
 data/*.json
 data/*.csv
 
