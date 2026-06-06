@@ -21,6 +21,43 @@ This is 🟡 SIMULATE-tier work in the [[MCP Server]], shipping in **Phase 4**. 
 **offline and keyless** — training never touches a wallet or the chain. It does **not**
 satisfy the June 16 PoC gate, which needs a real on-chain trade ([[Tech Stack]]).
 
+## Post-mortem: hard lessons from TradeSim (carry these, not the optimism)
+
+The prior project shipped a `baseline_handoff.md` (`tradesim_handoff_seed/`) distilling ~40
+iterations and 64 runs. It is the most valuable thing in the seed, and it **corrects** some of
+the optimism elsewhere in this note. Non-negotiable takeaways:
+
+- **Entry timing never clearly beat random; *exits / risk-management* carried performance** —
+  best honest outcome was **bull-regime breakeven**. → Treat **entry alpha as an open research
+  question** (the [[Trading Strategies]] edge thesis), weight effort toward exit/risk logic and
+  the survival overlay, and make a **baseline (Buy&Hold / cross-sectional momentum) behind an
+  honest gate** the first validated thing. Our *cross-sectional selection* claim differs from
+  single-asset entry timing — but the skepticism stands.
+- **The curriculum was cosmetic.** `CurriculumCallback` only logged phase names; it never
+  changed the episode sampler, so the phases were never applied. → Build curriculum as a
+  **real, data-driven sampler with a test asserting the sampled distribution shifts per phase**.
+  Start from the lever that worked — **regime** (bull → mixed → bear) — and add
+  volatility-bucketed / walk-forward phases.
+- **Fee-blind reward.** Fees *in the reward* taught the agent to **not trade** at all. → Track
+  fees for PnL reporting only; keep them out of the reward.
+- **`Discrete(3)` (Hold/Buy/Sell) beat continuous allocation** decisively; the continuous env
+  is legacy — consolidate to one discrete env.
+- **Reward was an 8-layer accretion — don't port it verbatim.** Rebuild from the clean intent
+  (DSR + light per-step shaping), **portfolio-level + ruin-aware** for our −100% rug tail.
+- **No gate ⇒ 64 redundant runs** (~95% minor variants of one config). → **Freeze a held-out
+  test set; every model must beat Buy&Hold and Random to earn a version; 100K-step smoke test
+  before any full run.**
+- **Slippage must match the data** ([[Simulated Market]]): volume-based slippage on
+  sparse/zero-volume candles produced fantasy fills — our sparse 1-min DEX data is the same
+  trap (our fix is an **AMM price-impact** model, not their fixed-spread).
+- **Converged config to start from:** PPO, lr **3e-5**, **ent_coef 0.2** (not 0.05 on volatile
+  data — low ent_coef collapsed to "always wait"), ~**5M** steps (20M overfit), n_envs 8,
+  **position cap 0.3**, min-hold lock, `GroupedIndicatorExtractor` (features_dim 128).
+
+The breakthrough to **keep** is the architecture itself: *modular indicators → grouped
+per-group MLP + attention → PPO, no hard-coded guardrails* — its first run was the project's
+best result (Sharpe 0.64, 74% win, learned from data).
+
 ## The reusable training stack (from TradeSim)
 
 The pipeline ports largely intact — the earned part is the reward and the evaluation
@@ -34,10 +71,12 @@ discipline, not the framework wiring.
 | Tracking | TensorBoard + per-run dirs/checkpoints | ~64 runs / 2,134 checkpoints / 23 finalized models in TradeSim |
 | Callbacks | trading-metrics, **curriculum**, early-stopping | See curriculum below |
 
-**Curriculum** ramps difficulty so the policy learns a stable core before facing chaos:
+**Curriculum** should ramp difficulty so the policy learns a stable core before facing chaos:
 **low-vol → mixed → high-vol → full + noise**. Scenario definitions for each stage are owned
 by [[Market Conditions]]. Early stopping halts runs that plateau or regress on the validation
-metric, keeping the experiment budget on promising configs.
+metric, keeping the experiment budget on promising configs. **⚠ In TradeSim this callback was
+cosmetic — it never changed the sampler (see post-mortem); it must be rebuilt as a real,
+tested data-driven sampler, ideally regime-based.**
 
 ## Reward design — the earned part
 
@@ -49,7 +88,9 @@ went through **30+ iterations** to a dense, risk-adjusted, hacking-resistant sha
 - **Quadratic drawdown penalty** — penalty grows with the *square* of drawdown, so deep
   drawdowns hurt disproportionately.
 - **Asymmetric loss weighting** — losses punished harder than equivalent gains are rewarded.
-- **Per-trade fee penalty + holding cost** — discourages churn and idle exposure.
+- **Per-trade fee penalty + holding cost** — discourages churn and idle exposure. **⚠ But
+  TradeSim found fees *in the reward* made the agent stop trading entirely — keep fee
+  accounting for PnL reporting, out of the reward (see post-mortem).**
 - **Clipping** — bounds reward magnitude against exploit spikes.
 
 The drawdown term maps **directly onto the competition's ~30% max-drawdown HARD DQ gate**: a

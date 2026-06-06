@@ -48,6 +48,21 @@ Worked out the *edge* before the plumbing:
   cached to Parquet). 1-minute subset for the liquid names is next.
 - **46 tests passing.**
 
+### TradeSim handoff analysis (`tradesim_handoff_seed/`)
+
+Analyzed the prior project's lean handoff; verdict captured in [[Simulated Market]] /
+[[AI Training]]:
+- **Most valuable artifact = the lessons** — esp. *entry timing never beat random; exits /
+  risk-management carried performance* — logged as a research question against our
+  entry-centric edge thesis.
+- **Ports clean:** leakage guard, metrics suite, benchmarks/backtester, indicator registry
+  (+71-col feature schema), grouped-attention extractor.
+- **Adapt:** broker (AMM slippage), dataset (→ multi-asset), reward (→ ruin-aware).
+- **Data caveat:** the seed's BTC slice is Sep 2024–Apr 2025 only and does **not** overlap our
+  alt window → still need a fresh ccxt BTC+BNB pull for the factor model.
+- **Discipline to adopt:** real (tested) regime curriculum, fee-blind reward, benchmark gate
+  before versioning, smoke test before full runs.
+
 ### In flight / next
 
 - **1-minute** subset for the liquid names (front-run / sweep features).

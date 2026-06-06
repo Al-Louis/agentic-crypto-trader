@@ -18,6 +18,15 @@ Schelling point); the edge is trading the *reaction* to those focal points. The 
 edges below are all **engineered features a learned core can weight** — RL won't discover a
 10-minute lead-lag from raw candles, but it can learn to combine hand-built signals.
 
+> **⚠ Honest prior (TradeSim post-mortem).** A prior RL project ground through 64 runs and
+> found **entry timing never clearly beat random** on single-asset BTC — *exits / risk
+> management* carried what little edge there was, and the honest ceiling was bull-only
+> breakeven. Our edge here is **cross-sectional selection** (*which* alts), a different and
+> better-documented claim than single-asset entry timing — but take the warning: **validate
+> any entry edge against a Buy&Hold / cross-sectional-momentum baseline behind an honest gate
+> before trusting it**, and weight real effort toward exits and the survival overlay. See the
+> [[AI Training]] post-mortem.
+
 ### "Bitcoin is King" — a factor model
 Each alt is modeled against the market driver: **`r_alt = α + β·r_btc + ε`**. β is how much
 the alt amplifies BTC (β≈2 ⇒ BTC −3% → alt −6%). The residual **ε** — the part BTC does

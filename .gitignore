@@ -28,6 +28,10 @@ data/*.parquet
 data/ohlcv/
 data/universe_screen.*
 data/proposed20.json
+
+# TradeSim reference seed (large: models/data/frontend; lessons captured in the vault)
+/tradesim_handoff_seed/
+/tradesim_handoff_seed.zip
 runs/
 models/
 *.log

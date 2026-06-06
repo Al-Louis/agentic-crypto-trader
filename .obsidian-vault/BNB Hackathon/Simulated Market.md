@@ -154,6 +154,42 @@ The honest version calibrates slippage to **real BSC pool depth**, not CEX volum
 called out as an open constraint in [[Project Overview]]. The closer the sim's cost model
 matches `simulate_trade`'s live quotes, the more the backtest predicts the live week.
 
+## Reuse from TradeSim (2026-06-06 handoff analysis)
+
+The `tradesim_handoff_seed/` package was analyzed for what ports here. The code is clean and
+well-tested — but the **lessons are worth more than the code**.
+
+**Ports ~clean** (into `src/trader/`): the **leakage guard + preprocessor**
+(`validate_no_lookahead`, gap handling, session segmentation, flash/wick flags); the **metrics
+suite** (Sharpe/Sortino/Calmar/maxDD+dur/VaR/CVaR/FIFO win-rate/profit-factor/fee-drag);
+**benchmarks + backtester** (Buy&Hold/SMA/RSI/Random through the *same* broker); the
+**indicator registry** + its **71-column feature schema** (incl. divergence features
+`div_rsi/macd/obv` that map onto our residual/divergence edge — [[Trading Strategies]]); and
+the `GroupedIndicatorExtractor` ([[AI Training]]).
+
+**Adapt** (don't port verbatim): the **broker** (rebuild slippage as AMM price-impact — note
+the seed's `default.yaml` still ships the *discredited* `volume_based` model); the **dataset /
+episode index** (single-asset → **cross-sectional multi-asset**); the **reward** (rebuild
+portfolio-level + ruin-aware, not the 8-layer accretion).
+
+### The slippage lesson (sharpens the porting gap above)
+
+TradeSim's worst data bug: **Bitstamp had 59% zero-volume 1-minute candles**, and volume-based
+slippage on them produced *fantasy* $300K fills. Their fix was fixed-spread slippage at retail
+size (impact ≈ 0 for liquid BTC). **Our case is the mirror image:** 1-minute DEX candles are
+*sparse* (minutes-with-trades only) **and** the pools are *thin*, so price-impact is **real and
+large** — we need a genuine AMM constant-product model **and** must **discard or down-weight
+low-volume candles** so we never backtest fills that couldn't happen. Same failure class,
+opposite remedy.
+
+### The BTC slice — a reference asset, not the factor anchor
+
+The seed's BTC_USDT 1m is **Sep 2024 – Apr 2025 only** (~8 months) and **does not time-overlap
+our alt window** (~Nov 2025 – Jun 2026), so it **cannot** be the "Bitcoin-is-King" factor
+anchor — that still needs a fresh **ccxt BTC + BNB** pull. Its value: a clean, indicator-rich
+**offline dataset** to build and unit-test the ported broker / leakage-guard / backtester
+against *before* the messy sparse DEX data, and a **feature blueprint** (its 71 columns).
+
 ## MCP tools (this note)
 
 `prepare_dataset` → `run_backtest` → `backtest_report`, with `run_baseline` for the honest
