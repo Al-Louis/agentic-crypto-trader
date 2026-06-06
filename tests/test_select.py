@@ -83,6 +83,21 @@ def test_tier_by_quality_assigns_risk_tiers_by_rank_picks_by_liquidity():
     assert by_sym["BabyDoge"] == "meme" and by_sym["COAI"] == "meme"
 
 
+def test_pin_tokens_swaps_into_tier_holding_count():
+    rows = [_row(s, liq, 500_000) for s, liq in
+            [("A", 9e6), ("B", 8e6), ("C", 7e6), ("LTC", 1e6)]]
+    ranks = {"A": 10, "B": 20, "C": 30, "LTC": 25}
+    cands = sel.enrich(rows)
+    for r in cands:
+        r["cmc_rank"] = ranks[r["symbol"]]
+    tiered = sel.tier_by_quality(cands, n_anchor=3, n_mid=0, n_meme=0)
+    assert {r["symbol"] for r in tiered} == {"A", "B", "C"}      # LTC didn't make it (lowest liq)
+    pinned = sel.pin_tokens(tiered, cands, {"LTC": "anchor"})
+    syms = {r["symbol"] for r in pinned}
+    assert "LTC" in syms and len(pinned) == 3                    # count held
+    assert "C" not in syms                                       # lowest-liq member bumped
+
+
 def test_select_drops_parked_and_stale():
     rows = [
         _row("ETH", 9_000_000, 30_000_000),         # keep

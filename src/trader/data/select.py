@@ -125,3 +125,29 @@ def select_quality(rows: list[dict], n_anchor: int = 7, n_mid: int = 7, n_meme: 
     """End-to-end quality/risk tiering: enrich -> gate -> tier by CMC rank."""
     return tier_by_quality(candidates(rows, liq_floor, turnover_floor),
                            n_anchor, n_mid, n_meme)
+
+
+def pin_tokens(tiered: list[dict], all_candidates: list[dict],
+               pins: dict[str, str]) -> list[dict]:
+    """Force specific symbols into a tier — manual override of the auto-selection.
+
+    Keeps each tier's size constant by bumping that tier's lowest-liquidity member.
+    `pins` is {symbol: tier}; a symbol that isn't a gated candidate is ignored.
+    """
+    by_sym = {r["symbol"]: r for r in all_candidates}
+    result = list(tiered)
+    for sym, want in pins.items():
+        token = by_sym.get(sym)
+        if token is None:
+            continue
+        already = next((r for r in result if r["symbol"] == sym), None)
+        if already is not None and already.get("tier") == want:
+            continue
+        result = [r for r in result if r["symbol"] != sym]      # remove from old tier
+        members = [r for r in result if r.get("tier") == want]
+        if members:                                            # bump lowest-liq to hold count
+            drop = min(members, key=lambda r: r.get("liq_usd", 0))
+            result = [r for r in result if r is not drop]
+        token = dict(token, tier=want, risk=risk_bucket(token))
+        result.append(token)
+    return result

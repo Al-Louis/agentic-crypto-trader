@@ -32,6 +32,8 @@ def main() -> None:
     ap.add_argument("--mid", type=int, default=7)
     ap.add_argument("--meme", type=int, default=6)
     ap.add_argument("--liq-floor", type=float, default=sel.QUALITY_LIQ_FLOOR)
+    ap.add_argument("--exclude", default="", help="comma symbols to drop, e.g. SHIB")
+    ap.add_argument("--pin", default="", help="comma SYM:tier overrides, e.g. LTC:anchor")
     ap.add_argument("--turnover-floor", type=float, default=sel.TURNOVER_FLOOR)
     args = ap.parse_args()
 
@@ -44,8 +46,16 @@ def main() -> None:
     for r in rows:  # resolved.json rows lack the screen-stage vol_proxy
         if r.get("status") == "resolved" and "vol_proxy" not in r:
             r["vol_proxy"] = ds.vol_proxy(r)
+    exclude = {s.strip() for s in args.exclude.split(",") if s.strip()}
+    pins = dict(p.split(":", 1) for p in args.pin.split(",") if ":" in p)
+    pins = {k.strip(): v.strip() for k, v in pins.items()}
+    if exclude:
+        rows = [r for r in rows if r.get("symbol") not in exclude]
+
     cands = sel.candidates(rows, args.liq_floor, args.turnover_floor)
     chosen = sel.tier_by_quality(cands, args.anchor, args.mid, args.meme)
+    if pins:
+        chosen = sel.pin_tokens(chosen, cands, pins)
 
     out = [{k: r.get(k) for k in KEEP} for r in chosen]
     with open(args.out, "w", encoding="utf-8") as f:
