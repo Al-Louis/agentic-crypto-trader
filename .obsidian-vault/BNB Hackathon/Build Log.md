@@ -63,8 +63,22 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
 - **Discipline to adopt:** real (tested) regime curriculum, fee-blind reward, benchmark gate
   before versioning, smoke test before full runs.
 
+### Factor model + IC gate
+
+- Pulled **BTC + BNB anchor** (ccxt / Binance.US, 0-gap 1m/1h/1d) — the factor data
+  (`trader.data.anchor`).
+- Ported the TradeSim **indicator pipeline** (71-col, leakage guard) + **metrics suite**;
+  verified vs the stored BTC parquet to ~1e-9.
+- Built the **two-factor residual model** (`trader.features.factor`): R²-classifier and
+  BTC/BNB betas validated empirically (majors→BTC, ecosystem→BNB, XAUt uncorrelated).
+- **IC gate refuted the residual-momentum *continuation* hypothesis** — negative IC at every
+  horizon (mean-reversion, not continuation; ≈ naive momentum). Factor model → *risk* tool,
+  not a selection alpha. Reinforces the post-mortem ([[Trading Strategies]]).
+
 ### In flight / next
 
+- **Cost-aware AMM broker + honest baseline backtest** — does anything beat Buy&Hold after
+  realistic thin-pool slippage? (does the reversal even survive costs?)
 - **1-minute** subset for the liquid names (front-run / sweep features).
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.

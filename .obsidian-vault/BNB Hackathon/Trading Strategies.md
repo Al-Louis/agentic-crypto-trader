@@ -38,6 +38,20 @@ disqualifies you); and **lead-lag** (BTC leads alts by minutes — the catch-up 
 tradeable form). The cross-sectional **residual rank** across the universe is the *selection*
 signal — which alts to hold.
 
+> **⚠ Empirically tested (2026-06-06) — continuation refuted.** Built live (BTC+BNB anchor, 20
+> alts, hourly), the model validates as a **risk** tool: R² cleanly separates factor-driven
+> majors (LINK 0.56, ADA 0.49, XRP 0.45) from dev-driven memes (UB/Q/SIREN ≈0.03), and the
+> two-factor split is real (majors load **BTC**, BSC-ecosystem load **BNB**; XAUt/gold
+> uncorrelated). **But the residual-momentum *selection* hypothesis failed an IC gate:** its
+> Information Coefficient is *negative* at every horizon (1h −0.044, t=−11; decays to
+> insignificance by 72–168h) — recent idiosyncratic strength predicts *lower* forward returns
+> (short-horizon **mean reversion**, not continuation), and it's indistinguishable from naive
+> price momentum, so the factor decomposition adds **no selection edge**. The short-horizon
+> reversal is statistically strong but suspect as tradeable (microstructure + sparse-data
+> forward-fill) — pending the cost-aware broker. **Takeaway:** use the factor model for
+> *risk / exposure* (beta sizing, BTC/BNB, regime), not as a standalone entry alpha.
+> Reinforces the [[AI Training]] post-mortem.
+
 ### Front-runners — alts that lead BTC
 Certain tokens *front-run* BTC's reversals (sell into the bottom, diverge, then turn up
 minutes before BTC). Formally a **lead-lag with the alt leading** (cross-correlation /
