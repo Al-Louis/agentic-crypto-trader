@@ -44,14 +44,13 @@ Worked out the *edge* before the plumbing:
 - `trader.data.select` — turnover-ranked, CMC-rank-tiered selection with `--exclude`/`--pin`
   manual overrides.
 - **Locked the 20-token universe** → [[Token Universe]].
-- **OHLCV backfill** (daily + hourly) — done for 18/20; the two forensic swaps (SFP, TAC)
-  await a top-up run, then the 1-minute subset.
+- **OHLCV backfill** (daily + hourly) — **complete for all 20** (~181d daily, ~200d hourly,
+  cached to Parquet). 1-minute subset for the liquid names is next.
 - **46 tests passing.**
 
 ### In flight / next
 
-- Top-up backfill for the two forensic swaps (SFP, TAC); then the **1-minute** subset for
-  the liquid names (front-run / sweep features).
+- **1-minute** subset for the liquid names (front-run / sweep features).
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.
 
