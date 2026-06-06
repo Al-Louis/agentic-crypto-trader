@@ -59,6 +59,30 @@ def test_select_tiers_and_counts():
     assert max(r["liq_usd"] for r in chosen) == majors[0]["liq_usd"]
 
 
+def test_risk_bucket_by_cmc_rank():
+    assert sel.risk_bucket({"cmc_rank": 6}) == "low"      # major
+    assert sel.risk_bucket({"cmc_rank": 120}) == "mid"    # midcap
+    assert sel.risk_bucket({"cmc_rank": 450}) == "high"   # new/meme
+    assert sel.risk_bucket({"cmc_rank": None}) == "high"  # unranked -> riskiest
+
+
+def test_tier_by_quality_assigns_risk_tiers_by_rank_picks_by_liquidity():
+    rows = [
+        _row("XRP", 1_000_000, 500_000), _row("LINK", 700_000, 300_000),   # low
+        _row("SKYAI", 9_000_000, 5_000_000), _row("SIREN", 8_000_000, 1_000_000),  # mid
+        _row("BabyDoge", 7_000_000, 400_000), _row("COAI", 1_000_000, 500_000),    # high
+    ]
+    ranks = {"XRP": 6, "LINK": 17, "SKYAI": 118, "SIREN": 72, "BabyDoge": 348, "COAI": 450}
+    cands = sel.enrich(rows)
+    for r in cands:
+        r["cmc_rank"] = ranks[r["symbol"]]
+    chosen = sel.tier_by_quality(cands, n_anchor=2, n_mid=2, n_meme=2)
+    by_sym = {r["symbol"]: r["tier"] for r in chosen}
+    assert by_sym["XRP"] == "anchor" and by_sym["LINK"] == "anchor"
+    assert by_sym["SKYAI"] == "mid" and by_sym["SIREN"] == "mid"
+    assert by_sym["BabyDoge"] == "meme" and by_sym["COAI"] == "meme"
+
+
 def test_select_drops_parked_and_stale():
     rows = [
         _row("ETH", 9_000_000, 30_000_000),         # keep

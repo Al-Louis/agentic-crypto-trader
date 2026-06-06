@@ -71,5 +71,57 @@ def tier(cands: list[dict], n_major: int = 7, n_mid: int = 7,
 
 def select(rows: list[dict], n_major: int = 7, n_mid: int = 7, n_degen: int = 6,
            liq_floor: float = LIQ_FLOOR, turnover_floor: float = TURNOVER_FLOOR) -> list[dict]:
-    """End-to-end: enrich -> gate -> tier. Returns the tiered candidate proposal."""
+    """End-to-end (liquidity tiering): enrich -> gate -> tier."""
     return tier(candidates(rows, liq_floor, turnover_floor), n_major, n_mid, n_degen)
+
+
+# --- quality tiering by CMC rank (the chosen approach) --------------------
+# On BSC, liquidity != safety (ETH is parked, memes are liquid), so the risk
+# tier is driven by CMC rank (establishment / rug-survival), not pool depth.
+# See vault "Trading Strategies" / "Market Conditions".
+ANCHOR_RANK = 60           # CMC rank <= this: established L1/L2/DeFi major (low risk)
+MID_RANK = 200             # <= this: established midcap; above/None: new/meme (high risk)
+QUALITY_LIQ_FLOOR = 50_000.0   # relaxed floor so traded modest-liquidity majors qualify
+
+
+def risk_bucket(r: dict) -> str:
+    rank = r.get("cmc_rank")
+    if rank is None:
+        return "high"
+    if rank <= ANCHOR_RANK:
+        return "low"
+    if rank <= MID_RANK:
+        return "mid"
+    return "high"
+
+
+def tier_by_quality(cands: list[dict], n_anchor: int = 7, n_mid: int = 7,
+                    n_meme: int = 6) -> list[dict]:
+    """Risk spectrum by CMC rank, tradeability by liquidity.
+
+    The *tier* (risk class) is set by CMC rank — established major / midcap /
+    new-or-meme. Within each tier we pick the **most liquid** names, so every
+    selected token is actually tradeable in its risk class.
+    """
+    for r in cands:
+        r["risk"] = risk_bucket(r)
+        r["tier"] = None
+    by_liq = lambda rs: sorted(rs, key=lambda r: r.get("liq_usd", 0), reverse=True)
+    anchor = by_liq(r for r in cands if r["risk"] == "low")[:n_anchor]
+    mid = by_liq(r for r in cands if r["risk"] == "mid")[:n_mid]
+    meme = by_liq(r for r in cands if r["risk"] == "high")[:n_meme]
+    for r in anchor:
+        r["tier"] = "anchor"
+    for r in mid:
+        r["tier"] = "mid"
+    for r in meme:
+        r["tier"] = "meme"
+    return anchor + mid + meme
+
+
+def select_quality(rows: list[dict], n_anchor: int = 7, n_mid: int = 7, n_meme: int = 6,
+                   liq_floor: float = QUALITY_LIQ_FLOOR,
+                   turnover_floor: float = TURNOVER_FLOOR) -> list[dict]:
+    """End-to-end quality/risk tiering: enrich -> gate -> tier by CMC rank."""
+    return tier_by_quality(candidates(rows, liq_floor, turnover_floor),
+                           n_anchor, n_mid, n_meme)
