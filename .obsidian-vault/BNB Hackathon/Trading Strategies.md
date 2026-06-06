@@ -116,7 +116,7 @@ The scoring rules and execution realities impose hard limits before any return o
 | Constraint | Detail | Strategic implication |
 |---|---|---|
 | **30% max-drawdown DQ** | Hard disqualification gate (not a points deduction) | Survival is the first objective; position sizing and stop logic are non-negotiable |
-| **≥1 trade/day, 7 days** | Minimum to qualify | A strategy that "waits for the perfect setup" and goes dark risks DQ; scheduling logic needed |
+| **≥1 trade/day, 7 days** | Minimum to qualify — a **hard activity DQ** | **Buy-and-hold is disqualified** (1 trade). Rebalance ≥ daily (or force a daily ping trade). Modeled as a second gate in `trader.sim.resample`; daily rebalancing also trims drawdown, so it's free here. |
 | **Hourly ≤$1 → 0%** | Any hour starting below $1 scores zero | Keep capital deployed; avoid routing all funds into illiquid positions or excessive gas burn |
 | **149 BEP-20 eligible tokens only** | Fixed allowlist; trades outside it don't count | Token universe is the hard filter for any signal or copy-trade target |
 | **Thin-token slippage** | Many eligible tokens have low DEX liquidity; Amber/Rango aggregators route fills but can't manufacture depth | Prefer liquid names or size positions small enough that `simulate_trade` (slippage preview) passes before committing |
@@ -139,6 +139,14 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 >   to a low P(DQ)** — which favors *some* concentration / upside variance, not minimum variance.
 >   (Caveat: the sample is bull-conditioned; a bear live week raises DQ risk, so survival logic
 >   stays as insurance.) See [[Market Conditions]] single-week variance.
+> - **≥1 trade/day is a hard *activity* DQ — buy-and-hold is disqualified.** Modeled in
+>   `trader.sim.resample` as a second gate (a strategy must rebalance ≥ daily; buy&hold trades
+>   once → **P(DQ)=100%**). Conveniently a **daily rebalance also *improves* the risk profile**
+>   (it trims winners), so compliance is not a tax here. **Current best candidate (compliant,
+>   both gates): daily-rebalanced equal-weight of the ~8 highest-volatility eligible tokens
+>   (`vol-top8`)** — a 26% chance of a >+15% week at only **1% P(DQ)** (p95 +40%); `vol-top5` is
+>   the more aggressive sibling (26% / 9% DQ, median +5%). **Volatility tilt ≫ beta tilt.**
+>   Pending out-of-sample validation + a regime overlay (the vol tilt is a bull bet).
 
 ---
 

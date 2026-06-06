@@ -86,10 +86,21 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
 - **Tournament reframing**: the prize rewards a top-5 finish, not the median — so optimize the
   **upper tail (P(big week) s.t. low P(DQ))**, not minimum variance ([[Trading Strategies]]).
 
+### Upper-tail sweep + activity DQ
+
+- Built the **upper-tail tournament sweep** (`scripts/tail_sweep.py`): rank static tilts by
+  P(week > +15% AND not DQ'd).
+- **Modeled the ≥1-trade/day rule** as a second DQ gate (`trader.sim.resample`) — **buy-and-hold
+  is disqualified for inactivity** (P(DQ)=100%); strategies must rebalance ≥ daily.
+- **Candidate found:** daily-rebalanced **`vol-top8`** (8 highest-vol tokens, equal-weight) — 26%
+  contender rate at **1% P(DQ)**; volatility tilt ≫ beta tilt; daily rebalance also cuts
+  drawdown, so compliance is free. ([[Trading Strategies]] tournament objective.)
+
 ### In flight / next
 
-- **Upper-tail / P(top-finish) sweep** — concentration (k) × volatility/beta tilt, maximizing
-  P(big week) under a DQ cap (the competition-winning objective).
+- **Out-of-sample validation** of the vol-tilt subset (train/test split — is it a fluke?).
+- **Regime overlay** — risk-on/off gate (hold vol-top8 in bull, rotate to stables in bear),
+  attacking the bull-conditioning of the sweep.
 - **1-minute** subset for the liquid names (front-run / sweep features).
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.
