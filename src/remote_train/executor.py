@@ -55,6 +55,9 @@ class SSHExecutor:
     """
 
     name = "ssh"
+    # Always non-interactive: never hang on a password prompt (key-only), fail fast on a
+    # dead route instead of the multi-minute default connect timeout.
+    BASE_OPTS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 
     def __init__(self, host: str, remote_workdir: str,
                  ssh: str = "ssh", ssh_opts: tuple[str, ...] = ()):
@@ -79,7 +82,7 @@ class SSHExecutor:
         remote_artifacts = f"{remote_run}/{spec.artifact_subdir}"
         remote_cmd = self._remote_command(spec, remote_run, remote_artifacts)
         with open(log_path, "w", encoding="utf-8", errors="replace") as log:
-            rc = subprocess.run([self.ssh, *self.ssh_opts, self.host, remote_cmd],  # noqa: S603
+            rc = subprocess.run([self.ssh, *self.BASE_OPTS, *self.ssh_opts, self.host, remote_cmd],  # noqa: S603
                                 stdout=log, stderr=subprocess.STDOUT, text=True).returncode
             if rc != 0:
                 return rc
@@ -88,7 +91,7 @@ class SSHExecutor:
 
     def _fetch_artifacts(self, remote_run: str, subdir: str, run_dir: Path, log) -> int:
         """`ssh host 'cd run && tar cf - subdir'` → extract into the local run dir."""
-        tar_cmd = [self.ssh, *self.ssh_opts, self.host,
+        tar_cmd = [self.ssh, *self.BASE_OPTS, *self.ssh_opts, self.host,
                    f"cd {shlex.quote(remote_run)} && tar cf - {shlex.quote(subdir)}"]
         proc = subprocess.run(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # noqa: S603
         if proc.returncode != 0:

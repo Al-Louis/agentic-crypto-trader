@@ -28,7 +28,9 @@ REPO = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = REPO.parent / "alexlouis-site" / "public" / "apentic" / "data"
 
 # Training desktop (CPU-parallel host, no keys). Reachable via Tailscale; key-based SSH.
-REMOTE_HOST = "root@act-trainer"
+# Use the Tailscale IP, not the MagicDNS name `act-trainer`: the name didn't resolve inside
+# the ssh *subprocess* (works interactively). The 100.x tailnet IP is stable per device.
+REMOTE_HOST = "root@100.97.195.65"   # act-trainer (Tailscale IP)
 REMOTE_WORKDIR = "/root/agentic-crypto-trader"
 REMOTE_PYTHON = "/root/agentic-crypto-trader/.venv/bin/python"
 
