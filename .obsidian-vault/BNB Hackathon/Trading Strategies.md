@@ -170,6 +170,17 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 >   decision core is now codified: `trader.strategy.build_candidate`** — daily-rebalanced
 >   equal-weight vol-top8 + regime overlay (default `stress50`; `trend50` = validated hedge;
 >   `none` = pure bull bet).
+> - **Crash stress test (synthetic, 2026-06-06) — overlay validated; default reconsidered.**
+>   Splicing a crash week (BTC drops, high-vol alts amplify via a 1.5× stress beta) confirms the
+>   gates **really protect**: BTC −25% linear → ungated 43% DD / 90% DQ vs **`trend50` 24% / 15%**
+>   (`stress50` 27% / 40%). **But `trend50` protects far better than the codified `stress50`
+>   default** — stress50's −8%/3-day threshold is too lax (barely fires on a slow bleed: BTC −15%
+>   → stress50 55% DQ vs trend50 0%), and half-exposure is too little. **Nothing half-exposed
+>   survives BTC −50%** (~40% DD / 100% DQ → needs full cash). The upside↔protection tradeoff is
+>   now quantified **both ways** (tournament sweep + crash test). **Open decision:** `trend50` is
+>   the most robust don't-know-the-regime default; the ideal is a **severity-scaled stress gate**
+>   (dormant in calm, scales to full cash by crash depth) — to build. `trader.sim.crash`,
+>   `scripts/crash_test.py`.
 
 ---
 

@@ -119,10 +119,19 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   daily-rebalanced equal-weight **vol-top8** + regime overlay (default `stress50`; `trend50` =
   validated hedge; `none` = pure bull). The validated candidate now lives in `strategy/`.
 
+### Crash stress test (synthetic)
+
+- Built `trader.sim.crash` (BTC crash path + high-vol-alt amplification via a stress beta) +
+  `scripts/crash_test.py`.
+- **Overlay VALIDATED:** both gates cut crash drawdown/DQ hard vs ungated (BTC −25% linear:
+  ungated 90% DQ → `trend50` 15%, `stress50` 40%). **But `trend50` ≫ the codified `stress50`
+  default** — stress50's threshold too lax (misses slow bleeds), half-exposure too little.
+  **Nothing half-exposed survives BTC −50%** (needs full cash). Tradeoff now quantified both ways.
+
 ### In flight / next
 
-- **Synthetic-crash stress test** — inject a −20–40% week and confirm `stress50` caps the
-  drawdown/DQ where ungated blows the gate (validate the "free tail insurance").
+- **Overlay default decision** — switch the codified default to `trend50` (most robust validated)
+  and/or build a **severity-scaled stress gate** (dormant in calm → full cash by crash depth).
 - **Phase-2 on-chain spike** (deferred) — TWAK dust trade + registration before June 22.
 - **1-minute data banked** (9/10 liquid tokens, ~182d; SIREN to re-fill; sparse on thin names,
   ~320–1,350 candles/day). Front-run/sweep features **deprioritized** — entry alpha is dead;
