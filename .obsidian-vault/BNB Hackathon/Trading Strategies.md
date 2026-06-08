@@ -181,6 +181,16 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 >   the most robust don't-know-the-regime default; the ideal is a **severity-scaled stress gate**
 >   (dormant in calm, scales to full cash by crash depth) — to build. `trader.sim.crash`,
 >   `scripts/crash_test.py`.
+> - **Severity gate built + measured (2026-06-06).** `severity` (`severity_exposure`, −5%→−20%
+>   trailing) keeps **~full upside** (TOURNEY 26% vs ungated 27% — dormant 98% of the time) and
+>   **uniquely survives a deep slow crash** (BTC −50% linear → 20% DD / 5% DQ, where `trend50` is
+>   42% / 100% and ungated 68% / 100%). **But it does not dominate `trend50`** — it *under-protects*
+>   moderate/sharp crashes (it re-invests as the drop ages out of the trailing window: BTC −25%
+>   linear → 50% DQ vs trend50's 15%). **Net:** the overlay is a fully-mapped tradeoff —
+>   **`trend50` (locked default)** = robust moderate/sharp protection at −6 pts upside; **`severity`**
+>   = full upside + deep-tail insurance with a moderate-crash gap; `none` = pure bull. A combined
+>   trend+depth gate would dominate `trend50` but is diminishing returns vs the unaddressed on-chain
+>   execution work — **strategy core is done; pivot to the Phase-2 execution spike.**
 
 ---
 

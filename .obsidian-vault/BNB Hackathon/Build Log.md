@@ -128,11 +128,17 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   default** — stress50's threshold too lax (misses slow bleeds), half-exposure too little.
   **Nothing half-exposed survives BTC −50%** (needs full cash). Tradeoff now quantified both ways.
 
+- **`trend50` locked as default**; **`severity` gate built + measured** — keeps ~full upside
+  (TOURNEY 26%) and uniquely survives a deep slow crash (BTC −50% → 20% DD) but under-protects
+  moderate/sharp crashes; complementary to `trend50`, not dominant. **Overlay frontier fully
+  mapped; strategy core done.**
+
 ### In flight / next
 
-- **Overlay default decision** — switch the codified default to `trend50` (most robust validated)
-  and/or build a **severity-scaled stress gate** (dormant in calm → full cash by crash depth).
-- **Phase-2 on-chain spike** (deferred) — TWAK dust trade + registration before June 22.
+- ⏭️ **Phase-2 on-chain spike (THE priority)** — TWAK self-custody signing, a dust trade, and
+  on-chain registration **before June 22**. The unfamiliar, blocker-laden half; gates a real
+  Track-1 entry. The strategy is strong enough that this is now the highest-leverage remaining work.
+- (optional) combined trend+depth overlay; walk-forward OOS; 1-min micro-edges (banked).
 - **1-minute data banked** (9/10 liquid tokens, ~182d; SIREN to re-fill; sparse on thin names,
   ~320–1,350 candles/day). Front-run/sweep features **deprioritized** — entry alpha is dead;
   available if we ever revisit micro-structure.

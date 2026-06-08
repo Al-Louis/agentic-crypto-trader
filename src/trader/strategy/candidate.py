@@ -9,9 +9,12 @@ Assembled from the full research loop (vault "Trading Strategies" / "Token Unive
       * `trend50`     — **default:** half de-risk below the BTC trend EMA. The best-*validated*
                         all-around hedge — the synthetic-crash test confirms it protects (BTC −25%
                         → 24% DD / 15% DQ vs ungated 43% / 90%); costs ~6 pts of tournament rate.
-      * `severity`    — **the refined design:** exposure scales *smoothly* with the trailing BTC
-                        drop — dormant in calm (keeps upside) → full cash in a deep crash (survives
-                        −50%, which the half-exposure gates can't). Evaluate vs `trend50`.
+      * `severity`    — exposure scales *smoothly* with the trailing BTC drop: **dormant in calm
+                        (keeps ~full upside — TOURNEY 26% vs ungated 27%) and survives a deep SLOW
+                        crash** (BTC −50% → 20% DD, where the half-exposure gates blow up). BUT the
+                        crash test showed it *under-protects* moderate/sharp crashes (it re-invests
+                        as the drop ages out of the trailing window). Complementary to `trend50`,
+                        not dominant — pick by which crash shape you fear.
       * `none`        — pure bull bet (best raw tournament rate; no insurance — blows the gate in
                         any real crash).
       * `stress50`    — extreme-only half de-risk; the crash test showed it UNDER-protects slow
