@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import re
 import sys
+import tarfile
 from pathlib import Path
 
 import remote_train as rt
-from remote_train.executor import LocalExecutor, _substitute
+from remote_train.executor import LocalExecutor, SSHExecutor, _substitute
 from remote_train.spec import JobSpec
 
 
@@ -67,6 +69,37 @@ def test_publish_local_merge_copy(tmp_path):
     rt.publish(src, str(dest))
     assert (dest / "a.json").read_text() == "1"
     assert (dest / "sub" / "b.json").read_text() == "2"
+
+
+def test_ssh_remote_command_builds_shell():
+    ex = SSHExecutor(host="root@act-trainer", remote_workdir="/root/app")
+    spec = JobSpec(name="j", entrypoint=["/root/app/.venv/bin/python", "s.py", "--out",
+                                         "{artifact_dir}"], env={"K": "v"})
+    cmd = ex._remote_command(spec, "/root/app/.runs/j-001", "/root/app/.runs/j-001/artifacts")
+    assert cmd.startswith("cd /root/app")
+    assert "mkdir -p /root/app/.runs/j-001/artifacts" in cmd
+    assert "K=v /root/app/.venv/bin/python s.py --out /root/app/.runs/j-001/artifacts" in cmd
+
+
+def test_ssh_fetch_artifacts_extracts_tar_stream(tmp_path, monkeypatch):
+    # Emulate the remote `tar cf - artifacts` stdout the fetch step extracts locally.
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        data = b"[]"
+        info = tarfile.TarInfo("artifacts/manifest.json")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+
+    class FakeProc:
+        returncode, stdout, stderr = 0, buf.getvalue(), b""
+
+    monkeypatch.setattr("remote_train.executor.subprocess.run", lambda *a, **k: FakeProc())
+    ex = SSHExecutor(host="h", remote_workdir="/root/app")
+    run_dir = tmp_path / "j-001"
+    run_dir.mkdir()
+    rc = ex._fetch_artifacts("/root/app/.runs/j-001", "artifacts", run_dir, log=io.StringIO())
+    assert rc == 0
+    assert (run_dir / "artifacts" / "manifest.json").read_text() == "[]"
 
 
 def test_remote_train_never_imports_trader():

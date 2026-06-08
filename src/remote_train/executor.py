@@ -9,9 +9,11 @@ swapping local→remote is a one-line change at the call site.
 
 from __future__ import annotations
 
+import io
 import os
 import shlex
 import subprocess
+import tarfile
 from pathlib import Path
 
 from remote_train.spec import JobSpec
@@ -41,21 +43,24 @@ class LocalExecutor:
 
 
 class SSHExecutor:
-    """Run the job on a remote host over SSH, then rsync its artifacts back.
+    """Run the job on a remote host over SSH, then stream its artifacts back.
 
     Assumes key-based SSH to ``host`` (e.g. a Tailscale name) and that the repo already
     lives at ``remote_workdir`` on that host. The training box holds **no keys and never
     touches mainnet** (vault "Remote Capabilities") — it is pure compute on recorded data.
+
+    Artifacts come back as a **tar stream over ssh** (remote ``tar`` → local `tarfile`),
+    not rsync/scp: it needs only ``ssh`` locally (Windows OpenSSH has no rsync, and scp
+    mis-parses ``C:\\`` drive-letter targets), and ``tar`` on the Linux host.
     """
 
     name = "ssh"
 
     def __init__(self, host: str, remote_workdir: str,
-                 ssh: str = "ssh", rsync: str = "rsync", ssh_opts: tuple[str, ...] = ()):
+                 ssh: str = "ssh", ssh_opts: tuple[str, ...] = ()):
         self.host = host
         self.remote_workdir = remote_workdir
         self.ssh = ssh
-        self.rsync = rsync
         self.ssh_opts = list(ssh_opts)
 
     def _remote_command(self, spec: JobSpec, remote_run: str, remote_artifacts: str) -> str:
@@ -73,12 +78,22 @@ class SSHExecutor:
         remote_run = f"{self.remote_workdir}/.runs/{run_dir.name}"
         remote_artifacts = f"{remote_run}/{spec.artifact_subdir}"
         remote_cmd = self._remote_command(spec, remote_run, remote_artifacts)
-        ssh_cmd = [self.ssh, *self.ssh_opts, self.host, remote_cmd]
         with open(log_path, "w", encoding="utf-8", errors="replace") as log:
-            rc = subprocess.run(ssh_cmd, stdout=log, stderr=subprocess.STDOUT, text=True).returncode  # noqa: S603
+            rc = subprocess.run([self.ssh, *self.ssh_opts, self.host, remote_cmd],  # noqa: S603
+                                stdout=log, stderr=subprocess.STDOUT, text=True).returncode
             if rc != 0:
                 return rc
-            # Pull artifacts back so downstream (publish) is host-agnostic.
-            pull = [self.rsync, "-az", f"{self.host}:{remote_artifacts}/", f"{artifact_dir}/"]
-            log.write(f"\n[ssh] rsync artifacts: {' '.join(pull)}\n")
-            return subprocess.run(pull, stdout=log, stderr=subprocess.STDOUT, text=True).returncode  # noqa: S603
+            log.write("\n[ssh] fetching artifacts via tar stream\n")
+            return self._fetch_artifacts(remote_run, spec.artifact_subdir, run_dir, log)
+
+    def _fetch_artifacts(self, remote_run: str, subdir: str, run_dir: Path, log) -> int:
+        """`ssh host 'cd run && tar cf - subdir'` → extract into the local run dir."""
+        tar_cmd = [self.ssh, *self.ssh_opts, self.host,
+                   f"cd {shlex.quote(remote_run)} && tar cf - {shlex.quote(subdir)}"]
+        proc = subprocess.run(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # noqa: S603
+        if proc.returncode != 0:
+            log.write(proc.stderr.decode("utf-8", "replace"))
+            return proc.returncode
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tf:
+            tf.extractall(run_dir, filter="data")   # filter guards against path traversal (py3.12+)
+        return 0

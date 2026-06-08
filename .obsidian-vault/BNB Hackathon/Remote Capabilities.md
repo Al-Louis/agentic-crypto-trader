@@ -113,8 +113,11 @@ before the desktop exists. Three tiers: **laptop** (dev + orchestration, all dev
 - **`remote_train/`** — a **generic, trading-agnostic** job orchestrator (its own package,
   `src/remote_train/`, in the wheel separately). `JobSpec` → `submit` → `status` (fire-and-poll
   via on-disk `status.json` + `progress.json`) → `publish`. Pluggable executors: **`LocalExecutor`**
-  (now / CI) and **`SSHExecutor`** (the desktop over Tailscale — runs the command, rsyncs the
-  artifact dir back). **Hard rule, test-enforced: it must never `import trader`** — so it lifts
+  (now / CI) and **`SSHExecutor`** (the desktop over Tailscale — runs the command, streams the
+  artifact dir back as a **tar over ssh**, since Windows OpenSSH has no rsync and scp mis-parses
+  `C:\` targets). The desktop is **`root@act-trainer`**, repo at `/root/agentic-crypto-trader`;
+  `scripts/dispatch_demo.py` dispatches there by default (`--local` to run on the laptop).
+  **Hard rule, test-enforced: `remote_train` must never `import trader`** — so it lifts
   into its own repo after the hackathon (decouple-now, extract-after-a-second-use — *not* a
   premature separate repo today).
 - **`trader.report.export_run`** — the **trading-specific** bridge to the dashboard contract.

@@ -1,12 +1,14 @@
 """End-to-end pipeline proof: dispatch the demo run through `remote_train`, then publish.
 
-Exercises every seam locally before the desktop exists:
-  submit (LocalExecutor) → job writes bundle + progress.json → publish to the dashboard dir.
+By default this dispatches to the **training desktop** over SSH (`act-trainer`); the job
+runs there, its bundle is rsynced back, and this (laptop) process publishes it. Pass
+`--local` to run the whole loop on this machine instead (the original local proof).
 
-Swap `LocalExecutor()` for `SSHExecutor(host=..., remote_workdir=...)` and `--target` for an
-``s3://`` (R2) URI to go remote — nothing else changes.
+  submit → job writes bundle + progress.json (on the desktop) → rsync back → publish.
 
-Run:  python scripts/dispatch_demo.py [--token HUMA] [--target <dir|s3://bucket/prefix>]
+Run:  python scripts/dispatch_demo.py            # → desktop over SSH
+      python scripts/dispatch_demo.py --local    # → this machine
+      python scripts/dispatch_demo.py --target s3://<bucket>/apentic   # publish to R2
 """
 
 from __future__ import annotations
@@ -19,11 +21,16 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from remote_train import JobSpec, LocalExecutor, publish, submit  # noqa: E402
+from remote_train import JobSpec, LocalExecutor, SSHExecutor, publish, submit  # noqa: E402
 from trader.report import upsert_manifest  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = REPO.parent / "alexlouis-site" / "public" / "apentic" / "data"
+
+# Training desktop (CPU-parallel host, no keys). Reachable via Tailscale; key-based SSH.
+REMOTE_HOST = "root@act-trainer"
+REMOTE_WORKDIR = "/root/agentic-crypto-trader"
+REMOTE_PYTHON = "/root/agentic-crypto-trader/.venv/bin/python"
 
 
 def main() -> None:
@@ -33,6 +40,10 @@ def main() -> None:
     p.add_argument("--target", default=str(DEFAULT_TARGET),
                    help="dashboard data dir, or an s3://bucket/prefix (R2)")
     p.add_argument("--store", default=str(REPO / "runs"))
+    p.add_argument("--local", action="store_true", help="run on this machine, not the desktop")
+    p.add_argument("--host", default=REMOTE_HOST, help="SSH target for the training desktop")
+    p.add_argument("--remote-workdir", default=REMOTE_WORKDIR, help="repo path on the desktop")
+    p.add_argument("--remote-python", default=REMOTE_PYTHON, help="python on the desktop")
     args = p.parse_args()
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -40,15 +51,21 @@ def main() -> None:
         pass
 
     run_id = f"{args.token.lower()}-trend-ema{args.ema}"
+    if args.local:
+        executor, py, workdir, label = LocalExecutor(), sys.executable, str(REPO), "LocalExecutor"
+    else:
+        executor = SSHExecutor(host=args.host, remote_workdir=args.remote_workdir)
+        py, workdir, label = args.remote_python, args.remote_workdir, f"SSHExecutor({args.host})"
+
     spec = JobSpec(
         name="apentic-demo",
-        entrypoint=[sys.executable, "scripts/export_demo_run.py", "--out", "{artifact_dir}",
+        entrypoint=[py, "scripts/export_demo_run.py", "--out", "{artifact_dir}",
                     "--token", args.token, "--ema", str(args.ema), "--run-id", run_id],
-        workdir=str(REPO),
+        workdir=workdir,
     )
 
-    print(f"[dispatch] submitting {spec.name} (LocalExecutor)…")
-    st = submit(spec, executor=LocalExecutor(), store=args.store)
+    print(f"[dispatch] submitting {spec.name} ({label})…")
+    st = submit(spec, executor=executor, store=args.store)
     print(f"[dispatch] {st.run_id}: {st.state} (rc={st.returncode})")
     if not st.ok:
         print(f"[dispatch] job failed — see {st.log_path}")
