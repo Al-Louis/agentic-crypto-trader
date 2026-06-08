@@ -7,6 +7,7 @@ import math
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from trader.report import apentic as ap
 from trader.sim.metrics import PerformanceMetrics
@@ -103,6 +104,19 @@ def test_publish_run_local_uploads_and_merges_manifest(tmp_path):
     for f in ap.BUNDLE_FILES:
         assert (target / "run-x" / f).read_text() == "[]"
     assert json.loads((target / "manifest.json").read_text()) == [entry]
+
+
+def test_publish_run_local_skips_cloudfront(tmp_path, monkeypatch):
+    import remote_train
+    monkeypatch.setattr(remote_train, "invalidate_cloudfront",
+                        lambda *a, **k: pytest.fail("must not invalidate a local target"))
+    src = tmp_path / "out" / "run-y"
+    src.mkdir(parents=True)
+    for f in ap.BUNDLE_FILES:
+        (src / f).write_text("[]")
+    # Passing a dist id but a LOCAL target → invalidation guarded off (only s3 targets).
+    ap.publish_run(src, "run-y", {"id": "run-y"}, str(tmp_path / "dash"), cloudfront_dist_id="DIST")
+    assert (tmp_path / "dash" / "run-y" / "metrics.json").exists()
 
 
 def test_upsert_manifest_replaces_same_id(tmp_path):

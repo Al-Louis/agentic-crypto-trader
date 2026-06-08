@@ -127,6 +127,20 @@ def test_ssh_skips_fetch_when_disabled(tmp_path, monkeypatch):
     assert rc == 0 and called["fetch"] is False     # job self-published → no haul-back
 
 
+def test_invalidate_cloudfront_calls_boto3(monkeypatch):
+    import types
+    calls = {}
+    fake_client = types.SimpleNamespace(
+        create_invalidation=lambda **kw: calls.update(kw) or {"Invalidation": {"Id": "I1"}})
+    monkeypatch.setitem(sys.modules, "boto3",
+                        types.SimpleNamespace(client=lambda svc, **kw: fake_client))
+    iid = rt.invalidate_cloudfront("DIST", ["/apentic/data/*"], caller_reference="ref1")
+    assert iid == "I1"
+    assert calls["DistributionId"] == "DIST"
+    assert calls["InvalidationBatch"]["Paths"]["Items"] == ["/apentic/data/*"]
+    assert calls["InvalidationBatch"]["CallerReference"] == "ref1"
+
+
 def test_remote_train_never_imports_trader():
     """The whole point of the package: it stays liftable into its own repo."""
     pkg = Path(rt.__file__).parent

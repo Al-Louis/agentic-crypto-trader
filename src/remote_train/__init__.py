@@ -13,7 +13,13 @@ from __future__ import annotations
 
 from remote_train.executor import LocalExecutor, SSHExecutor
 from remote_train.progress import read_progress, write_progress
-from remote_train.publish import get_bytes, join, publish, put_bytes
+from remote_train.publish import (
+    get_bytes,
+    invalidate_cloudfront,
+    join,
+    publish,
+    put_bytes,
+)
 from remote_train.runner import list_runs, status, submit
 from remote_train.spec import JobSpec, RunStatus
 
@@ -21,6 +27,6 @@ __all__ = [
     "JobSpec", "RunStatus",
     "LocalExecutor", "SSHExecutor",
     "submit", "status", "list_runs",
-    "publish", "get_bytes", "put_bytes", "join",
+    "publish", "get_bytes", "put_bytes", "join", "invalidate_cloudfront",
     "write_progress", "read_progress",
 ]

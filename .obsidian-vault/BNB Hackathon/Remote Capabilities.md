@@ -126,11 +126,28 @@ before the desktop exists. Three tiers: **laptop** (dev + orchestration, all dev
   `run_info.json`, from `PUBLIC_APENTIC_DATA`. `roundtrips_from_position` folds any single-asset
   exposure series (heuristic now, RL later) into cost-honest round-trips.
 
-**Decisions locked:** publish target = **Cloudflare R2** (S3-compatible; `publish` has a boto3
-path behind the `remote` extra + a local-dir fallback used now); dispatch = **SSH over Tailscale**;
-sequencing = **pipeline-first** (`scripts/dispatch_demo.py` already runs submit→job→publish→manifest
-against a real HUMA backtest, rendering in Apentic). **Telemetry seam:** the job appends
-`progress.json` (reward/return curve); `status()` and the dashboard poll the same flat file.
+**Decisions locked:** dispatch = **SSH over Tailscale**; sequencing = **pipeline-first**;
+**Telemetry seam:** the job appends `progress.json` (reward/return curve); `status()` and the
+dashboard poll the same flat file.
+
+**Publishing — revised to AWS, self-from-desktop (2026-06-08).** Two findings reshaped this:
+1. **The bundle haul-back is fragile** — a **path-MTU black hole** on the freshly-revived
+   tailnet (≤~512 B returns work, ≥4 KB stall and the ssh session dies). So we **stopped
+   pulling artifacts back**: `JobSpec.fetch_artifacts=False` and the **job self-publishes**
+   (`trader.report.publish_run`) straight to the target. For remote runs the desktop uploads
+   over **its own internet**, so nothing large crosses the tailnet — the laptop only sends the
+   tiny ssh trigger + reads tiny `progress`/`status`.
+2. **Drop Cloudflare R2 → reuse the site's AWS infra.** `alexlouis.dev` is already **static →
+   S3 (`alexlouis-site-web`, private/OAC) + CloudFront `ESSV4WVWKTQ9F`**, deployed by GitHub
+   OIDC. Decision: a **separate data bucket** (`alexlouis-apentic-data`) added as a 2nd
+   origin + `apentic/data/*` behavior on the *existing* distribution → served **same-origin**
+   at `alexlouis.dev/apentic/data` (no CORS, no `PUBLIC_APENTIC_DATA` change; dashboard default
+   `/apentic/data` just works) and **isolated from the site's `s3 sync --delete`**. Freshness:
+   **CloudFront invalidation of `/apentic/data/*` on every publish** (the `remote` extra's
+   boto3 path; immutable cache on per-run files, short on `manifest.json`). Desktop creds = a
+   **scoped IAM user** (`PutObject`/`GetObject` on the data bucket + `CreateInvalidation` on the
+   distribution) in the desktop `.env` — *not* the GitHub OIDC role. The publish code is
+   cloud-agnostic (plain S3 API), so AWS works unchanged from the R2 design.
 
 **Open fork (deferred):** the frontend contract is **single-asset** (entry/exit round-trips on
 one symbol). Our live strategy is **cross-sectional portfolio**. The demo uses a single-asset
@@ -156,19 +173,22 @@ runs unmodified and CPU-only torch installs cleanly.
 **Setup shape (keyless host):**
 - Repo cloned into the **Linux FS** at `~/agentic-crypto-trader` (*not* `/mnt/...` — cross-OS
   file access throttles git/rsync/env-stepping). This path is `SSHExecutor.remote_workdir`.
-- venv: `pip install -e ".[data,dev]"` + the **CPU torch wheel**
+- venv: `pip install -e ".[data,dev,remote]"` + the **CPU torch wheel**
   (`--index-url https://download.pytorch.org/whl/cpu`) + `stable-baselines3 sb3-contrib
-  gymnasium`. The **`remote` (boto3/R2) extra is *not* installed here** — `publish` runs on
-  the laptop after the bundle is streamed back.
+  gymnasium`. The **`remote` extra (boto3) IS now installed here** — per the publishing
+  revision above, the **job self-publishes to AWS S3 + CloudFront from the desktop** (no
+  laptop-side haul-back). Desktop `.env`: scoped AWS creds + `APENTIC_PUBLISH_TARGET=
+  s3://alexlouis-apentic-data/apentic/data` + `APENTIC_CLOUDFRONT_DIST_ID=ESSV4WVWKTQ9F`.
 - Reachability: **Tailscale SSH** (`tailscale up --ssh`) chosen over installing
   `openssh-server` — tailscaled terminates the session (identity-based, no key files), works
   under WSL2 userspace networking, and the artifact bundle streams back as a **tar over the
   same `ssh` transport** (no rsync — see the as-built note above; this is also why the
   orchestrator can be plain Windows). The classic `sshd` + key-auth path would additionally
   have to solve WSL2 inbound forwarding.
-- Dispatch: `scripts/dispatch_demo.py` now **defaults to SSH** dispatch to `root@act-trainer`
-  (`/root/agentic-crypto-trader`); pass `--local` to run on the laptop. Remaining laptop-side
-  step is pointing `--target` at the R2 URI for publish.
+- Dispatch: `scripts/dispatch_demo.py` now **defaults to SSH** dispatch to the desktop
+  (Tailscale IP `root@100.97.195.65`, `/root/agentic-crypto-trader`); pass `--local` to run on
+  the laptop. The job self-publishes; remaining step is the **AWS data bucket + CloudFront
+  behavior + IAM user** (publishing revision above) and the desktop `.env`.
 
 Custody posture holds: **no `.env` mnemonic, no `twak serve`, no execute-tier tools on this
 box** — its only outputs are model artifacts and reports ([[Security and Encryption]]).

@@ -108,7 +108,8 @@ def main() -> None:
     # means R2 over the desktop's own internet, never back across the tailnet.
     publish_target = args.publish_target or config.get("APENTIC_PUBLISH_TARGET")
     if publish_target:
-        dest = ap.publish_run(os.path.join(args.out, run_id), run_id, entry, publish_target)
+        dest = ap.publish_run(os.path.join(args.out, run_id), run_id, entry, publish_target,
+                              cloudfront_dist_id=config.get("APENTIC_CLOUDFRONT_DIST_ID"))
         print(f"  published → {dest}")
     else:
         print("  (no publish target set; bundle left in the artifact dir)")

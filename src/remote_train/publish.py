@@ -65,20 +65,25 @@ def get_bytes(uri: str) -> bytes | None:
     return path.read_bytes() if path.is_file() else None
 
 
-def put_bytes(uri: str, data: bytes, content_type: str | None = None) -> str:
+def put_bytes(uri: str, data: bytes, content_type: str | None = None,
+              cache_control: str | None = None) -> str:
     """Write bytes to an object (local file or s3/r2 key)."""
     if _is_s3(uri):
         bucket, key = _s3_split(uri)
-        extra = {"ContentType": content_type} if content_type else {}
+        extra: dict[str, str] = {}
+        if content_type:
+            extra["ContentType"] = content_type
+        if cache_control:
+            extra["CacheControl"] = cache_control
         _s3_client().put_object(Bucket=bucket, Key=key, Body=data, **extra)
         return uri
-    path = _local_path(uri)
+    path = _local_path(uri)                          # cache_control is a CDN concern; n/a locally
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return str(path)
 
 
-def publish(local_dir: Path | str, target: str) -> str:
+def publish(local_dir: Path | str, target: str, cache_control: str | None = None) -> str:
     """Upload every file under `local_dir` into `target` (local dir or s3/r2 prefix)."""
     local_dir = Path(local_dir)
     if not local_dir.is_dir():
@@ -87,5 +92,27 @@ def publish(local_dir: Path | str, target: str) -> str:
         if src.is_file():
             rel = src.relative_to(local_dir).as_posix()
             put_bytes(join(target, rel), src.read_bytes(),
-                      content_type="application/json" if src.suffix == ".json" else None)
+                      content_type="application/json" if src.suffix == ".json" else None,
+                      cache_control=cache_control)
     return target
+
+
+def invalidate_cloudfront(distribution_id: str, paths: list[str],
+                          caller_reference: str | None = None) -> str:
+    """Invalidate CloudFront `paths` so freshly-published objects are served immediately.
+
+    AWS-specific (the CDN in front of the S3 publish target). boto3 is lazy/optional. Returns
+    the invalidation id. `caller_reference` must be unique per request — defaults to a clock
+    stamp (this runs as a normal script, not a workflow, so the clock is available).
+    """
+    try:
+        import boto3  # noqa: PLC0415 — optional dependency
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("CloudFront invalidation needs boto3 — install the 'remote' extra") from exc
+    import time  # noqa: PLC0415
+    ref = caller_reference or f"apentic-{time.time_ns()}"
+    resp = boto3.client("cloudfront").create_invalidation(
+        DistributionId=distribution_id,
+        InvalidationBatch={"Paths": {"Quantity": len(paths), "Items": list(paths)},
+                           "CallerReference": ref})
+    return resp["Invalidation"]["Id"]

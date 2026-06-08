@@ -187,11 +187,17 @@ def _merge_entry(items: list[dict], entry: dict) -> list[dict]:
     return [e for e in items if e.get("id") != entry["id"]] + [entry]
 
 
-def upsert_manifest_at(manifest_uri: str, entry: dict) -> list[dict]:
+# Per-run files never change (new run id each time) → cache forever; the manifest changes
+# every publish → short cache, and CloudFront is invalidated so it refreshes immediately.
+RUN_CACHE_CONTROL = "public, max-age=31536000, immutable"
+MANIFEST_CACHE_CONTROL = "public, max-age=60"
+
+
+def upsert_manifest_at(manifest_uri: str, entry: dict, cache_control: str | None = None) -> list[dict]:
     """Read-merge-write the manifest at a URI (local path or ``s3://…``).
 
     The same read-merge-write as `upsert_manifest`, but over `remote_train`'s object store so
-    it works against R2. Single-writer assumption (one run publishes at a time).
+    it works against S3/R2. Single-writer assumption (one run publishes at a time).
     """
     from remote_train import get_bytes, put_bytes  # local import: trader may depend on remote_train
 
@@ -202,22 +208,33 @@ def upsert_manifest_at(manifest_uri: str, entry: dict) -> list[dict]:
         items = []
     items = _merge_entry(items, entry)
     put_bytes(manifest_uri, json.dumps(items, indent=2).encode("utf-8"),
-              content_type="application/json")
+              content_type="application/json", cache_control=cache_control)
     return items
 
 
-def publish_run(run_bundle_dir: Path | str, run_id: str, entry: dict, target: str) -> str:
+def publish_run(run_bundle_dir: Path | str, run_id: str, entry: dict, target: str,
+                cloudfront_dist_id: str | None = None) -> str:
     """Publish one run to `target` (local dir or ``s3://…``) and merge its manifest entry.
 
     Uploads ``<run_bundle_dir>`` → ``<target>/<run_id>/`` and upserts ``<target>/manifest.json``.
-    This is what the *job* calls (on the desktop) so the bundle goes straight to R2 over the
-    desktop's own internet — nothing large traverses the tailnet back to the laptop.
+    This is what the *job* calls (on the desktop) so the bundle goes straight to S3/R2 over the
+    desktop's own internet — nothing large traverses the tailnet back to the laptop. When
+    `cloudfront_dist_id` is set and `target` is S3, invalidates the served prefix so the CDN
+    serves the new run immediately.
     """
-    from remote_train import join, publish  # local import: trader may depend on remote_train
+    from urllib.parse import urlparse
+
+    from remote_train import invalidate_cloudfront, join, publish  # trader may depend on remote_train
 
     dest = join(target, run_id)
-    publish(run_bundle_dir, dest)
-    upsert_manifest_at(join(target, "manifest.json"), entry)
+    publish(run_bundle_dir, dest, cache_control=RUN_CACHE_CONTROL)
+    upsert_manifest_at(join(target, "manifest.json"), entry, cache_control=MANIFEST_CACHE_CONTROL)
+
+    if cloudfront_dist_id and urlparse(target).scheme in ("s3", "r2"):
+        # CloudFront behavior maps the URL path 1:1 to the S3 key, so the served prefix is the
+        # key prefix. One wildcard invalidation covers the manifest + the new run.
+        served_prefix = "/" + urlparse(target).path.strip("/")
+        invalidate_cloudfront(cloudfront_dist_id, [f"{served_prefix}/*"])
     return dest
 
 
