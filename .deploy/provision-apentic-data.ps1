@@ -32,9 +32,9 @@ $CfAliasZone = 'Z2FDTNDATAQYW2'                           # CloudFront alias hos
 $OutFile     = Join-Path $PSScriptRoot 'apentic-data.out.json'
 
 # ---- helpers ---------------------------------------------------------------
-function Aws {
+function Invoke-Aws {
     # Run aws, throw on non-zero exit, return stdout as one string (for ConvertFrom-Json / .Trim()).
-    $out = & aws @args
+    $out = & aws.exe @args
     if ($LASTEXITCODE -ne 0) { throw "FAILED: aws $($args -join ' ') (exit $LASTEXITCODE)" }
     return ($out -join "`n")
 }
@@ -46,17 +46,17 @@ function Write-JsonFile([object]$Obj, [string]$Name) {
 
 # ---- 1. private S3 bucket --------------------------------------------------
 Write-Host "==> S3 bucket $Bucket"
-& aws s3api head-bucket --bucket $Bucket 2>$null
+& aws.exe s3api head-bucket --bucket $Bucket 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Aws s3api create-bucket --bucket $Bucket --region $Region | Out-Null
-    Aws s3api put-public-access-block --bucket $Bucket --public-access-block-configuration `
+    Invoke-Aws s3api create-bucket --bucket $Bucket --region $Region | Out-Null
+    Invoke-Aws s3api put-public-access-block --bucket $Bucket --public-access-block-configuration `
         'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true' | Out-Null
     Write-Host "    created (private)"
 } else { Write-Host "    exists - skipping create" }
 
 # ---- 2. ACM cert (*.alexlouis.dev, ISSUED, us-east-1) ----------------------
 Write-Host "==> ACM cert *.$Apex"
-$CertArn = (Aws acm list-certificates --region $Region --certificate-statuses ISSUED `
+$CertArn = (Invoke-Aws acm list-certificates --region $Region --certificate-statuses ISSUED `
     --query "CertificateSummaryList[?DomainName=='*.$Apex'].CertificateArn" --output text).Trim()
 if (-not $CertArn -or $CertArn -eq 'None') {
     throw "No ISSUED *.$Apex certificate in $Region. Request + DNS-validate it first."
@@ -65,10 +65,10 @@ Write-Host "    $CertArn"
 
 # ---- 3. Origin Access Control (reuse by name) ------------------------------
 Write-Host "==> Origin Access Control $OacName"
-$OacId = (Aws cloudfront list-origin-access-controls `
+$OacId = (Invoke-Aws cloudfront list-origin-access-controls `
     --query "OriginAccessControlList.Items[?Name=='$OacName'].Id | [0]" --output text).Trim()
 if (-not $OacId -or $OacId -eq 'None') {
-    $OacId = (Aws cloudfront create-origin-access-control --origin-access-control-config `
+    $OacId = (Invoke-Aws cloudfront create-origin-access-control --origin-access-control-config `
         "Name=$OacName,SigningProtocol=sigv4,SigningBehavior=always,OriginAccessControlOriginType=s3" `
         --query "OriginAccessControl.Id" --output text).Trim()
     Write-Host "    created $OacId"
@@ -76,7 +76,7 @@ if (-not $OacId -or $OacId -eq 'None') {
 
 # ---- 4. CloudFront distribution (reuse by alias) ---------------------------
 Write-Host "==> CloudFront distribution for $Domain"
-$DistId = (Aws cloudfront list-distributions `
+$DistId = (Invoke-Aws cloudfront list-distributions `
     --query "DistributionList.Items[?contains(Aliases.Items, '$Domain')].Id | [0]" --output text).Trim()
 if (-not $DistId -or $DistId -eq 'None') {
     $cfg = [ordered]@{
@@ -119,12 +119,12 @@ if (-not $DistId -or $DistId -eq 'None') {
         IsIPV6Enabled        = $true
     }
     $cfgUri = Write-JsonFile $cfg 'apentic-dist.json'
-    $resp = (Aws cloudfront create-distribution --distribution-config $cfgUri --output json) | ConvertFrom-Json
+    $resp = (Invoke-Aws cloudfront create-distribution --distribution-config $cfgUri --output json) | ConvertFrom-Json
     $DistId = $resp.Distribution.Id
     $DistDomain = $resp.Distribution.DomainName
     Write-Host "    created $DistId ($DistDomain)"
 } else {
-    $DistDomain = (Aws cloudfront get-distribution --id $DistId --query "Distribution.DomainName" --output text).Trim()
+    $DistDomain = (Invoke-Aws cloudfront get-distribution --id $DistId --query "Distribution.DomainName" --output text).Trim()
     Write-Host "    exists $DistId ($DistDomain) - skipping create"
 }
 
@@ -142,12 +142,12 @@ $policy = @{
         })
 }
 $polUri = Write-JsonFile $policy 'apentic-bucket-policy.json'
-Aws s3api put-bucket-policy --bucket $Bucket --policy $polUri | Out-Null
+Invoke-Aws s3api put-bucket-policy --bucket $Bucket --policy $polUri | Out-Null
 Write-Host "    applied"
 
 # ---- 6. Route 53 alias -> the distribution ---------------------------------
 Write-Host "==> Route 53 alias $Domain"
-$ZoneId = ((Aws route53 list-hosted-zones-by-name --dns-name $Apex --query "HostedZones[0].Id" --output text) -replace '/hostedzone/', '').Trim()
+$ZoneId = ((Invoke-Aws route53 list-hosted-zones-by-name --dns-name $Apex --query "HostedZones[0].Id" --output text) -replace '/hostedzone/', '').Trim()
 $alias = @{ HostedZoneId = $CfAliasZone; DNSName = $DistDomain; EvaluateTargetHealth = $false }
 $batch = @{
     Comment = "$Domain -> Apentic CloudFront"
@@ -157,12 +157,12 @@ $batch = @{
     )
 }
 $batchUri = Write-JsonFile $batch 'apentic-r53.json'
-Aws route53 change-resource-record-sets --hosted-zone-id $ZoneId --change-batch $batchUri | Out-Null
+Invoke-Aws route53 change-resource-record-sets --hosted-zone-id $ZoneId --change-batch $batchUri | Out-Null
 Write-Host "    upserted in zone $ZoneId"
 
 # ---- 7. wait for deploy, record, and print next steps ----------------------
 Write-Host "==> Waiting for distribution to deploy (a few minutes)..."
-Aws cloudfront wait distribution-deployed --id $DistId | Out-Null
+Invoke-Aws cloudfront wait distribution-deployed --id $DistId | Out-Null
 
 [ordered]@{
     bucket             = $Bucket
