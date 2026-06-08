@@ -136,6 +136,38 @@ that fits the frontend vs. portfolio allocator that needs a new view) is decided
 [[rl-ml-trainer]] — the exporter and pipeline are identical either way. The MCP `start_training`
 / `training_status` / `export_run` tools ([[MCP Server]]) become thin wrappers over `remote_train`.
 
+### Desktop host — as-provisioned (2026-06-08)
+
+The desktop is now stood up. **8 physical / 16 logical cores, 32 GB RAM** — sized for
+`n_envs ≈ 8` on this env-stepping-bound workload.
+
+**Decision: the training host runs inside WSL2 (Ubuntu-24.04), not native Windows.** Two
+reasons the original "just SSH into the desktop" framing missed: (1) `SSHExecutor` builds a
+**POSIX** remote command (`mkdir -p`, `shlex.quote` single-quoting, `git fetch && checkout`)
+and pulls artifacts with **`rsync`** — native Windows OpenSSH defaults to a `cmd.exe` shell
+where that quoting and `mkdir -p` break and `rsync` is absent; (2) the Windows-side Python is
+3.14, which has **no torch wheel** yet. WSL2 resolves both: inside Ubuntu-24.04 there is
+**systemd (pid 1), Python 3.12, rsync, and tailscaled** already present, so `SSHExecutor`
+runs unmodified and CPU-only torch installs cleanly.
+
+**Setup shape (keyless host):**
+- Repo cloned into the **Linux FS** at `~/agentic-crypto-trader` (*not* `/mnt/...` — cross-OS
+  file access throttles git/rsync/env-stepping). This path is `SSHExecutor.remote_workdir`.
+- venv: `pip install -e ".[data,dev]"` + the **CPU torch wheel**
+  (`--index-url https://download.pytorch.org/whl/cpu`) + `stable-baselines3 sb3-contrib
+  gymnasium`. The **`remote` (boto3/R2) extra is *not* installed here** — `publish` runs on
+  the laptop after artifacts rsync back.
+- Reachability: **Tailscale SSH** (`tailscale up --ssh`) chosen over installing
+  `openssh-server` — tailscaled terminates the session (identity-based, no key files), works
+  under WSL2 userspace networking, and `rsync` rides the same `ssh` transport. The classic
+  `sshd` + key-auth path would additionally have to solve WSL2 inbound forwarding.
+- Going live = the one-line laptop swap: `LocalExecutor()` →
+  `SSHExecutor(host="<user>@<tailscale-name>", remote_workdir="~/agentic-crypto-trader")` in
+  `scripts/dispatch_demo.py`, and `--target` → the R2 URI.
+
+Custody posture holds: **no `.env` mnemonic, no `twak serve`, no execute-tier tools on this
+box** — its only outputs are model artifacts and reports ([[Security and Encryption]]).
+
 ## CI/CD and validation gates
 
 - **Offline-first gate:** tests + lint + the strategy core's pure-logic checks must pass

@@ -156,9 +156,13 @@ pipeline **first**, decoupled and proven locally before the desktop exists ([[Re
 
 ### In flight / next
 
-- ⏭️ **Stand up the desktop training host** — Tailscale + key-based SSH + repo clone + venv
-  (**CPU torch**, many cores for vectorized envs); then flip `LocalExecutor`→`SSHExecutor` and
-  the publish target → R2. (User-side setup in progress.)
+- 🔄 **Desktop training host — being stood up.** Decision: it runs **inside WSL2
+  (Ubuntu-24.04)**, not native Windows — `SSHExecutor` is POSIX (`rsync`, `mkdir -p`,
+  single-quote quoting) and Windows-side Python 3.14 has no torch wheel; WSL gives systemd +
+  Python 3.12 + rsync + tailscaled out of the box. Machine: **8c/16t, 32 GB**. Repo cloned to
+  the Linux FS (`~/agentic-crypto-trader`); CPU-only torch venv; **Tailscale SSH** (no
+  `openssh-server`/keys). Remaining: `tailscale up --ssh`, then the laptop swap
+  `LocalExecutor`→`SSHExecutor` + publish target → R2. As-built detail → [[Remote Capabilities]].
 - ⏭️ **RL env on the desktop** ([[AI Training]] / [[Simulated Market]]) — backtester=env,
   metrics=eval, **vol-tilt=baseline-to-beat**, ruin-aware reward, real regime curriculum.
 - ⏭️ **Phase-2 on-chain spike** — TWAK self-custody signing, a dust trade, and on-chain
