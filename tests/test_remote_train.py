@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import re
 import sys
@@ -82,16 +83,16 @@ def test_ssh_remote_command_builds_shell():
 
 
 def test_ssh_fetch_artifacts_extracts_tar_stream(tmp_path, monkeypatch):
-    # Emulate the remote `tar cf - artifacts` stdout the fetch step extracts locally.
+    # Emulate the remote `tar czf - artifacts | base64` stdout the fetch decodes + extracts.
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w") as tf:
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
         data = b"[]"
         info = tarfile.TarInfo("artifacts/manifest.json")
         info.size = len(data)
         tf.addfile(info, io.BytesIO(data))
 
     class FakeProc:
-        returncode, stdout, stderr = 0, buf.getvalue(), b""
+        returncode, stdout, stderr = 0, base64.b64encode(buf.getvalue()), b""
 
     monkeypatch.setattr("remote_train.executor.subprocess.run", lambda *a, **k: FakeProc())
     ex = SSHExecutor(host="h", remote_workdir="/root/app")
@@ -100,6 +101,30 @@ def test_ssh_fetch_artifacts_extracts_tar_stream(tmp_path, monkeypatch):
     rc = ex._fetch_artifacts("/root/app/.runs/j-001", "artifacts", run_dir, log=io.StringIO())
     assert rc == 0
     assert (run_dir / "artifacts" / "manifest.json").read_text() == "[]"
+
+
+def test_get_put_bytes_local_roundtrip(tmp_path):
+    uri = str(tmp_path / "sub" / "a.json")
+    assert rt.get_bytes(uri) is None
+    rt.put_bytes(uri, b'{"x":1}', content_type="application/json")
+    assert rt.get_bytes(uri) == b'{"x":1}'
+
+
+def test_ssh_skips_fetch_when_disabled(tmp_path, monkeypatch):
+    ex = SSHExecutor(host="h", remote_workdir="/root/app")
+
+    class P:
+        returncode = 0
+
+    monkeypatch.setattr("remote_train.executor.subprocess.run", lambda *a, **k: P())
+    called = {"fetch": False}
+    monkeypatch.setattr(ex, "_fetch_artifacts",
+                        lambda *a, **k: called.__setitem__("fetch", True) or 99)
+    run_dir = tmp_path / "j"
+    (run_dir / "artifacts").mkdir(parents=True)
+    spec = JobSpec(name="j", entrypoint=["echo"], fetch_artifacts=False)
+    rc = ex.run(spec, run_dir, run_dir / "artifacts", run_dir / "log.txt")
+    assert rc == 0 and called["fetch"] is False     # job self-published → no haul-back
 
 
 def test_remote_train_never_imports_trader():

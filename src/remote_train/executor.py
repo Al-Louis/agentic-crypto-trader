@@ -9,6 +9,7 @@ swapping local→remote is a one-line change at the call site.
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import shlex
@@ -56,8 +57,10 @@ class SSHExecutor:
 
     name = "ssh"
     # Always non-interactive: never hang on a password prompt (key-only), fail fast on a
-    # dead route instead of the multi-minute default connect timeout.
-    BASE_OPTS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
+    # dead route (ConnectTimeout), and drop a *stalled* established session within ~15s via
+    # keepalives — ConnectTimeout only covers the initial connect, not a mid-stream stall.
+    BASE_OPTS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                 "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3")
 
     def __init__(self, host: str, remote_workdir: str,
                  ssh: str = "ssh", ssh_opts: tuple[str, ...] = ()):
@@ -84,19 +87,45 @@ class SSHExecutor:
         with open(log_path, "w", encoding="utf-8", errors="replace") as log:
             rc = subprocess.run([self.ssh, *self.BASE_OPTS, *self.ssh_opts, self.host, remote_cmd],  # noqa: S603
                                 stdout=log, stderr=subprocess.STDOUT, text=True).returncode
-            if rc != 0:
+            if rc != 0 or not spec.fetch_artifacts:
+                if not spec.fetch_artifacts:
+                    log.write("\n[ssh] fetch_artifacts=False — job published its own output\n")
                 return rc
             log.write("\n[ssh] fetching artifacts via tar stream\n")
             return self._fetch_artifacts(remote_run, spec.artifact_subdir, run_dir, log)
 
-    def _fetch_artifacts(self, remote_run: str, subdir: str, run_dir: Path, log) -> int:
-        """`ssh host 'cd run && tar cf - subdir'` → extract into the local run dir."""
+    def _fetch_artifacts(self, remote_run: str, subdir: str, run_dir: Path, log,
+                         attempts: int = 3, timeout: float = 120.0) -> int:
+        """`ssh host 'cd run && tar czf - subdir | base64'` → decode + extract locally.
+
+        The archive is gzipped *and* base64-encoded so it travels as **text**: raw binary
+        over a freshly-revived tailnet path stalls and the connection dies (the job's text
+        stdout returns fine — only binary fails), whereas base64 text comes back cleanly.
+        Retries: keepalives (BASE_OPTS) drop a stalled session in ~15s; `timeout` is a hard
+        backstop; a corrupt/truncated payload also triggers a retry.
+        """
         tar_cmd = [self.ssh, *self.BASE_OPTS, *self.ssh_opts, self.host,
-                   f"cd {shlex.quote(remote_run)} && tar cf - {shlex.quote(subdir)}"]
-        proc = subprocess.run(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # noqa: S603
-        if proc.returncode != 0:
-            log.write(proc.stderr.decode("utf-8", "replace"))
-            return proc.returncode
-        with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tf:
-            tf.extractall(run_dir, filter="data")   # filter guards against path traversal (py3.12+)
-        return 0
+                   f"cd {shlex.quote(remote_run)} && tar czf - {shlex.quote(subdir)} | base64"]
+        last = "no attempt made"
+        for attempt in range(1, attempts + 1):
+            try:
+                proc = subprocess.run(tar_cmd, stdout=subprocess.PIPE,  # noqa: S603
+                                      stderr=subprocess.PIPE, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                last = f"fetch exceeded {timeout:.0f}s"
+                log.write(f"[ssh] artifact fetch attempt {attempt}/{attempts}: {last}\n")
+                continue
+            if proc.returncode != 0:
+                last = proc.stderr.decode("utf-8", "replace").strip() or f"rc={proc.returncode}"
+                log.write(f"[ssh] artifact fetch attempt {attempt}/{attempts} failed: {last}\n")
+                continue
+            try:
+                raw = base64.b64decode(proc.stdout)         # ignores the wrapping newlines
+                with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as tf:
+                    tf.extractall(run_dir, filter="data")   # filter guards path traversal (py3.12+)
+                return 0
+            except (tarfile.TarError, ValueError) as exc:   # corrupt/truncated payload → retry
+                last = f"corrupt payload: {exc}"
+                log.write(f"[ssh] artifact fetch attempt {attempt}/{attempts}: {last}\n")
+        log.write(f"[ssh] artifact fetch failed after {attempts} attempts ({last})\n")
+        return 1

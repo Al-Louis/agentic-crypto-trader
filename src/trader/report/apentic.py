@@ -183,5 +183,43 @@ def upsert_manifest(manifest_path: Path | str, entry: dict) -> list[dict]:
     return items
 
 
+def _merge_entry(items: list[dict], entry: dict) -> list[dict]:
+    return [e for e in items if e.get("id") != entry["id"]] + [entry]
+
+
+def upsert_manifest_at(manifest_uri: str, entry: dict) -> list[dict]:
+    """Read-merge-write the manifest at a URI (local path or ``s3://…``).
+
+    The same read-merge-write as `upsert_manifest`, but over `remote_train`'s object store so
+    it works against R2. Single-writer assumption (one run publishes at a time).
+    """
+    from remote_train import get_bytes, put_bytes  # local import: trader may depend on remote_train
+
+    raw = get_bytes(manifest_uri)
+    try:
+        items = json.loads(raw) if raw else []
+    except json.JSONDecodeError:
+        items = []
+    items = _merge_entry(items, entry)
+    put_bytes(manifest_uri, json.dumps(items, indent=2).encode("utf-8"),
+              content_type="application/json")
+    return items
+
+
+def publish_run(run_bundle_dir: Path | str, run_id: str, entry: dict, target: str) -> str:
+    """Publish one run to `target` (local dir or ``s3://…``) and merge its manifest entry.
+
+    Uploads ``<run_bundle_dir>`` → ``<target>/<run_id>/`` and upserts ``<target>/manifest.json``.
+    This is what the *job* calls (on the desktop) so the bundle goes straight to R2 over the
+    desktop's own internet — nothing large traverses the tailnet back to the laptop.
+    """
+    from remote_train import join, publish  # local import: trader may depend on remote_train
+
+    dest = join(target, run_id)
+    publish(run_bundle_dir, dest)
+    upsert_manifest_at(join(target, "manifest.json"), entry)
+    return dest
+
+
 def _dump(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")

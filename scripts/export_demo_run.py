@@ -23,6 +23,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from remote_train.progress import write_progress  # noqa: E402
+from trader import config  # noqa: E402
 from trader.report import apentic as ap  # noqa: E402
 from trader.sim.metrics import PerformanceMetrics  # noqa: E402
 
@@ -52,11 +53,14 @@ def main() -> None:
     ap_.add_argument("--ema", type=int, default=168)   # ~1 week on hourly bars → low churn
     ap_.add_argument("--band", type=float, default=0.04, help="hysteresis band around the EMA")
     ap_.add_argument("--capital", type=float, default=10_000.0)
+    ap_.add_argument("--publish-target", default=None,
+                     help="local dir or s3://… to publish to (default: env APENTIC_PUBLISH_TARGET)")
     args = ap_.parse_args()
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001
         pass
+    config.load_dotenv()   # R2 creds + APENTIC_PUBLISH_TARGET from the host's .env
 
     token = args.token
     run_id = args.run_id or f"{token.lower()}-trend-ema{args.ema}"
@@ -99,6 +103,15 @@ def main() -> None:
           f"return {report.total_return_pct:+.1%}, Sharpe {report.sharpe_ratio:.2f}, "
           f"maxDD {report.max_drawdown_pct:.1%}")
     print(f"  bundle → {os.path.join(args.out, run_id)}  (manifest entry id={entry['id']})")
+
+    # Self-publish (job-side) so the bundle goes straight to the target — for remote runs that
+    # means R2 over the desktop's own internet, never back across the tailnet.
+    publish_target = args.publish_target or config.get("APENTIC_PUBLISH_TARGET")
+    if publish_target:
+        dest = ap.publish_run(os.path.join(args.out, run_id), run_id, entry, publish_target)
+        print(f"  published → {dest}")
+    else:
+        print("  (no publish target set; bundle left in the artifact dir)")
 
 
 if __name__ == "__main__":

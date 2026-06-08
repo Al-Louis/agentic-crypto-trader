@@ -12,11 +12,14 @@ from trader.report.apentic import (
     equity_points,
     export_run,
     metrics_to_frontend,
+    publish_run,
     roundtrips_from_position,
     upsert_manifest,
+    upsert_manifest_at,
 )
 
 __all__ = [
     "export_run", "roundtrips_from_position", "metrics_to_frontend",
-    "candles_from_ohlcv", "equity_points", "upsert_manifest",
+    "candles_from_ohlcv", "equity_points",
+    "upsert_manifest", "upsert_manifest_at", "publish_run",
 ]

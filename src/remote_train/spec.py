@@ -28,6 +28,9 @@ class JobSpec:
         repo_ref: optional git ref to check out before running (None → run as-is).
         env: extra environment variables (values support the same placeholders).
         artifact_subdir: where the job writes its output bundle, relative to the run dir.
+        fetch_artifacts: whether a remote executor pulls the artifact dir back. Set False when
+            the job publishes its own output (e.g. straight to R2) — then nothing large needs
+            to traverse the link back to the orchestrator.
         resources: advisory hints (e.g. ``{"cpus": 16}``) for schedulers; not enforced here.
     """
 
@@ -37,6 +40,7 @@ class JobSpec:
     repo_ref: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     artifact_subdir: str = "artifacts"
+    fetch_artifacts: bool = True
     resources: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

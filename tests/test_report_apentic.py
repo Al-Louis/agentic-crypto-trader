@@ -83,6 +83,28 @@ def test_export_run_writes_bundle_and_upserts_manifest(tmp_path):
     assert candles[0]["time"] == 1_700_000_000 and "close" in candles[0]
 
 
+def test_upsert_manifest_at_local_uri(tmp_path):
+    uri = str(tmp_path / "manifest.json")
+    ap.upsert_manifest_at(uri, {"id": "a", "model_name": "v1"})
+    items = ap.upsert_manifest_at(uri, {"id": "a", "model_name": "v2"})  # replace same id
+    assert items == [{"id": "a", "model_name": "v2"}]
+
+
+def test_publish_run_local_uploads_and_merges_manifest(tmp_path):
+    src = tmp_path / "out" / "run-x"
+    src.mkdir(parents=True)
+    for f in ap.BUNDLE_FILES:
+        (src / f).write_text("[]")
+    target = tmp_path / "dash"
+    entry = {"id": "run-x", "model_name": "demo", "symbol": "HUMA"}
+
+    ap.publish_run(src, "run-x", entry, str(target))
+
+    for f in ap.BUNDLE_FILES:
+        assert (target / "run-x" / f).read_text() == "[]"
+    assert json.loads((target / "manifest.json").read_text()) == [entry]
+
+
 def test_upsert_manifest_replaces_same_id(tmp_path):
     mpath = tmp_path / "manifest.json"
     ap.upsert_manifest(mpath, {"id": "a", "model_name": "v1"})
