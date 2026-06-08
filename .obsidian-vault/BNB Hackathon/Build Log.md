@@ -105,7 +105,9 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
 - **Regime overlay** — risk-on/off gate (hold vol-top8 in bull, rotate to stables in bear),
   attacking the bull-conditioning (a bear week is still untested). The last major piece of the
   strategy core.
-- **1-minute** subset for the liquid names (front-run / sweep features).
+- **1-minute data banked** (9/10 liquid tokens, ~182d; SIREN to re-fill; sparse on thin names,
+  ~320–1,350 candles/day). Front-run/sweep features **deprioritized** — entry alpha is dead;
+  available if we ever revisit micro-structure.
 - **Walk-forward** OOS (multiple splits) for extra robustness.
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.
