@@ -39,6 +39,9 @@ models/
 *.log
 logs/
 
+# Generated infra-provisioning output (resource ids, not secrets)
+.deploy/*.out.json
+
 # Vendored SDK clones — keep provenance (_SOURCE.md), drop the third-party source.
 # (trust-wallet-agent-kit is doc-only markdown, so it stays tracked.)
 .obsidian-vault/References/bnb-ai-agent-sdk/*
