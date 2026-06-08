@@ -159,17 +159,48 @@ runs unmodified and CPU-only torch installs cleanly.
 - venv: `pip install -e ".[data,dev]"` + the **CPU torch wheel**
   (`--index-url https://download.pytorch.org/whl/cpu`) + `stable-baselines3 sb3-contrib
   gymnasium`. The **`remote` (boto3/R2) extra is *not* installed here** — `publish` runs on
-  the laptop after artifacts rsync back.
+  the laptop after the bundle is streamed back.
 - Reachability: **Tailscale SSH** (`tailscale up --ssh`) chosen over installing
   `openssh-server` — tailscaled terminates the session (identity-based, no key files), works
-  under WSL2 userspace networking, and `rsync` rides the same `ssh` transport. The classic
-  `sshd` + key-auth path would additionally have to solve WSL2 inbound forwarding.
-- Going live = the one-line laptop swap: `LocalExecutor()` →
-  `SSHExecutor(host="<user>@<tailscale-name>", remote_workdir="~/agentic-crypto-trader")` in
-  `scripts/dispatch_demo.py`, and `--target` → the R2 URI.
+  under WSL2 userspace networking, and the artifact bundle streams back as a **tar over the
+  same `ssh` transport** (no rsync — see the as-built note above; this is also why the
+  orchestrator can be plain Windows). The classic `sshd` + key-auth path would additionally
+  have to solve WSL2 inbound forwarding.
+- Dispatch: `scripts/dispatch_demo.py` now **defaults to SSH** dispatch to `root@act-trainer`
+  (`/root/agentic-crypto-trader`); pass `--local` to run on the laptop. Remaining laptop-side
+  step is pointing `--target` at the R2 URI for publish.
 
 Custody posture holds: **no `.env` mnemonic, no `twak serve`, no execute-tier tools on this
 box** — its only outputs are model artifacts and reports ([[Security and Encryption]]).
+
+**Verified end-to-end (2026-06-08):** torch 2.12.0+cpu (cuda False), sb3/sb3_contrib 2.8.0,
+gymnasium 1.2.3; **122 tests pass**; `remote_train` imports pull in zero `trader` modules
+(decoupling holds at runtime); the exact dispatch entrypoint runs on the trainer and emits the
+full dashboard bundle against real data.
+
+### Operational gotchas — learned standing it up (2026-06-08)
+
+The host is `100.97.195.65` / `act-trainer.tail7214b2.ts.net` (tailnet `al-louis.github`),
+user `root`, repo `/root/agentic-crypto-trader`. Five things bit us; record them so they don't again:
+
+- **WSL idles the distro out → tailscaled dies → node drops off the tailnet.** A distro that
+  nothing holds open is shut down after the idle timeout, killing its systemd services. Fix: a
+  keep-alive pin (`wsl -d act-trainer -u root -e sleep infinity`) registered as a **logon
+  scheduled task `act-trainer-keepalive`** so the trainer auto-starts and stays reachable
+  across reboots. Host sleep still pauses it (acceptable for a burst training box).
+- **Tailnet name doesn't resolve from the Windows laptop.** Even with MagicDNS on, Windows
+  skips the tailnet search domain, so bare `act-trainer` fails (`could not resolve hostname`).
+  Use the **IP `100.97.195.65`** or the **FQDN** `act-trainer.tail7214b2.ts.net`.
+- **The repo is private + the headless distro has no GitHub creds** → an HTTPS `git clone`
+  hangs forever on a credential prompt. Cloned instead from the **local Windows working copy
+  at `/mnt/p/...`** (origin points there; auth-free). `GIT_TERMINAL_PROMPT=0` set so git fails
+  fast instead of hanging. Update path: `git pull` the Windows clone, then pull on the trainer.
+- **Market data is gitignored** (the repo is ~1 MB) and lives only on the laptop, so it must be
+  copied over: `scp -r data root@100.97.195.65:/root/agentic-crypto-trader/` (102 MB; the job
+  hard-requires hourly OHLCV under `data/ohlcv/hour_1/`).
+- **WSL2 clock skew was the root cause of Tailscale login not holding** ("appears in the admin
+  console but `tailscale status` says Logged out"). `systemd-timesyncd` (enabled via
+  `/etc/wsl.conf [boot] systemd=true`) keeps the clock synced and the session stable.
 
 ## CI/CD and validation gates
 

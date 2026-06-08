@@ -156,13 +156,16 @@ pipeline **first**, decoupled and proven locally before the desktop exists ([[Re
 
 ### In flight / next
 
-- 🔄 **Desktop training host — being stood up.** Decision: it runs **inside WSL2
-  (Ubuntu-24.04)**, not native Windows — `SSHExecutor` is POSIX (`rsync`, `mkdir -p`,
-  single-quote quoting) and Windows-side Python 3.14 has no torch wheel; WSL gives systemd +
-  Python 3.12 + rsync + tailscaled out of the box. Machine: **8c/16t, 32 GB**. Repo cloned to
-  the Linux FS (`~/agentic-crypto-trader`); CPU-only torch venv; **Tailscale SSH** (no
-  `openssh-server`/keys). Remaining: `tailscale up --ssh`, then the laptop swap
-  `LocalExecutor`→`SSHExecutor` + publish target → R2. As-built detail → [[Remote Capabilities]].
+- ✅ **Desktop training host — stood up & verified.** Runs inside a fresh dedicated WSL2 distro
+  **`act-trainer`** (Ubuntu 24.04, root, systemd), not native Windows — `SSHExecutor` is POSIX
+  and Windows-side Python 3.14 has no torch wheel; WSL gives systemd + Python 3.12 + rsync +
+  tailscaled. Machine: **8c/16t, 32 GB**. CPU-only torch venv (**122 tests pass**); **Tailscale
+  SSH** at `100.97.195.65` / `act-trainer.tail7214b2.ts.net`; data scp'd in (102 MB); the
+  dispatch entrypoint runs on the trainer and emits the full bundle. `dispatch_demo.py` now
+  defaults to SSH dispatch (`--local` to opt out) and `SSHExecutor` streams artifacts back as a
+  **tar over ssh** (Windows has no rsync). Gotchas (WSL idle-shutdown → keep-alive task, tailnet
+  naming, private-repo clone-from-/mnt/p, clock skew) → [[Remote Capabilities]]. Remaining
+  laptop-side: `--target` → R2. **Desktop on-disk only (GitHub auth pending) for this commit.**
 - ⏭️ **RL env on the desktop** ([[AI Training]] / [[Simulated Market]]) — backtester=env,
   metrics=eval, **vol-tilt=baseline-to-beat**, ruin-aware reward, real regime curriculum.
 - ⏭️ **Phase-2 on-chain spike** — TWAK self-custody signing, a dust trade, and on-chain
