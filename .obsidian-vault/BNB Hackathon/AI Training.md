@@ -145,7 +145,8 @@ Driven by [[MCP Server]] tools so workflows run the loop deterministically:
 (progress + live metrics) → `evaluate_model` (held-out vs baselines) → `diagnose_run`
 (failure-mode check) → iterate. `list_models` / `model_info` enumerate and describe finalized
 models. A `/workflows` script can drive *train → evaluate → diagnose → retrain* until a model
-clears the bar or is abandoned. GPU/host question is deferred to [[Remote Capabilities]].
+clears the bar or is abandoned. Host question (a CPU-core-bound, env-stepping workload — not
+GPU) is deferred to [[Remote Capabilities]].
 
 ## Is RL worth it here? (candid)
 
@@ -187,4 +188,6 @@ decision-core interface lets us decide this late.
   needs a term for it.
 - **Generalization to on-chain execution.** A policy trained against simulated AMM costs must
   still behave under real Amber/Rango fills — the sim-to-live gap is the biggest unknown.
-- **Training host.** Where the offline runs execute (local vs cloud GPU) → [[Remote Capabilities]].
+- **Training host.** Where the offline runs execute — the **desktop**, chosen for CPU cores +
+  RAM (this workload is env-stepping-bound; torch CPU-only). Parallelize via vectorized envs
+  (`n_envs ≈ physical cores`), not GPU → [[Remote Capabilities]].

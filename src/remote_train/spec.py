@@ -28,7 +28,7 @@ class JobSpec:
         repo_ref: optional git ref to check out before running (None → run as-is).
         env: extra environment variables (values support the same placeholders).
         artifact_subdir: where the job writes its output bundle, relative to the run dir.
-        resources: advisory hints (e.g. ``{"gpu": 1}``) for schedulers; not enforced here.
+        resources: advisory hints (e.g. ``{"cpus": 16}``) for schedulers; not enforced here.
     """
 
     name: str

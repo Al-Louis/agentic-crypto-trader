@@ -22,14 +22,22 @@ how the key is stored and unlocked safely there is deferred to [[Security and En
 | | **Live trading runtime** | **Offline RL/ML training** |
 |---|---|---|
 | When | Continuous, June 22–28 (and forward-run before) | Burst, any time before the live window |
-| Resource shape | Low CPU/RAM, network-reliable, must not miss a tick | GPU-friendly, high burst compute, interruptible |
+| Resource shape | Low CPU/RAM, network-reliable, must not miss a tick | **Many CPU cores + RAM** (env-stepping-bound, not GPU-bound), interruptible |
 | Custody posture | **Holds signing keys** — custody-sensitive | **No keys** — pure compute on recorded data |
 | Failure mode | Missed day → forfeit; key exposure → loss of funds | Wasted compute; re-runnable |
 
 These have opposite security and uptime profiles. **Run them on different hosts.** The
-training box never sees a key; the trading box never runs untrusted training code or opens
-GPU-driver attack surface. Conflating them puts keys next to the most experimental code in
-the project — avoid it.
+training box never sees a key; the trading box never runs the experimental training code.
+Conflating them puts keys next to the most volatile code in the project — avoid it.
+
+> **Training is CPU-bound, not GPU-bound.** This RL workload (small MLP/attention policies on
+> engineered features) is bottlenecked on **environment stepping**, not the policy's
+> forward/backward pass — confirmed across the prior [[TradeSim]] runs. The win comes from
+> **env parallelism across CPU cores** (vectorized / `SubprocVecEnv`, `n_envs ≈ physical
+> cores`), so the desktop is chosen for **core count + RAM**, and torch installs **CPU-only**
+> (no CUDA toolkit/driver matching — a simpler, faster setup). GPU is revisited *only* if
+> profiling ever shows the policy pass dominating (a large extractor with big minibatches) —
+> not the default here.
 
 ## Hosting options for the live runtime
 
@@ -78,8 +86,8 @@ Three processes run on the trading host:
 ## Remote training orchestration
 
 Lineage from [[TradeSim]]: training is launched as **background subprocesses driven by MCP
-tools**, not interactive jobs — so it runs unattended on the GPU host and is workflow-drivable
-from the principal host.
+tools**, not interactive jobs — so it runs unattended on the training host and is
+workflow-drivable from the principal host.
 
 - `start_training` (config → run id) spawns the run; `training_status` (run id → metrics)
   polls progress. The host fires-and-polls rather than blocking.
@@ -99,8 +107,8 @@ artifacts and reports that later flow into the strategy core.
 
 The training→telemetry pipeline is built **pipeline-first** and proven end-to-end *locally*
 before the desktop exists. Three tiers: **laptop** (dev + orchestration, all dev stays here),
-**desktop** (GPU training host — no keys), **Apentic frontend** (`alexlouis-site`, reads
-static JSON). Two cleanly separated code layers:
+**desktop** (CPU/core-parallel training host — no keys; env-stepping-bound, torch CPU-only),
+**Apentic frontend** (`alexlouis-site`, reads static JSON). Two cleanly separated code layers:
 
 - **`remote_train/`** — a **generic, trading-agnostic** job orchestrator (its own package,
   `src/remote_train/`, in the wheel separately). `JobSpec` → `submit` → `status` (fire-and-poll

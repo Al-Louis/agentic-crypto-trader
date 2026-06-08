@@ -135,7 +135,8 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
 
 ## 2026-06-08 — Apentic training/telemetry pipeline (laptop ↔ desktop ↔ frontend)
 
-Reframed the next phase: train on the **desktop** (GPU, no keys), orchestrate from the
+Reframed the next phase: train on the **desktop** (CPU-parallel, no keys — this RL workload is
+env-stepping-bound, not GPU-bound; torch CPU-only), orchestrate from the
 **laptop**, surface results in the **Apentic** web frontend (`alexlouis-site`). Built the
 pipeline **first**, decoupled and proven locally before the desktop exists ([[Remote Capabilities]]).
 
@@ -155,8 +156,9 @@ pipeline **first**, decoupled and proven locally before the desktop exists ([[Re
 
 ### In flight / next
 
-- ⏭️ **Stand up the desktop training host** — Tailscale + key-based SSH + repo clone + GPU venv;
-  then flip `LocalExecutor`→`SSHExecutor` and the publish target → R2. (User-side setup in progress.)
+- ⏭️ **Stand up the desktop training host** — Tailscale + key-based SSH + repo clone + venv
+  (**CPU torch**, many cores for vectorized envs); then flip `LocalExecutor`→`SSHExecutor` and
+  the publish target → R2. (User-side setup in progress.)
 - ⏭️ **RL env on the desktop** ([[AI Training]] / [[Simulated Market]]) — backtester=env,
   metrics=eval, **vol-tilt=baseline-to-beat**, ruin-aware reward, real regime curriculum.
 - ⏭️ **Phase-2 on-chain spike** — TWAK self-custody signing, a dust trade, and on-chain

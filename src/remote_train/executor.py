@@ -1,7 +1,8 @@
 """Executors — *where* a job's command runs. The orchestrator stays identical across them.
 
 `LocalExecutor` runs on this machine (used now for the pipeline-first proof and CI).
-`SSHExecutor` runs on a remote host over SSH (the desktop GPU box, reachable via Tailscale)
+`SSHExecutor` runs on a remote host over SSH (the desktop training box — chosen for CPU cores
++ RAM, since this RL workload is env-stepping-bound, not GPU-bound — reachable via Tailscale)
 and syncs the remote artifact directory back. Both implement the same `run` contract, so
 swapping local→remote is a one-line change at the call site.
 """
