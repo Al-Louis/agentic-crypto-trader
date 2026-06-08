@@ -139,15 +139,21 @@ dashboard poll the same flat file.
    tiny ssh trigger + reads tiny `progress`/`status`.
 2. **Drop Cloudflare R2 → reuse the site's AWS infra.** `alexlouis.dev` is already **static →
    S3 (`alexlouis-site-web`, private/OAC) + CloudFront `ESSV4WVWKTQ9F`**, deployed by GitHub
-   OIDC. Decision: a **separate data bucket** (`alexlouis-apentic-data`) added as a 2nd
-   origin + `apentic/data/*` behavior on the *existing* distribution → served **same-origin**
-   at `alexlouis.dev/apentic/data` (no CORS, no `PUBLIC_APENTIC_DATA` change; dashboard default
-   `/apentic/data` just works) and **isolated from the site's `s3 sync --delete`**. Freshness:
-   **CloudFront invalidation of `/apentic/data/*` on every publish** (the `remote` extra's
-   boto3 path; immutable cache on per-run files, short on `manifest.json`). Desktop creds = a
-   **scoped IAM user** (`PutObject`/`GetObject` on the data bucket + `CreateInvalidation` on the
-   distribution) in the desktop `.env` — *not* the GitHub OIDC role. The publish code is
-   cloud-agnostic (plain S3 API), so AWS works unchanged from the R2 design.
+   OIDC. Decision: a **separate data bucket** (`alexlouis-apentic-data`) served at **root** by
+   its **own CloudFront distribution** on a dedicated subdomain **`data.alexlouis.dev`**
+   (`PUBLIC_APENTIC_DATA=https://data.alexlouis.dev`). Chosen over the apex-path
+   (`alexlouis.dev/apentic/data`) for **clean error semantics** — the site distribution's
+   custom error responses (`403/404 → /index.html`) are distribution-wide, so on the apex a
+   *missing* data object returns the SPA HTML with 200 instead of a clean 404; a dedicated
+   distribution avoids that and isolates caching/WAF/logging. Cross-origin is handled by
+   CloudFront's managed **`SimpleCORS`** response-headers policy (the browser only talks to
+   CloudFront; S3 needs no CORS). `api.` is reserved for a future *dynamic* API; static
+   bundles live on `data.`. Naturally **isolated from the site's `s3 sync --delete`** (separate
+   bucket). Freshness: **CloudFront invalidation of `/*` on every publish** (the `remote`
+   extra's boto3 path; immutable cache on per-run files, short on `manifest.json`). Desktop
+   creds = a **scoped IAM user** (`PutObject`/`GetObject` on the data bucket + `CreateInvalidation`
+   on the data distribution) in the desktop `.env` — *not* the GitHub OIDC role. The publish
+   code is cloud-agnostic (plain S3 API), so AWS works unchanged from the R2 design.
 
 **Open fork (deferred):** the frontend contract is **single-asset** (entry/exit round-trips on
 one symbol). Our live strategy is **cross-sectional portfolio**. The demo uses a single-asset
