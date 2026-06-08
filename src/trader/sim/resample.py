@@ -54,8 +54,8 @@ def evaluate_windows(returns: pd.DataFrame, weights_fn, liquidity: dict,
         mdd = PerformanceMetrics._max_drawdown(eq)        # warmup is flat at capital (1st peak)
         dd_dq = mdd > dq_threshold
         act_dq = out["n_rebalances"] < required_trade_days  # buy&hold trades once -> DQ
-        rows.append({"ret": ret, "maxdd": mdd, "dd_dq": bool(dd_dq), "act_dq": bool(act_dq),
-                     "dq": bool(dd_dq or act_dq), "profit": ret > 0})
+        rows.append({"start": int(s), "ret": ret, "maxdd": mdd, "dd_dq": bool(dd_dq),
+                     "act_dq": bool(act_dq), "dq": bool(dd_dq or act_dq), "profit": ret > 0})
     return pd.DataFrame(rows)
 
 

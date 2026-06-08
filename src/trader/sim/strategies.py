@@ -54,3 +54,18 @@ def static_subset(symbols):
         return pd.Series({s: 1.0 / n for s in avail}) if n else pd.Series(dtype=float)
 
     return weights
+
+
+def regime_gated(base_fn, risk_on: pd.Series):
+    """Gate a base weights-fn by a risk-on series (indexed by timestamp).
+
+    Risk-on → the base weights (e.g. the vol tilt); risk-off → **cash** (empty weights). The
+    daily rebalance still occurs (the agent forces a daily ping trade), so ≥1-trade/day holds
+    even in a sustained risk-off; the realized cost in cash is ~gas (negligible).
+    """
+    def weights(hist: pd.DataFrame) -> pd.Series:
+        t = hist.index[-1]
+        on = bool(risk_on.get(t, False))            # default risk-off if the bar is unknown
+        return base_fn(hist) if on else pd.Series(dtype=float)
+
+    return weights
