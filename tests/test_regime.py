@@ -3,7 +3,12 @@
 import numpy as np
 import pandas as pd
 
-from trader.features.regime import btc_risk_on, stress_exposure, trend_exposure
+from trader.features.regime import (
+    btc_risk_on,
+    severity_exposure,
+    stress_exposure,
+    trend_exposure,
+)
 from trader.sim import strategies as S
 
 
@@ -50,3 +55,19 @@ def test_regime_scaled_scales_base_weights():
     g = S.regime_scaled(lambda h: pd.Series({"A": 1.0}), pd.Series([0.5], index=[10]))
     w = g(pd.DataFrame({"A": [1.0]}, index=[10]))
     assert abs(w["A"] - 0.5) < 1e-12
+
+
+def test_severity_exposure_full_in_calm():
+    rising = pd.Series(np.linspace(100, 130, 300))     # trailing return > 0 everywhere
+    assert severity_exposure(rising, window=50).iloc[-1] == 1.0
+
+
+def test_severity_exposure_full_cash_in_deep_crash():
+    close = pd.Series(list(np.full(60, 100.0)) + list(np.linspace(100, 75, 60)))  # ~-25%
+    assert severity_exposure(close, window=50, soft=-0.05, hard=-0.20).iloc[-1] == 0.0
+
+
+def test_severity_exposure_partial_in_moderate_drop():
+    close = pd.Series(list(np.full(60, 100.0)) + list(np.linspace(100, 90, 60)))  # ~-10%
+    e = severity_exposure(close, window=50, soft=-0.05, hard=-0.20).iloc[-1]
+    assert 0.0 < e < 1.0                               # scaled, neither full nor cash

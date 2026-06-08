@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from trader.data.anchor import load_anchor  # noqa: E402
-from trader.features.regime import stress_exposure, trend_exposure  # noqa: E402
+from trader.features.regime import severity_exposure, stress_exposure, trend_exposure  # noqa: E402
 from trader.sim.resample import WEEK_BARS, evaluate_windows  # noqa: E402
 from trader.sim.strategies import regime_scaled, static_subset  # noqa: E402
 
@@ -61,7 +61,7 @@ def main() -> None:
         ("trend 50% (off.5)", trend_exposure(close, 72, off=0.5)),
         ("trend 50% +band2%", trend_exposure(close, 72, off=0.5, band=0.02)),
         ("stress 50% (-8%/3d)", stress_exposure(close, 72, drop=-0.08, off=0.5)),
-        ("stress cash (-10%/3d)", stress_exposure(close, 72, drop=-0.10, off=0.0)),
+        ("severity (-5..-20%)", severity_exposure(close, 72, soft=-0.05, hard=-0.20, floor=0.0)),
     ]
 
     print(f"refined overlay: vol-top{args.k}, {args.samples} windows, contender +{args.bar:.0%}\n")

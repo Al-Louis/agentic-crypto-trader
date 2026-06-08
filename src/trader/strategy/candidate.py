@@ -5,14 +5,17 @@ Assembled from the full research loop (vault "Trading Strategies" / "Token Unive
   - **Universe:** equal-weight the `k` highest-realized-volatility eligible tokens. The
     volatility tilt is OOS-validated (it ~doubles the tournament contender rate vs the passive
     baseline on held-out windows; vol-rank persists Spearman +0.66). Volatility tilt ≫ beta tilt.
-  - **Overlay:** scale exposure by a BTC regime gate. The sweep frontier:
-      * `none`        — pure bull bet (best raw tournament rate; no bear insurance).
-      * `stress50`    — **default/best design:** extreme-stress-only (de-risk to 50% only on a
-                        deep trailing BTC drop). Keeps ~full upside and insures the crash tail —
-                        but the crash protection is **UNVALIDATED** in the crash-free sample
-                        (pending a synthetic-crash stress test).
-      * `trend50`     — visible/validated hedge: half de-risk below the BTC trend EMA. Costs
-                        ~6 pts of tournament rate but demonstrably drives bear-week DQ to 0%.
+  - **Overlay:** scale exposure by a BTC regime gate. The frontier (tournament sweep + crash test):
+      * `trend50`     — **default:** half de-risk below the BTC trend EMA. The best-*validated*
+                        all-around hedge — the synthetic-crash test confirms it protects (BTC −25%
+                        → 24% DD / 15% DQ vs ungated 43% / 90%); costs ~6 pts of tournament rate.
+      * `severity`    — **the refined design:** exposure scales *smoothly* with the trailing BTC
+                        drop — dormant in calm (keeps upside) → full cash in a deep crash (survives
+                        −50%, which the half-exposure gates can't). Evaluate vs `trend50`.
+      * `none`        — pure bull bet (best raw tournament rate; no insurance — blows the gate in
+                        any real crash).
+      * `stress50`    — extreme-only half de-risk; the crash test showed it UNDER-protects slow
+                        bleeds (threshold too lax). Use only with a confident no-crash forecast.
       * `stresscash` / `trendcash` — full-cash variants (more insurance, more upside cost).
   - **Compliant:** the backtester rebalances daily → satisfies the ≥1-trade/day activity rule
     (buy-and-hold would be disqualified). Daily rebalancing also trims drawdown.
@@ -26,11 +29,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from trader.features.regime import stress_exposure, trend_exposure
+from trader.features.regime import severity_exposure, stress_exposure, trend_exposure
 from trader.sim.strategies import regime_scaled, static_subset
 
-OVERLAYS = ("none", "stress50", "stresscash", "trend50", "trendcash")
-DEFAULT_OVERLAY = "stress50"
+OVERLAYS = ("none", "trend50", "severity", "stress50", "stresscash", "trendcash")
+DEFAULT_OVERLAY = "trend50"
 
 
 def select_vol_tokens(returns: pd.DataFrame, k: int = 8) -> list[str]:
@@ -42,6 +45,8 @@ def select_vol_tokens(returns: pd.DataFrame, k: int = 8) -> list[str]:
 
 
 def _exposure(btc_close: pd.Series, overlay: str) -> pd.Series:
+    if overlay == "severity":
+        return severity_exposure(btc_close, window=72, soft=-0.05, hard=-0.20, floor=0.0)
     if overlay == "stress50":
         return stress_exposure(btc_close, window=72, drop=-0.08, off=0.5)
     if overlay == "stresscash":

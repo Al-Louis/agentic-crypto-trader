@@ -28,7 +28,7 @@ from trader.strategy import build_candidate, select_vol_tokens  # noqa: E402
 W = 168                                              # warmup bars + crash-week bars
 SEVERITIES = [-0.15, -0.25, -0.35, -0.50]
 SHAPES = ["linear", "sharp"]
-VARIANTS = [("ungated", "none"), ("stress50", "stress50"), ("trend50", "trend50")]
+VARIANTS = [("ungated", "none"), ("trend50", "trend50"), ("severity", "severity")]
 
 
 def main() -> None:
@@ -59,7 +59,7 @@ def main() -> None:
     warm_btc = btc_close.iloc[-W:].reset_index(drop=True)
 
     print(f"crash stress test: vol-top{args.k}, stress beta {args.beta}, {args.seeds} seeds/cell\n"
-          f"  {'scenario':18} {'ungated':>22} {'stress50':>22} {'trend50':>22}")
+          f"  {'scenario':18} {'ungated':>22} {'trend50':>22} {'severity':>22}")
     print(f"  {'':18} {'maxDD  ret  P(DQ)':>22} {'maxDD  ret  P(DQ)':>22} {'maxDD  ret  P(DQ)':>22}")
 
     for shape in SHAPES:

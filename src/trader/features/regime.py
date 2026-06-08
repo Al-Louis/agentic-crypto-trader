@@ -41,3 +41,18 @@ def stress_exposure(close: pd.Series, window: int = 72, drop: float = -0.08,
     the upside the trend gate sacrifices."""
     stressed = (close.pct_change(window) < drop).fillna(False)
     return pd.Series(np.where(stressed, off, 1.0), index=close.index)
+
+
+def severity_exposure(close: pd.Series, window: int = 72, soft: float = -0.05,
+                      hard: float = -0.20, floor: float = 0.0) -> pd.Series:
+    """Severity-scaled gate — the design the crash test pointed to.
+
+    Exposure scales **smoothly** with BTC's trailing `window`-bar return: full (1.0) while the
+    drop is shallower than `soft`, then ramps down linearly to `floor` (default full cash) at
+    `hard`. This fixes both flaws of the binary gates at once — **dormant in calm** (keeps the
+    upside the trend gate sacrifices) yet **reaches full cash in a deep crash** (which the
+    half-exposure gates can't survive). Warmup → fully invested. (vault "Trading Strategies".)
+    """
+    trail = close.pct_change(window)
+    raw = ((trail - hard) / (soft - hard)).clip(lower=0.0, upper=1.0)
+    return (floor + (1.0 - floor) * raw).fillna(1.0)
