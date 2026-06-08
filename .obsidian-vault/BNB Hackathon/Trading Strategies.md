@@ -161,8 +161,15 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 >   insured DQ is only ~2%. Two honest gaps: the sample has **no real crash** (so it
 >   *under-values* the insurance), and the **all-or-nothing 72h gate is too blunt**. Working
 >   stance: **ungated vol-top8 is the bull bet; the gate is toggle-able bear insurance** keyed to
->   the live-regime forecast. Refinement: **partial de-risk / hysteresis / extreme-stress-only**
->   gating to keep upside while capping the tail (`trader.features.regime`, `regime_scaled`).
+>   the live-regime forecast.
+> - **Refined overlay swept + candidate codified (2026-06-06).** Partial de-risk (`trend 50%`)
+>   dominates the blunt full-cash gate (TOURNEY 21% vs 13%, **0% bear-week DQ**); **extreme-
+>   stress-only (`stress 50%`)** keeps the *full* tournament rate (27%) and de-risks only on a
+>   genuine crash — the ideal "insure the tail, keep the upside" design — but stays **dormant
+>   (unvalidated)** in this crash-free sample (pending a synthetic-crash stress test). **The
+>   decision core is now codified: `trader.strategy.build_candidate`** — daily-rebalanced
+>   equal-weight vol-top8 + regime overlay (default `stress50`; `trend50` = validated hedge;
+>   `none` = pure bull bet).
 
 ---
 

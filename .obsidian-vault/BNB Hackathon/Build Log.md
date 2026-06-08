@@ -110,11 +110,20 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   insurance); the all-or-nothing 72h gate is too blunt. Stance: ungated vol-top8 = bull bet, gate
   = toggle-able insurance ([[Trading Strategies]]).
 
+### Strategy candidate codified
+
+- Refined-overlay sweep: **partial de-risk (`trend 50%`)** beats the blunt gate (TOURNEY 21% vs
+  13%, 0% bear-week DQ); **`stress 50%`** (extreme-only) keeps full upside (TOURNEY 27%) and
+  de-risks only in a crash — ideal but dormant/unvalidated here (no crash in the sample).
+- **Committed the decision core → `trader.strategy.build_candidate`** (`src/trader/strategy/`):
+  daily-rebalanced equal-weight **vol-top8** + regime overlay (default `stress50`; `trend50` =
+  validated hedge; `none` = pure bull). The validated candidate now lives in `strategy/`.
+
 ### In flight / next
 
-- **Refined overlay** — partial de-risk (50% vs full cash) / hysteresis / extreme-stress-only
-  gating, to keep upside while capping the tail. Plus synthetic-crash stress tests (the sample
-  has no real crash).
+- **Synthetic-crash stress test** — inject a −20–40% week and confirm `stress50` caps the
+  drawdown/DQ where ungated blows the gate (validate the "free tail insurance").
+- **Phase-2 on-chain spike** (deferred) — TWAK dust trade + registration before June 22.
 - **1-minute data banked** (9/10 liquid tokens, ~182d; SIREN to re-fill; sparse on thin names,
   ~320–1,350 candles/day). Front-run/sweep features **deprioritized** — entry alpha is dead;
   available if we ever revisit micro-structure.
