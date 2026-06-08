@@ -100,11 +100,21 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   (Spearman +0.66); train-selected vol-top8 **doubles the contender rate on held-out test
   windows** (42% vs all-20's 21%, 0% DQ), ~no skill lost OOS. The tilt is real.
 
+### Regime overlay (BTC risk-on/off gate)
+
+- Built `btc_risk_on` (close > trailing EMA) + `regime_gated` (hold tilt risk-on, cash risk-off);
+  resampler now conditions outcomes on each window's BTC return.
+- **Honest finding:** real insurance in bear weeks (halves drawdown, eliminates bear DQ) but
+  **overpriced** in the bull-conditioned sample — cuts the tournament rate in half (27%→13%) and
+  bull upside (+15%→+8%); the insured DQ is only ~2%. Sample has no real crash (under-values the
+  insurance); the all-or-nothing 72h gate is too blunt. Stance: ungated vol-top8 = bull bet, gate
+  = toggle-able insurance ([[Trading Strategies]]).
+
 ### In flight / next
 
-- **Regime overlay** — risk-on/off gate (hold vol-top8 in bull, rotate to stables in bear),
-  attacking the bull-conditioning (a bear week is still untested). The last major piece of the
-  strategy core.
+- **Refined overlay** — partial de-risk (50% vs full cash) / hysteresis / extreme-stress-only
+  gating, to keep upside while capping the tail. Plus synthetic-crash stress tests (the sample
+  has no real crash).
 - **1-minute data banked** (9/10 liquid tokens, ~182d; SIREN to re-fill; sparse on thin names,
   ~320–1,350 candles/day). Front-run/sweep features **deprioritized** — entry alpha is dead;
   available if we ever revisit micro-structure.

@@ -153,6 +153,16 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 >   in-sample fluke. Remaining caveat: one split and both periods are bull-ish — **a bear week is
 >   still untested**, so a **regime overlay** (hold vol-top8 risk-on, rotate to stables risk-off)
 >   is the next piece. Live, select the vol set from recent pre-competition data.
+> - **Regime overlay tested (2026-06-06) — overpriced insurance in the bull sample.** A BTC
+>   trend-gate (`btc_risk_on`: close > 72h EMA → hold vol-top8, else cash) is **real insurance in
+>   bear weeks** (halves mean drawdown 12%→6%, eliminates bear-week DQ 3%→0%) but sits in cash
+>   56% of the time, **cutting the tournament rate in half (27%→13%) and bull-week upside
+>   (+15.5%→+7.6%)** — net-negative for a leaderboard *in this crash-free sample*, where the
+>   insured DQ is only ~2%. Two honest gaps: the sample has **no real crash** (so it
+>   *under-values* the insurance), and the **all-or-nothing 72h gate is too blunt**. Working
+>   stance: **ungated vol-top8 is the bull bet; the gate is toggle-able bear insurance** keyed to
+>   the live-regime forecast. Refinement: **partial de-risk / hysteresis / extreme-stress-only**
+>   gating to keep upside while capping the tail (`trader.features.regime`, `regime_scaled`).
 
 ---
 
