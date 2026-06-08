@@ -231,11 +231,21 @@ def publish_run(run_bundle_dir: Path | str, run_id: str, entry: dict, target: st
     upsert_manifest_at(join(target, "manifest.json"), entry, cache_control=MANIFEST_CACHE_CONTROL)
 
     if cloudfront_dist_id and urlparse(target).scheme in ("s3", "r2"):
-        # CloudFront behavior maps the URL path 1:1 to the S3 key, so the served prefix is the
-        # key prefix. One wildcard invalidation covers the manifest + the new run.
-        served_prefix = "/" + urlparse(target).path.strip("/")
-        invalidate_cloudfront(cloudfront_dist_id, [f"{served_prefix}/*"])
+        # One wildcard invalidation covers the manifest + the new run.
+        invalidate_cloudfront(cloudfront_dist_id, [_invalidation_path(target)])
     return dest
+
+
+def _invalidation_path(target: str) -> str:
+    """CloudFront path to invalidate for an S3 target — mirrors the served key prefix.
+
+    Root-hosted (no key prefix, e.g. a dedicated `data.alexlouis.dev` distribution) → ``/*``;
+    prefix-hosted (e.g. ``s3://bucket/apentic/data`` behind a path behavior) → ``/apentic/data/*``.
+    """
+    from urllib.parse import urlparse
+
+    key_prefix = urlparse(target).path.strip("/")
+    return f"/{key_prefix}/*" if key_prefix else "/*"
 
 
 def _dump(path: Path, data: Any) -> None:

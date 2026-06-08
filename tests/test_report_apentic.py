@@ -119,6 +119,11 @@ def test_publish_run_local_skips_cloudfront(tmp_path, monkeypatch):
     assert (tmp_path / "dash" / "run-y" / "metrics.json").exists()
 
 
+def test_invalidation_path_root_vs_prefix():
+    assert ap._invalidation_path("s3://alexlouis-apentic-data") == "/*"            # data.alexlouis.dev root
+    assert ap._invalidation_path("s3://bucket/apentic/data") == "/apentic/data/*"  # apex path behavior
+
+
 def test_upsert_manifest_replaces_same_id(tmp_path):
     mpath = tmp_path / "manifest.json"
     ap.upsert_manifest(mpath, {"id": "a", "model_name": "v1"})
