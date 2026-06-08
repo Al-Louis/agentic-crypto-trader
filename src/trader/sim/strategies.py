@@ -69,3 +69,16 @@ def regime_gated(base_fn, risk_on: pd.Series):
         return base_fn(hist) if on else pd.Series(dtype=float)
 
     return weights
+
+
+def regime_scaled(base_fn, exposure: pd.Series):
+    """Scale the base weights by a continuous exposure series ∈ [0,1] (the rest → cash).
+
+    The refined overlay: exposure 1 = full tilt, 0.5 = half tilt + half cash, 0 = all cash.
+    Daily rebalance still satisfies ≥1 trade/day.
+    """
+    def weights(hist: pd.DataFrame) -> pd.Series:
+        e = float(exposure.get(hist.index[-1], 0.0))
+        return base_fn(hist) * e
+
+    return weights
