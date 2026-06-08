@@ -15,6 +15,7 @@ This is the map of content (MOC) for my entry into the [[BNB Hack - AI Trading A
 - [[Market Conditions]] - Macro/micro trends, market sentiment
 - [[Trading Strategies]] - Technical indicators, wallet monitoring, asset comparison
 - [[Token Universe]] - The 20 tradeable tokens, selection methodology, and the theory behind them
+- [[Strategy Logic]] - Visual map (flowcharts) of the universe pipeline, research loop, and runtime logic
 - [[Simulated Market]] - Historical exchange data, back-testing environment
 - [[AI Training]] - RL/ML agent training, reward tuning, curriculum
 - [[Security and Encryption]] - Wallet addresses, encryption methods, best practices
