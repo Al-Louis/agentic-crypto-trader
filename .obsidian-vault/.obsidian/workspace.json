@@ -6,15 +6,20 @@
       {
         "id": "5830cbe82ba24231",
         "type": "tabs",
+        "dimension": 45.49492385786802,
         "children": [
           {
             "id": "005cc92c1c8b5da4",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "BNB Hackathon/AI Training.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "AI Training"
             }
           }
         ]
@@ -22,15 +27,20 @@
       {
         "id": "37285771880bd786",
         "type": "tabs",
+        "dimension": 54.50507614213198,
         "children": [
           {
             "id": "c665139adb3544af",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "type": "markdown",
+              "state": {
+                "file": "BNB Hackathon/Strategy Logic.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Strategy Logic"
             }
           }
         ]
@@ -192,9 +202,37 @@
       "bases:Create new base": false
     }
   },
-  "active": "005cc92c1c8b5da4",
+  "active": "c665139adb3544af",
   "lastOpenFiles": [
-    "New folder",
+    "BNB Hackathon/Build Log.md.tmp.18940.94e872174221",
+    "BNB Hackathon/Remote Capabilities.md.tmp.18940.57322a97bb1b",
+    "BNB Hackathon/Tech Stack.md",
+    "BNB Hackathon/Strategy Logic.md",
+    "BNB Hackathon/Index.md.tmp.18940.31d524c76d3b",
+    "BNB Hackathon/Strategy Logic.md.tmp.18940.dabc471d952f",
+    "BNB Hackathon/Build Log.md.tmp.18940.8a29e7cf5577",
+    "BNB Hackathon/Trading Strategies.md.tmp.18940.fa23b9c6e274",
+    "wallet-core/building.md",
+    "BNB Hackathon/AI Training.md",
+    "References/trust-wallet-agent-kit/_get-started.md",
+    "References/coinmarketcap-cli/skills/cmc-cli/SKILL.md",
+    "References/bnb-ai-agent-sdk/bnbagent/core/README.md",
+    "BNB Hackathon/Simulated Market.md",
+    "trustconnect/bitcoin.md",
+    "trustconnect",
+    "References/trust-wallet-agent-kit/mcp/docs-mcp.md",
+    "wallet-core/newevmchain.md",
+    "wallet-core",
+    "BNB Hackathon/Build Log.md.tmp.18940.b328cfe46e20",
+    "BNB Hackathon/Trading Strategies.md.tmp.18940.33c54acf72e5",
+    "BNB Hackathon/Build Log.md.tmp.18940.1cc2bcc4ba81",
+    "BNB Hackathon/Real-time Monitoring.md",
+    "BNB Hackathon/Token Universe.md",
+    "BNB Hackathon/Trading Strategies.md",
+    "BNB Hackathon/MCP Server.md",
+    "BNB Hackathon/Build Log.md",
+    "BNB Hackathon/Project Overview.md",
+    "References/trust-wallet-agent-kit/SUMMARY.md",
     "Welcome.md"
   ]
 }

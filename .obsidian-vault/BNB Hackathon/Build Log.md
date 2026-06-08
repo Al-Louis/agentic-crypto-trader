@@ -133,11 +133,34 @@ Analyzed the prior project's lean handoff; verdict captured in [[Simulated Marke
   moderate/sharp crashes; complementary to `trend50`, not dominant. **Overlay frontier fully
   mapped; strategy core done.**
 
+## 2026-06-08 — Apentic training/telemetry pipeline (laptop ↔ desktop ↔ frontend)
+
+Reframed the next phase: train on the **desktop** (GPU, no keys), orchestrate from the
+**laptop**, surface results in the **Apentic** web frontend (`alexlouis-site`). Built the
+pipeline **first**, decoupled and proven locally before the desktop exists ([[Remote Capabilities]]).
+
+- **`remote_train/`** — a generic, **trading-agnostic** job orchestrator (separate package, lifts
+  into its own repo later; test-enforced *no `import trader`*). `JobSpec` → `submit`/`status`/
+  `publish`, `progress.json` telemetry, pluggable **`LocalExecutor`** (now) + **`SSHExecutor`**
+  (desktop over Tailscale). *Decouple-now, extract-after-second-use* — not a premature repo.
+- **`trader.report.export_run`** — the bridge to the dashboard's static-JSON contract (manifest +
+  `trades`/`metrics`/`candles`/`equity_curve`/`run_info`). `roundtrips_from_position` folds any
+  single-asset exposure series into cost-honest round-trips.
+- **End-to-end proven:** `scripts/dispatch_demo.py` runs submit → job (a real HUMA trend backtest)
+  → publish → manifest upsert; the bundle renders in Apentic at `/apentic/training`. **+13 tests
+  (122 total).** Decisions locked: **R2** publish, **SSH/Tailscale** dispatch, **pipeline-first**.
+- **Open fork:** frontend is single-asset; our strategy is portfolio. Demo exercises every panel
+  via a heuristic; the trained-agent shape is decided with [[rl-ml-trainer]] (pipeline is identical
+  either way).
+
 ### In flight / next
 
-- ⏭️ **Phase-2 on-chain spike (THE priority)** — TWAK self-custody signing, a dust trade, and
-  on-chain registration **before June 22**. The unfamiliar, blocker-laden half; gates a real
-  Track-1 entry. The strategy is strong enough that this is now the highest-leverage remaining work.
+- ⏭️ **Stand up the desktop training host** — Tailscale + key-based SSH + repo clone + GPU venv;
+  then flip `LocalExecutor`→`SSHExecutor` and the publish target → R2. (User-side setup in progress.)
+- ⏭️ **RL env on the desktop** ([[AI Training]] / [[Simulated Market]]) — backtester=env,
+  metrics=eval, **vol-tilt=baseline-to-beat**, ruin-aware reward, real regime curriculum.
+- ⏭️ **Phase-2 on-chain spike** — TWAK self-custody signing, a dust trade, and on-chain
+  registration **before June 22**. The unfamiliar, blocker-laden half; gates a real Track-1 entry.
 - (optional) combined trend+depth overlay; walk-forward OOS; 1-min micro-edges (banked).
 - **1-minute data banked** (9/10 liquid tokens, ~182d; SIREN to re-fill; sparse on thin names,
   ~320–1,350 candles/day). Front-run/sweep features **deprioritized** — entry alpha is dead;

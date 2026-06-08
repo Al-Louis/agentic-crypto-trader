@@ -1,0 +1,187 @@
+"""Export a backtest/eval into the Apentic dashboard bundle.
+
+This is the *contract seam* between our Python sim and the frontend (`alexlouis-site`,
+`src/apentic/`). The dashboard reads static JSON from ``PUBLIC_APENTIC_DATA``: a top-level
+``manifest.json`` plus, per run, ``trades.json`` / ``metrics.json`` / ``candles.json`` /
+``equity_curve.json`` / ``run_info.json``. The TypeScript shapes are
+`RoundTrip` / `MetricsReport` / `CandleData` / `EquityPoint`.
+
+Generic over the strategy: `roundtrips_from_position` folds any single-asset exposure series
+(a heuristic policy now, an RL policy later) into round-trips. The portfolio path can emit
+metrics + equity + candles with an empty trade list until the single-asset-vs-portfolio fork
+is decided (vault "Remote Capabilities").
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
+from trader.sim.metrics import MetricsReport, Trade
+
+BUNDLE_FILES = ("trades.json", "metrics.json", "candles.json", "equity_curve.json", "run_info.json")
+
+
+def _to_secs(ts: Any) -> int:
+    """Normalize an epoch timestamp (s or ms) to integer seconds for lightweight-charts."""
+    v = int(pd.Timestamp(ts).value // 1_000_000_000) if isinstance(ts, pd.Timestamp) else int(ts)
+    return v // 1000 if v > 10_000_000_000 else v   # 13-digit ms → seconds
+
+
+def _iso(ts: Any) -> str:
+    return datetime.fromtimestamp(_to_secs(ts), tz=timezone.utc).isoformat()
+
+
+def equity_points(equity: pd.Series, episode: int = 0) -> list[dict]:
+    return [{"time": _to_secs(t), "value": float(v), "episode": episode}
+            for t, v in equity.items()]
+
+
+def candles_from_ohlcv(df: pd.DataFrame, episode: int = 0, time_col: str = "timestamp") -> list[dict]:
+    """OHLCV frame (`timestamp,open,high,low,close,volume`) → `CandleData[]`, time-ascending."""
+    df = df.sort_values(time_col)
+    return [{"time": _to_secs(r[time_col]), "open": float(r["open"]), "high": float(r["high"]),
+             "low": float(r["low"]), "close": float(r["close"]), "volume": float(r["volume"]),
+             "episode": episode} for _, r in df.iterrows()]
+
+
+def metrics_to_frontend(m: MetricsReport, *, episodes_evaluated: int = 1,
+                        episodes_profitable: int | None = None,
+                        avg_episode_return: float | None = None) -> dict:
+    """`MetricsReport` → the dashboard's `MetricsReport` (adds the three episode fields).
+
+    Non-finite floats (inf Calmar on a degenerate curve, etc.) become null — JSON has no inf.
+    """
+    d = {k: (None if isinstance(v, float) and not np.isfinite(v) else v)
+         for k, v in m.to_dict().items()}
+    d["episodes_evaluated"] = episodes_evaluated
+    d["episodes_profitable"] = (episodes_profitable if episodes_profitable is not None
+                                else (1 if m.total_return_pct > 0 else 0))
+    d["avg_episode_return"] = (avg_episode_return if avg_episode_return is not None
+                               else m.total_return_pct)
+    return d
+
+
+def roundtrips_from_position(prices: pd.Series, position: pd.Series, *, capital: float = 10_000.0,
+                             liquidity_usd: float = 0.0, lp_fee_bps: float = DEFAULT_LP_FEE_BPS,
+                             gas_usd: float = DEFAULT_GAS_USD, rebal_threshold: float = 0.02,
+                             min_trade_usd: float = 1.0, episode: int = 0
+                             ) -> tuple[list[dict], pd.Series, list[Trade]]:
+    """Fold a single-asset exposure series into round-trips, an equity curve, and Trade objects.
+
+    `position[i]` ∈ [0,1] is the target fraction of equity to hold *during* bar i (caller makes
+    it causal). A held position rides — we only trade when the target exposure moves by more
+    than `rebal_threshold`, so a 0/1 policy yields exactly one buy + one sell per spell (no
+    fee-induced churn). A round-trip is one contiguous in-position spell (exposure leaves 0 →
+    returns to 0). AMM cost is charged on every traded notional, so the equity curve and
+    round-trip PnL are cost-honest.
+    """
+    prices = prices.astype(float)
+    position = position.reindex(prices.index).fillna(0.0).clip(0.0, 1.0)
+    idx = list(prices.index)
+
+    cash, hold, applied = float(capital), 0.0, 0.0
+    equity = np.empty(len(idx))
+    trade_objs: list[Trade] = []
+    trips: list[dict] = []
+    spell: dict | None = None       # open round-trip accumulator
+
+    prev_price = float(prices.iloc[0])
+    for i, t in enumerate(idx):
+        p = float(prices.iloc[i])
+        hold *= (1.0 + (p / prev_price - 1.0)) if prev_price else 1.0
+        prev_price = p
+        eq = cash + hold
+
+        desired = float(position.iloc[i])
+        if abs(desired - applied) >= rebal_threshold and eq > 1.0:
+            trade = desired * eq - hold
+            if abs(trade) >= min_trade_usd:
+                fee = amm_cost_usd(trade, liquidity_usd, lp_fee_bps, gas_usd)
+                cash -= trade + fee
+                hold += trade
+                eq = cash + hold
+                applied = desired
+                trade_objs.append(Trade(side="buy" if trade > 0 else "sell",
+                                        quantity=abs(trade) / p, price=p, fee=fee, step=i))
+                if trade > 0 and spell is None:        # 0 → in: open a round-trip
+                    spell = {"i": i, "t": t, "price": p, "qty": trade / p, "fee": fee, "pv": eq}
+                elif desired <= rebal_threshold and spell is not None:  # back to flat: close it
+                    trips.append(_close_trip(spell, len(trips), i, t, p, fee, eq, episode))
+                    spell = None
+        equity[i] = eq
+
+    if spell is not None:                          # still in position at series end → mark out
+        trips.append(_close_trip(spell, len(trips), len(idx) - 1, idx[-1], float(prices.iloc[-1]),
+                                 0.0, float(equity[-1]), episode, reason="end of sample"))
+    return trips, pd.Series(equity, index=prices.index), trade_objs
+
+
+def _close_trip(spell: dict, n: int, i: int, t: Any, exit_price: float, exit_fee: float,
+                exit_pv: float, episode: int, reason: str = "flat signal") -> dict:
+    pnl = exit_pv - spell["pv"]
+    return {
+        "id": f"rt-{n:04d}", "episode": episode,
+        "entry_datetime": _iso(spell["t"]), "entry_price": spell["price"],
+        "entry_quantity": spell["qty"], "entry_fee": spell["fee"],
+        "entry_close": spell["price"], "entry_portfolio_value": spell["pv"],
+        "exit_datetime": _iso(t), "exit_price": exit_price, "exit_fee": exit_fee,
+        "exit_close": exit_price, "exit_portfolio_value": exit_pv, "exit_reason": reason,
+        "duration_steps": i - spell["i"],
+        "pnl_usdt": pnl, "pnl_pct": pnl / spell["pv"] if spell["pv"] else 0.0,
+        "total_fees": spell["fee"] + exit_fee,
+    }
+
+
+def export_run(out_dir: Path | str, run_id: str, *, equity: pd.Series, metrics: dict,
+               symbol: str, model_name: str, timestamp: str, trades: list[dict] | None = None,
+               candles: list[dict] | None = None, regime: str = "", n_episodes: int = 1,
+               indicators_used: list[str] | None = None,
+               available_indicators: list[str] | None = None, ta_time: float | None = None,
+               simulation: bool = False) -> dict:
+    """Write a run's bundle under ``<out_dir>/<run_id>/`` and upsert ``<out_dir>/manifest.json``.
+
+    Returns the manifest entry. `metrics` is the dict from `metrics_to_frontend`.
+    """
+    out_dir = Path(out_dir)
+    run_dir = out_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_info = {"model_name": model_name,
+                "indicators_used": indicators_used or [],
+                "available_indicators": available_indicators or (indicators_used or []),
+                "ta_time": ta_time, "regime": regime, "n_episodes": n_episodes}
+    _dump(run_dir / "trades.json", trades or [])
+    _dump(run_dir / "metrics.json", metrics)
+    _dump(run_dir / "candles.json", candles or [])
+    _dump(run_dir / "equity_curve.json", equity_points(equity))
+    _dump(run_dir / "run_info.json", run_info)
+
+    entry = {"id": run_id, "model_name": model_name, "timestamp": timestamp,
+             "n_episodes": n_episodes, "regime": regime, "symbol": symbol,
+             "simulation": simulation}
+    upsert_manifest(out_dir / "manifest.json", entry)
+    return entry
+
+
+def upsert_manifest(manifest_path: Path | str, entry: dict) -> list[dict]:
+    """Read-merge-write the dashboard manifest, replacing any entry with the same id."""
+    manifest_path = Path(manifest_path)
+    try:
+        items = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        items = []
+    items = [e for e in items if e.get("id") != entry["id"]] + [entry]
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    return items
+
+
+def _dump(path: Path, data: Any) -> None:
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")

@@ -13,7 +13,7 @@ and [[Tech Stack]] for context.
   hard-gated.
 - **Deterministic and inspectable.** Every tool supports a `dry_run` where meaningful and
   returns structured results a workflow can branch on.
-- **The server enforces guardrails**, not the model. Allowlist, per-trade/daily caps,
+- **The server enforces guardrails**, not the model. [[Allowlist,]] per-trade/daily caps,
   slippage, and the drawdown stop live in the `execute_trade` code path; out-of-policy calls
   are refused, not negotiated.
 - **Secrets never in the server or repo.** Keys/API keys load from a local `.env` / secure

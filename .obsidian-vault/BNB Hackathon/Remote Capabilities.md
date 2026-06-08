@@ -95,6 +95,39 @@ from the principal host.
 The training host holds **no keys and touches no mainnet** — its only outputs are model
 artifacts and reports that later flow into the strategy core.
 
+### Apentic pipeline — as-built (2026-06-08)
+
+The training→telemetry pipeline is built **pipeline-first** and proven end-to-end *locally*
+before the desktop exists. Three tiers: **laptop** (dev + orchestration, all dev stays here),
+**desktop** (GPU training host — no keys), **Apentic frontend** (`alexlouis-site`, reads
+static JSON). Two cleanly separated code layers:
+
+- **`remote_train/`** — a **generic, trading-agnostic** job orchestrator (its own package,
+  `src/remote_train/`, in the wheel separately). `JobSpec` → `submit` → `status` (fire-and-poll
+  via on-disk `status.json` + `progress.json`) → `publish`. Pluggable executors: **`LocalExecutor`**
+  (now / CI) and **`SSHExecutor`** (the desktop over Tailscale — runs the command, rsyncs the
+  artifact dir back). **Hard rule, test-enforced: it must never `import trader`** — so it lifts
+  into its own repo after the hackathon (decouple-now, extract-after-a-second-use — *not* a
+  premature separate repo today).
+- **`trader.report.export_run`** — the **trading-specific** bridge to the dashboard contract.
+  The frontend reads, per run, a `manifest.json` + `trades.json` (`RoundTrip[]`) / `metrics.json`
+  (`MetricsReport`) / `candles.json` (`CandleData[]`) / `equity_curve.json` (`EquityPoint[]`) /
+  `run_info.json`, from `PUBLIC_APENTIC_DATA`. `roundtrips_from_position` folds any single-asset
+  exposure series (heuristic now, RL later) into cost-honest round-trips.
+
+**Decisions locked:** publish target = **Cloudflare R2** (S3-compatible; `publish` has a boto3
+path behind the `remote` extra + a local-dir fallback used now); dispatch = **SSH over Tailscale**;
+sequencing = **pipeline-first** (`scripts/dispatch_demo.py` already runs submit→job→publish→manifest
+against a real HUMA backtest, rendering in Apentic). **Telemetry seam:** the job appends
+`progress.json` (reward/return curve); `status()` and the dashboard poll the same flat file.
+
+**Open fork (deferred):** the frontend contract is **single-asset** (entry/exit round-trips on
+one symbol). Our live strategy is **cross-sectional portfolio**. The demo uses a single-asset
+trend heuristic to exercise every panel; the trained agent's shape (single-asset entry/exit RL
+that fits the frontend vs. portfolio allocator that needs a new view) is decided with
+[[rl-ml-trainer]] — the exporter and pipeline are identical either way. The MCP `start_training`
+/ `training_status` / `export_run` tools ([[MCP Server]]) become thin wrappers over `remote_train`.
+
 ## CI/CD and validation gates
 
 - **Offline-first gate:** tests + lint + the strategy core's pure-logic checks must pass
