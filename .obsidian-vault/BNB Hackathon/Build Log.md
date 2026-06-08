@@ -154,6 +154,31 @@ pipeline **first**, decoupled and proven locally before the desktop exists ([[Re
   via a heuristic; the trained-agent shape is decided with [[rl-ml-trainer]] (pipeline is identical
   either way).
 
+### ✅ Live end-to-end on AWS (2026-06-08, evening)
+
+The full loop runs hands-off on real hardware: laptop `dispatch_demo.py` → SSH trigger →
+**desktop runs the job, exports the bundle, self-publishes to AWS S3, and invalidates
+CloudFront** over its own internet (no tailnet haul-back). Verified at
+`https://data.alexlouis.dev/manifest.json` — **HTTP 200, `X-Cache: Hit from cloudfront`**.
+
+- **Pivoted publish R2 → the site's existing AWS infra** (the publish code is cloud-agnostic S3,
+  so no transport change): S3 `alexlouis-apentic-data` + a **dedicated CloudFront distribution
+  `E14F268NIY6WLZ` on `data.alexlouis.dev`** (OAC, managed SimpleCORS, *no* SPA error fallback →
+  clean 404s; isolated from the site's `s3 sync --delete`). `.deploy/provision-apentic-data.ps1`
+  provisions it idempotently; scoped IAM user `apentic-publisher` (S3 Put/Get/**List** +
+  `CreateInvalidation`) creds live in the desktop `.env`.
+- **The job self-publishes** (`JobSpec.fetch_artifacts=False`) — which is exactly why the
+  **path-MTU black hole** on the haul-back (≤512 B returns OK, ≥4 KB stall and the ssh session
+  dies) no longer matters: nothing large crosses the tailnet.
+- **Debug trail that got here:** Tailscale on the laptop; MagicDNS didn't resolve inside the ssh
+  *subprocess* → use the tailnet IP `100.97.195.65`; tar-stream haul-back hit the PMTU wall →
+  self-publish; the desktop `/root` clone tracked a **stale P: drive mirror, not GitHub** →
+  fast-forwarded it; first publish needed **`s3:ListBucket`** (missing key returns 403 not 404
+  without it).
+- **Remaining:** the frontend sets `PUBLIC_APENTIC_DATA=https://data.alexlouis.dev` (cross-origin
+  subdomain; SimpleCORS already allows it). Then this same path serves real RL training runs — the
+  telemetry half is done.
+
 ### In flight / next
 
 - ✅ **Desktop training host — stood up & verified.** Runs inside a fresh dedicated WSL2 distro
