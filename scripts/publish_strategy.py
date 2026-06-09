@@ -19,7 +19,7 @@ sys.path.insert(0, "src")
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from train_rl import build_portfolio_artifacts, trade_stats  # noqa: E402
+from train_rl import build_portfolio_artifacts, build_volume_panel, trade_stats  # noqa: E402
 from trader import config  # noqa: E402
 from trader.report import apentic as ap  # noqa: E402
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd  # noqa: E402
@@ -103,9 +103,10 @@ def main():
     warmed = returns.iloc[ts - WARMUP:]                 # warm up on PRE-test data -> trade from day 1
     d0, d1 = int(test_r.index[0]), int(test_r.index[-1])
     uni = select_vol_tokens(test_r, 8)
+    vol = build_volume_panel(uni, returns.index)
     print(f"publishing TEST strategies (warmed from pre-window; universe {uni}) -> {target}")
-    publish("rung0-test", "Rung-0 disciplined trend-hold (TEST)", warmed,
-            build_rung0(warmed, tokens=uni), liq, target, dist, d0, d1)
+    publish("rung0-test", "Rung-0 volume-ignition trend-hold (TEST)", warmed,
+            build_rung0(warmed, tokens=uni, volume=vol), liq, target, dist, d0, d1)
     publish("voltop8-test", "vol-top8 plain hold (TEST)", warmed,
             build_candidate(warmed, tokens=uni, overlay="none"), liq, target, dist, d0, d1)
     publish("trend50-test", "vol-top8 trend50 (TEST)", warmed,

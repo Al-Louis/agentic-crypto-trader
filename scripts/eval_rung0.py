@@ -18,7 +18,7 @@ import datetime as dt  # noqa: E402
 
 import pandas as pd  # noqa: E402
 
-from train_rl import load_data, time_split  # noqa: E402
+from train_rl import build_volume_panel, load_data, time_split  # noqa: E402
 from trader.sim.backtest import run_xs_backtest  # noqa: E402
 from trader.sim.metrics import PerformanceMetrics  # noqa: E402
 from trader.strategy.candidate import build_candidate, select_vol_tokens  # noqa: E402
@@ -43,12 +43,13 @@ def run(name, returns, btc, liq, fn):
 def main():
     returns, btc, anchor, liq = load_data()
     train_r, val_r, test_r = time_split(returns)
+    vol = build_volume_panel(list(returns.columns), returns.index)
 
     for split, r in [("VAL", val_r), ("TEST", test_r)]:
         print(f"\n=== {split} split  (universe = {select_vol_tokens(r, 8)}) ===")
         print(f"  {'strategy':24}{'return':>9}{'maxDD':>8}{'Sharpe':>8}{'turnover$':>11}{'rebals':>7}")
         rows = [
-            run("rung0 (disciplined)", r, btc, liq, build_rung0(r)),
+            run("rung0 (disciplined)", r, btc, liq, build_rung0(r, volume=vol)),
             run("vol-top8 (none/hold)", r, btc, liq, build_candidate(r, btc, overlay="none")),
             run("vol-top8 trend50", r, btc, liq, build_candidate(r, btc, overlay="trend50")),
         ]
@@ -57,7 +58,7 @@ def main():
 
     # SIREN trace under rung 0 (test split) — does it stand aside through the dead-zone?
     print("\n=== SIREN under rung-0 on TEST (held intervals; expect: ride runup, exit, stand aside) ===")
-    fn = build_rung0(test_r)
+    fn = build_rung0(test_r, volume=vol)
     def d(t): return dt.datetime.fromtimestamp(int(t), dt.timezone.utc).strftime("%b %d")
     prev = 0.0
     for i in range(WARMUP, len(test_r), REBAL):

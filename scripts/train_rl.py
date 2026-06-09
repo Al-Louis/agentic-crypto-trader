@@ -101,6 +101,19 @@ def _load_token_ohlcv(token):
     return df.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
 
 
+def build_volume_panel(tokens, index):
+    """Per-token hourly volume aligned to `index` (the returns timestamps) — for volume-spike signals."""
+    cols = {}
+    for t in tokens:
+        oh = _load_token_ohlcv(t)
+        if oh is None:
+            continue
+        ts = oh["timestamp"].to_numpy()
+        ts = (ts // 1000) if ts.max() > 1e12 else ts
+        cols[t] = pd.Series(oh["volume"].to_numpy(), index=ts).reindex(index).fillna(0.0)
+    return pd.DataFrame(cols, index=index)
+
+
 def _price_at(win, tm):
     if win.empty:
         return None
