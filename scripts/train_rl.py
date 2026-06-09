@@ -61,14 +61,16 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
     env = PortfolioEnv(returns_win, btc_close, liq, **{**env_kwargs, "episode_steps": steps})
     obs = env.reset(start=env._min_start)
     fees = trades = 0
+    raw_actions = []
     done = False
     while not done:
         norm = vecnorm.normalize_obs(obs.reshape(1, -1)) if vecnorm is not None else obs.reshape(1, -1)
         action, _ = model.predict(norm, deterministic=True)
+        raw_actions.append(float(np.asarray(action).reshape(-1)[0]))   # pre-clip policy output
         obs, _, done, info = env.step(np.asarray(action).reshape(-1))
         fees += info["cost"]
         trades += 1 if info["cost"] > 0 else 0
-    return np.asarray(env.equity_curve, dtype=float), fees, trades
+    return np.asarray(env.equity_curve, dtype=float), fees, trades, raw_actions
 
 
 def main() -> None:
@@ -130,7 +132,10 @@ def main() -> None:
 
     # ---- evaluate on held-out validation, build + publish the bundle ----
     write_progress(out, state="running", phase="evaluate")
-    equity, fees, trades = evaluate_policy(model, venv, val_r, btc_close, liq, env_kwargs)
+    equity, fees, trades, raw_actions = evaluate_policy(model, venv, val_r, btc_close, liq, env_kwargs)
+    print(f"[eval] raw policy action: min={min(raw_actions):+.3f} "
+          f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} "
+          f"(>0 ⇒ takes exposure; clipped to [0,1])")
 
     report = PerformanceMetrics.compute_all(equity, steps_per_year=HOURS_PER_YEAR)
     metrics = ap.metrics_to_frontend(report)
