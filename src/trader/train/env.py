@@ -25,6 +25,7 @@ import pandas as pd
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
 
 N_OBS = 6  # [btc_trend, btc_recent_return, drawdown, exposure, last_step_return, realized_vol]
+DSR_CLIP = 10.0  # the differential Sharpe is unstable when variance is tiny / a return spikes
 
 
 class PortfolioEnv:
@@ -121,13 +122,18 @@ class PortfolioEnv:
 
     # -- pieces -------------------------------------------------------------
     def _dsr(self, r: float) -> float:
-        """Differential (online) Sharpe increment — Moody & Saffell. 0 until variance exists."""
+        """Differential (online) Sharpe increment — Moody & Saffell. 0 until variance exists.
+
+        Floored denom + clipped output: with a near-zero variance estimate (early episode) or a
+        big daily return on a high-vol token, the raw DSR explodes to thousands and PPO's
+        advantages become noise (the post-mortem's "clip reward magnitude" lesson).
+        """
         da, db = r - self.A, r * r - self.B
         denom = self.B - self.A * self.A
-        d = (self.B * da - 0.5 * self.A * db) / denom ** 1.5 if denom > 1e-12 else 0.0
+        d = (self.B * da - 0.5 * self.A * db) / denom ** 1.5 if denom > 1e-8 else 0.0
         self.A += self.eta * da
         self.B += self.eta * db
-        return float(d)
+        return float(np.clip(d, -DSR_CLIP, DSR_CLIP))
 
     def _dd_penalty(self, dd: float) -> float:
         """0 below `dd_soft`, ramps² to 1 at the `dd_gate` (the DQ) — ruin is treated as ruin."""

@@ -120,6 +120,17 @@ def test_gym_adapter_conforms_and_steps():
     assert isinstance(terminated, bool) and truncated is False
 
 
+def test_reward_bounded_on_high_vol_returns():
+    returns, btc = _panel(base_vol=0.2)               # huge returns → raw DSR would explode
+    env = PortfolioEnv(returns, btc, _deep_liq(returns), episode_steps=20)
+    env.reset(start=300)
+    rewards, done = [], False
+    while not done:
+        _, r, done, _ = env.step(1.0)
+        rewards.append(r)
+    assert all(abs(x) <= 12.0 for x in rewards)        # DSR clipped to ±10, dd penalty up to ~2
+
+
 def test_too_short_series_raises():
     returns, btc = _panel(n_bars=200)
     try:
