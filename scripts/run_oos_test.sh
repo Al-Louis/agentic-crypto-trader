@@ -31,6 +31,9 @@ for entry in "${CONFIGS[@]}"; do
   for seed in $SEEDS; do
     rid="ppo-oos-${label}-s${seed}"
     n=$((n+1))
+    if grep -q "^\[train_rl\]" "$LOGDIR/${rid}.log" 2>/dev/null; then
+      echo "[oos] ($n) skip $rid — already complete"; continue   # resumable after interruption
+    fi
     echo "[oos] === ($n) $rid  $(date -u +%FT%TZ) ==="
     # shellcheck disable=SC2086
     $PY scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs \
