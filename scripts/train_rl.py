@@ -280,6 +280,22 @@ def main() -> None:
     metrics["eval_giveback"] = shaping["giveback"]        # mode diagnostics for the cross-run compare
     metrics["eval_realized_usd"] = shaping["realized"]
     metrics["eval_turnover_usd"] = shaping["turnover"]
+    # full reproducibility provenance baked into every bundle — the experiment ledger reads this so
+    # we can always reconstruct the exact (code + config) that produced a result (the TradeSim lesson)
+    import subprocess
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).stdout.strip()
+    except Exception:  # noqa: BLE001
+        sha = "unknown"
+    metrics["provenance"] = {
+        "git_commit": sha, "action_mode": args.action_mode, "reward_mode": args.reward_mode,
+        "rich_obs": args.rich_obs, "timesteps": args.timesteps, "seed": args.seed,
+        "n_envs": args.n_envs, "step_bars": args.step_bars, "episode_steps": args.episode_steps,
+        "ent_coef": args.ent_coef, "lr": args.lr, "eval_split": args.eval_split,
+        "gb_lambda": args.gb_lambda, "turn_lambda": args.turn_lambda,
+        "realized_lambda": args.realized_lambda,
+    }
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
         token_candles=token_candles, token_trades=token_trades, universe=universe,

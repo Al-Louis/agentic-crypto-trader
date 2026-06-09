@@ -304,6 +304,47 @@ backstop throughout — held conclusions, wide search.
 - **BTC + BNB anchor series** (ccxt) for the factor model.
 - Feature engineering → residual/factor model → [[Simulated Market]] broker → backtest.
 
+## 2026-06-09 — Reward-shaping sweep, data-realism audit, experiment ledger
+
+### Frontend honesty pass (→ [[Apentic Data Contract]])
+- Fixed `total_trades` (was counting rebalance *days*, not trades — 34 → ~194 real per-token
+  trades), added real `win_rate`/`profit_factor` from per-token FIFO round-trips, and corrected
+  `avg_win_pct`/`avg_loss_pct` from mislabeled **dollars** to genuine **return fractions** (clipped
+  to [-1, +10] to kill dust/fee artifacts). Every bundle now carries the seed in its `model_name`.
+
+### Reward-shaping sweep #1 (→ [[Experiment Log]], [[AI Training]])
+- Added `--reward-mode {sharpe,giveback,realized,turnover}` + `--rich-obs`. The env now tracks
+  per-token **cost basis** + **high-water unrealized return**: `giveback` penalizes surrendering
+  gains from a held position's peak (a learned trailing-stop that *selling* never triggers),
+  `realized` rewards locked-in profit, `turnover` penalizes churn. Rich obs add per-token
+  unrealized gain + distance-below-recent-high so the policy can *see* the profit it holds.
+- 12-run sweep (4 modes × 3 seeds × 100k, identical obs/seed → reward is the only variable).
+  **All four modes beat the vol-tilt baseline (+78.7%):** realized +198% / sharpe +152% /
+  turnover +127% / giveback +103%. At 20k without rich obs, RL *lost* to the baseline — rich obs +
+  steps flipped it. Frontier is **return-vs-DQ**: the high-return modes breach the 30% gate; only
+  turnover/giveback clear it on the *mean*, but **every mode's worst seed hits ~40–43% DD** —
+  robustness, not return, is the gap.
+
+### Data-realism audit (skepticism on the +100–200% returns)
+- Per-token PnL **reconciles** to the equity curve ($22.0k vs $21.1k) → not a frontend bug.
+- SIREN's violent path is **real data**: the −81% bar traded **10.2M vs 11.3k median volume**
+  (~900×) — a genuine liquidation event; SIREN is **CMC #72**, vetted at **$1.1M/24h**, $9.2M pool.
+- The AMM friction (~$18 = **0.36%** on a $5k trade vs a $9.2M pool) is **defensible** constant-
+  product math (slippage from pool depth, not daily volume — my earlier "fantasy" framing was
+  wrong). Returns are real within a mostly-sound sim; residual gaps: static liquidity under stress,
+  and concentration (one token can dominate). Tools: `diag_token_pnl.py`.
+
+### Experiment ledger — the TradeSim lesson, made structural (→ [[Experiment Log]])
+- `train_rl` now stamps a full **`provenance`** block (git commit + every hyperparameter) into each
+  bundle. `build_ledger.py` rebuilds a committed, append-only `experiments/ledger.jsonl` +
+  `experiments/champion.json` (best mean return under the DD gate, with the exact reproduce
+  command). Never tweak without a permanent, version-controlled performance trail again.
+- **Champion (provisional):** `turnover` +126.5% @ 29.6% mean DD (worst seed 41.1%).
+
+### Thesis recalibration (→ [[Market Conditions]])
+- Re-anchored: realized-volatility capture **is** the edge (not the S&P 500); the ~30% drawdown DQ
+  gate is the only hard constraint. Stop importing tradfi skepticism / writing approaches off early.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

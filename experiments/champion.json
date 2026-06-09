@@ -1,0 +1,80 @@
+{
+  "champion": {
+    "mode": "turnover",
+    "by_legal_mean": true,
+    "dd_gate": 0.3,
+    "mean_return": 1.2652973749924328,
+    "mean_maxdd": 0.2964128938050633,
+    "worst_maxdd": 0.41091233319072334,
+    "timesteps": 100000,
+    "git": null,
+    "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode turnover --rich-obs --eval-split val --timesteps 100000 --n-envs 6 --seed <0|1|2>   (defaults: ent_coef 0.2, lr 3e-4, step_bars 24)"
+  },
+  "modes": {
+    "giveback": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 1.0308068336241278,
+      "mean_maxdd": 0.287402753875654,
+      "mean_sharpe": 3.8521704760296736,
+      "mean_pf": 1.208342140575566,
+      "worst_maxdd": 0.4048402827657488,
+      "timesteps": 100000,
+      "git": null,
+      "legal_mean": true
+    },
+    "realized": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 1.9823394652307282,
+      "mean_maxdd": 0.3462015050977511,
+      "mean_sharpe": 4.750466843913596,
+      "mean_pf": 1.7312955420255458,
+      "worst_maxdd": 0.414553970296206,
+      "timesteps": 100000,
+      "git": null,
+      "legal_mean": false
+    },
+    "sharpe": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 1.516497837831647,
+      "mean_maxdd": 0.3176065134398865,
+      "mean_sharpe": 4.386458386715307,
+      "mean_pf": 1.699080949857504,
+      "worst_maxdd": 0.4282831911761509,
+      "timesteps": 100000,
+      "git": null,
+      "legal_mean": false
+    },
+    "turnover": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 1.2652973749924328,
+      "mean_maxdd": 0.2964128938050633,
+      "mean_sharpe": 4.236758919408252,
+      "mean_pf": 1.564120499101216,
+      "worst_maxdd": 0.41091233319072334,
+      "timesteps": 100000,
+      "git": null,
+      "legal_mean": true
+    }
+  },
+  "dd_gate": 0.3
+}

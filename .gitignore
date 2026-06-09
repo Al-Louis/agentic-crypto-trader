@@ -35,13 +35,17 @@ data/*.csv
 /tradesim_handoff_seed/
 /tradesim_handoff_seed.zip
 runs/
-experiments/
+experiments/*
+# …but the experiment ledger MUST be version-controlled (the permanent performance trail)
+!experiments/ledger.jsonl
+!experiments/champion.json
 models/
 *.log
 logs/
 
 # Generated infra-provisioning output (resource ids, not secrets)
 .deploy/*.out.json
+apentic-iam.json
 
 # Vendored SDK clones — keep provenance (_SOURCE.md), drop the third-party source.
 # (trust-wallet-agent-kit is doc-only markdown, so it stays tracked.)
