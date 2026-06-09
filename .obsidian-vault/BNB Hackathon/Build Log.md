@@ -245,6 +245,25 @@ tokens isn't worth it (cash 0% beats the −40% heuristic baselines). Caveats: a
 → Build **action B** (allocate/weight tokens, not just dial exposure) — cash-vs-hold is too
 thin a lever to show learning; allocation is where the vol-tilt edge lives.
 
+### Action B (allocation) works — and the regime signal was dead (2026-06-09)
+
+**Action B (per-token weight allocation) produces a non-trivial policy**, unlike the
+cash-collapsed exposure overlay: on the held-out val window it allocates (~76% mean invested),
+returns **+18.4% net, Sharpe ~2.0** (after fixing a ~5× Sharpe over-annualization — daily eval
+steps were annualized hourly), **22.3% maxDD** (under the gate), **34 trades**. The loop's
+`diagnose_run` scored it — PASS drawdown / positive-Sharpe / activity, **FAIL fee_drag** (fees
+eat 96% of net PnL → it churns). The loop *working*: train → eval → publish → "promising
+allocator, but fee-heavy → cut turnover."
+
+**Bug found while validating — the BTC regime features were dead.** Factor returns index is in
+**seconds**, the BTC anchor in **milliseconds** → `reindex` made BTC all-NaN → the env's
+`btc_trend`/`btc_recent_return` obs were always 0. So the exposure overlay (C) couldn't see the
+regime it's meant to gate on (confounds the "cash optimal" result), and `candles.json` published
+empty (no baseline gate, blank chart). Fixed (align anchor → seconds). Added the **frozen-test
+split** + a real **vol-tilt baseline head-to-head** to the trainer for honest validation.
+**Skeptical stance holds:** +18% is *one* val window; the verdict that counts is beat-the-vol-tilt
+on the *frozen test* across seeds.
+
 ### In flight / next
 
 - ✅ **Desktop training host — stood up & verified.** Runs inside a fresh dedicated WSL2 distro

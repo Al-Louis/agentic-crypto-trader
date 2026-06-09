@@ -42,6 +42,8 @@ def load_data():
     returns = np.expm1(pd.DataFrame(ret).sort_index())              # log → simple
     anchor = pd.read_parquet(os.path.join("data", "anchor", "BTC_USDT", "1h.parquet"))
     anchor = anchor.set_index("timestamp").sort_index()
+    if anchor.index.max() > 1e12:                  # anchor is ms; factor returns are seconds — align
+        anchor.index = (anchor.index // 1000).astype("int64")
     btc_close = anchor["close"]
     liq = {s["symbol"]: (s.get("liq_usd") or 0.0)
            for s in json.load(open(os.path.join("data", "selection.json"), encoding="utf-8"))}
@@ -87,6 +89,8 @@ def main() -> None:
     p.add_argument("--ent-coef", type=float, default=0.2,    # post-mortem: low ent_coef → "always-wait" collapse
                    help="PPO entropy coefficient (exploration)")
     p.add_argument("--lr", type=float, default=3e-4, help="PPO learning rate")
+    p.add_argument("--eval-split", default="val", choices=["val", "test"],
+                   help="held-out split to evaluate on (test = the frozen, honest verdict)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     config.load_dotenv()
@@ -102,7 +106,8 @@ def main() -> None:
     from trader.train.gym_env import GymPortfolioEnv
 
     returns, btc_close, anchor, liq = load_data()
-    train_r, val_r, _test_r = time_split(returns)
+    train_r, val_r, test_r = time_split(returns)
+    eval_r = test_r if args.eval_split == "test" else val_r    # tune on val; final verdict on test
     env_kwargs = dict(step_bars=args.step_bars, episode_steps=args.episode_steps,
                       warmup=168, action_mode=args.action_mode, seed=args.seed)
 
@@ -132,9 +137,9 @@ def main() -> None:
                 ent_coef=args.ent_coef, learning_rate=args.lr)
     model.learn(total_timesteps=args.timesteps, callback=ProgressCb())
 
-    # ---- evaluate on held-out validation, build + publish the bundle ----
+    # ---- evaluate on the held-out split, build + publish the bundle ----
     write_progress(out, state="running", phase="evaluate")
-    equity, fees, trades, raw_actions = evaluate_policy(model, venv, val_r, btc_close, liq, env_kwargs)
+    equity, fees, trades, raw_actions = evaluate_policy(model, venv, eval_r, btc_close, liq, env_kwargs)
     print(f"[eval] total allocation weight: min={min(raw_actions):+.3f} "
           f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} (0 ⇒ all cash)")
 
@@ -148,9 +153,25 @@ def main() -> None:
 
     # equity points sit at step boundaries (warmup + k·step_bars), not consecutive bars
     sb, wu = args.step_bars, env_kwargs["warmup"]
-    positions = [min(wu + k * sb, len(val_r) - 1) for k in range(len(equity))]
-    eq_series = pd.Series(equity, index=val_r.index[positions])
-    candles = ap.candles_from_ohlcv(anchor.loc[val_r.index[0]:val_r.index[-1]].reset_index())
+    positions = [min(wu + k * sb, len(eval_r) - 1) for k in range(len(equity))]
+    eq_series = pd.Series(equity, index=eval_r.index[positions])
+    candles = ap.candles_from_ohlcv(anchor.loc[eval_r.index[0]:eval_r.index[-1]].reset_index())
+
+    # ---- honest head-to-head: the validated vol-tilt on the SAME window, same backtester ----
+    from trader.sim.backtest import run_xs_backtest
+    from trader.strategy.candidate import build_candidate
+    base_fn = build_candidate(eval_r, btc_close=btc_close, k=8, overlay="trend50")
+    base_eq = run_xs_backtest(eval_r, base_fn, liq, rebalance_every=args.step_bars,
+                              warmup=wu)["equity"].to_numpy()
+    base_daily = base_eq[::sb]                              # match the policy's daily resolution
+    base_report = PerformanceMetrics.compute_all(base_daily, steps_per_year=steps_per_year)
+    base_ret = base_eq[-1] / base_eq[0] - 1.0 if base_eq[0] else 0.0
+    metrics["baseline_return"] = base_ret
+    print(f"[baseline] vol-tilt(trend50) on {args.eval_split}: return {base_ret:+.1%}, "
+          f"Sharpe {base_report.sharpe_ratio:.2f}, maxDD {base_report.max_drawdown_pct:.1%}")
+    print(f"[verdict] policy {report.total_return_pct:+.1%} (Sh {report.sharpe_ratio:.2f}) vs "
+          f"vol-tilt {base_ret:+.1%} (Sh {base_report.sharpe_ratio:.2f}) on {args.eval_split} → "
+          f"{'BEATS' if report.total_return_pct > base_ret else 'loses to'} baseline")
 
     entry = ap.export_run(
         out, args.run_id, equity=eq_series, metrics=metrics, trades=[], candles=candles,
