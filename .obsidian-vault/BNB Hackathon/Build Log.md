@@ -463,6 +463,21 @@ allocation" to a **signal-grounded, rule-first** strategy, sketched with the use
 - **The ladder:** rung 0 = hand-set rules (interpretable, the new baseline-to-beat); RL tunes the
   thresholds at rung 1+ only if it beats rung 0 OOS — so we never commit to one architecture blind.
 
+## 2026-06-09 (cont.) — Rung 0 built + threshold sweep overfits (→ [[Trading Strategies]])
+
+- **Built rung 0** (`trader.strategy.rung0`) — the per-token state machine (enter on breakout, let
+  winners run, exit on rollover, no-FOMO cooldown, dead-zone) as a stateful `run_xs_backtest`
+  weights-fn; test pins ride-runup-then-stand-aside; `eval_rung0.py` compares vs the baselines.
+- **First read (frozen TEST):** rung0 **+17.0% @ 12.3% DD** (best Sharpe 2.81, lowest turnover) vs
+  vol-top8 hold +22.5% @ **34.6% (DQ)** / trend50 +25.7% @ 24.1%. The discipline *works* (SIREN: held
+  one day then cash — no churn, vs RL's 8+ churn trades) — but it's **dialed too conservative**: uses
+  only ~12% of a 30% DD budget, so it leaves return on the table and doesn't beat trend50.
+- **Threshold sweep (rung 0.5) OVERFIT.** Grid-searched the 4 knobs on val, picked best val-return
+  under the gate: **+167% on val → −17% @ 44% DD on test** (blows the gate). The conservative default
+  *generalizes*; the val-greedy config detonates. **Same trap as the RL** — single-window greedy
+  tuning (policy weights *or* rule thresholds) finds the val-noise-fit point. Robust aggression needs
+  **walk-forward / multi-window** selection, not one val window. `scripts/{eval,sweep}_rung0.py`.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

@@ -249,6 +249,22 @@ exit on the rollover, then **stand aside in cash** — no churn, no FOMO re-entr
 - **Honest success criterion:** lower turnover + cleaner exits → higher OOS return at a survivable
   worst-seed drawdown vs the vol-top8 baseline. We do **not** claim entry alpha.
 
+### Built + measured (2026-06-09)
+
+Rung 0 is built (`trader.strategy.rung0`) and evaluated on the same windows + cost model as the RL:
+
+- **The discipline validates.** On the frozen **test** split: **+17.0% @ 12.3% maxDD** (best Sharpe
+  2.81, lowest turnover) vs vol-top8 hold +22.5% @ **34.6% — DQ** / trend50 +25.7% @ 24.1%. It rides
+  the runup then stands aside (SIREN: held one day, then cash — no churn). The exit + low-turnover
+  edge is real, out-of-sample.
+- **But it's too conservative** — uses only ~12% of the 30% DD budget, so it doesn't beat trend50 on
+  return. The obvious move is to spend the risk budget.
+- **Single-window threshold tuning OVERFITS** (`sweep_rung0.py`): the best val config (+167% @ 25.8%)
+  collapses to **−17% @ 44% DD** on test — the same trap as the RL. **Robust thresholds require
+  walk-forward / multi-window selection, not one val window** (`trader.sim.resample`).
+- **Status:** the conservative default is a gate-safe, generalizing baseline; robust aggression is
+  pending the walk-forward sweep. See [[Experiment Log]], [[Build Log]].
+
 ---
 
 ## Candidate strategy families
