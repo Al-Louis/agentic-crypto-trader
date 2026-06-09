@@ -262,8 +262,21 @@ Rung 0 is built (`trader.strategy.rung0`) and evaluated on the same windows + co
 - **Single-window threshold tuning OVERFITS** (`sweep_rung0.py`): the best val config (+167% @ 25.8%)
   collapses to **−17% @ 44% DD** on test — the same trap as the RL. **Robust thresholds require
   walk-forward / multi-window selection, not one val window** (`trader.sim.resample`).
-- **Status:** the conservative default is a gate-safe, generalizing baseline; robust aggression is
-  pending the walk-forward sweep. See [[Experiment Log]], [[Build Log]].
+- **Walk-forward sweep — the disciplined rules lose to vol-top8 on the tournament objective.**
+  `sweep_rung0_wf.py` scored all 144 configs across ~120 random 7-day windows (train+val), selecting
+  by P(week > +15%) at P(DQ) < 5%. It correctly **rejected the single-window overfit** (only 36/144
+  gate-safe; the aggressive `maxW 0.60` winners breach too often). But on frozen-test windows (all 0%
+  weekly DQ): **vol-top8 plain hold 15% tourney > trend50 9% > rung-0 tuned-pick 6% > rung-0 default
+  3%.** The tuned pick beat the default (robust tuning *did* help within the rule set), but the rule
+  ceiling sits **below the baseline**. **Why:** the prize rewards upside *variance* (P(a big week));
+  risk discipline suppresses variance, so it clips the fat right tail the contest pays for — the
+  discipline optimizes for *real-trading* risk-adjusted return, not the tournament objective.
+- **Verdict:** **second hypothesis to lose to vol-top8** (after RL-from-scratch). The vol-top8
+  *selection* is the edge; complexity on top hasn't beaten it *for the competition*. For the contest:
+  ship **vol-top8 + trend50** (gate-safe, bear-insured, best realistic tourney rate) or `none` for
+  max upside. The rung-0 discipline is kept as a **real-trading / risk-adjusted** asset, and the next
+  *competition* edge must come from a genuine **upside signal** (sentiment/regime), not more
+  discipline. See [[Experiment Log]], [[Build Log]].
 
 ---
 

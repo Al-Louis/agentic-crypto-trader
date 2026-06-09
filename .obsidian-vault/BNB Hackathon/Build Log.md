@@ -478,6 +478,17 @@ allocation" to a **signal-grounded, rule-first** strategy, sketched with the use
   tuning (policy weights *or* rule thresholds) finds the val-noise-fit point. Robust aggression needs
   **walk-forward / multi-window** selection, not one val window. `scripts/{eval,sweep}_rung0.py`.
 
+## 2026-06-09 (cont.) — Walk-forward sweep: discipline loses to vol-top8 on the tourney objective
+
+`sweep_rung0_wf.py` — robust multi-window selection (P(week>+15%) at P(DQ)<5% across ~120 random
+7-day windows). It **rejected the single-window overfit** (only 36/144 gate-safe) — the method works.
+But on frozen-test windows (all 0% weekly DQ): **vol-top8 hold 15% tourney > trend50 9% > rung-0
+pick 6% > default 3%.** The disciplined rules sit *below* the baseline because the prize rewards
+upside *variance* and discipline suppresses it (it's the right objective for real trading, the wrong
+one for the contest). **Second hypothesis to lose to vol-top8** (after RL-from-scratch) — the
+selection is the edge. Strategy side has converged; the open work is the **unbuilt Track-1 execution
+loop** (TWAK signing + on-chain registration — the June 16 PoC gate). See [[Trading Strategies]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
