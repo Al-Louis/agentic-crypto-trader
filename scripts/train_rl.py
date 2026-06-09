@@ -283,7 +283,7 @@ def main() -> None:
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
         token_candles=token_candles, token_trades=token_trades, universe=universe,
-        model_name=f"PPO {args.action_mode}/{args.reward_mode} ({args.timesteps:,} steps)",
+        model_name=f"PPO {args.action_mode}/{args.reward_mode} s{args.seed} ({args.timesteps:,} steps)",
         action_mode=args.action_mode, regime=args.eval_split,
         timestamp=datetime.now(timezone.utc).isoformat())
 
