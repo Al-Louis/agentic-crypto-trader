@@ -178,7 +178,12 @@ class PortfolioEnv:
         # re-rank the traded set for the NEXT step (after info, so it describes the step just traded;
         # before _obs, so the next observation/action target the fresh universe)
         if self.rerank_every and not done and self.step_count % self.rerank_every == 0:
-            self._rerank()
+            for t, (trade, c) in self._rerank().items():  # record forced rotation-sells as markers
+                info["trades_usd"][t] = info["trades_usd"].get(t, 0.0) + trade
+                info["trade_fees"][t] = info["trade_fees"].get(t, 0.0) + c
+                info["weights"][t] = 0.0                   # exited to cash on rotation
+                info["cost"] += c
+                info["turnover"] += abs(trade)
         return self._obs(), float(reward), bool(done), info
 
     # -- pieces -------------------------------------------------------------
@@ -187,23 +192,29 @@ class PortfolioEnv:
         win = self.returns.iloc[max(at - self.warmup, 0):at]
         return list(win.std().sort_values(ascending=False).head(self.k).index)
 
-    def _rerank(self) -> None:
+    def _rerank(self) -> dict:
         """Re-pick the vol-top-k for the next step; liquidate names leaving the universe to cash,
         carry over retained names' position/basis/peak, start entrants flat. Keeps the positional
-        slot-map pinned to the *current* vol leaders instead of a stale episode-start snapshot."""
+        slot-map pinned to the *current* vol leaders instead of a stale episode-start snapshot.
+
+        Returns the forced rotation-sells `{token: (trade_usd<0, fee)}` so the caller can record them
+        as markers — else per-token PnL/turnover/fees wouldn't reconcile with the equity curve."""
         new_tokens = self._pick_universe(self.i)
         if new_tokens == self.tokens:
-            return
+            return {}
+        liq: dict = {}
         for t in self.tokens:                             # sell anything dropping out → cash
             if t not in new_tokens and abs(float(self.pos[t])) >= 1.0:
                 v = float(self.pos[t])
                 c = amm_cost_usd(-v, self.liquidity.get(t, 0.0), self.lp_fee_bps, self.gas_usd)
                 self.cash += v - c
+                liq[t] = (-v, c)                          # a full forced sell of the position
         self.pos = self.pos.reindex(new_tokens).fillna(0.0)
         self.basis = self.basis.reindex(new_tokens).fillna(0.0)
         self.peak_ret = self.peak_ret.reindex(new_tokens).fillna(0.0)
         self.tokens = new_tokens
         self.equity = float(self.pos.sum() + self.cash)
+        return liq
 
     def _target_fracs(self, action) -> pd.Series:
         """Map an action to per-token target fractions (Σ ≤ 1, remainder cash)."""
