@@ -419,6 +419,29 @@ re-ranked runs (**reconciliation gap $3,467**). Headline return/DD/Sharpe were *
   double-counts, weight/position conservation. **Plan: a conservation/invariant audit suite** run
   across every bundle + as synthetic-data tests, so corruption is caught automatically, not by luck.
 
+## 2026-06-09 (cont.) — Integrity audit finds (and fixes) a silent data bug
+
+The integrity suite paid off immediately. `audit_bundles.py` (invariant #1, per-token PnL
+reconciliation) showed the re-rank marker bug was **not isolated** — ~13 static bundles also failed
+with $200–1700 bidirectional gaps. **Invariant #2** (`r_alt` vs candle returns, per token) found the
+cause:
+
+- **5 tokens' env return series diverged from their candle prices** — ZEC catastrophically
+  (+141.5% `r_alt` vs −31.7% candles, **+173pt**); SIREN/UB/SKYAI/Q mildly (7–20pt).
+- **Root cause: a spurious opening-bar return per token** — the feature pipeline computed each
+  series' first return against a non-existent prior price (ZEC's was a phantom +253.8%). Every other
+  bar matched the candle exactly; zeroing the first bar reconciled all five.
+- **Fix** (`6ed8412`): `load_data` zeros each token's first valid return (a return with no prior
+  price must be 0). All 20 tokens now reconcile. `audit_data.py` is the **invariant-#2 gate** (exits
+  non-zero on divergence) — run before trusting a training run.
+- **Impact is limited:** the bad bars sit at each series' start (Nov–Dec 2025), **months before the
+  val/test windows**, so the eval results (val/OOS verdicts) stand; only training's opening was
+  mildly affected. The earlier "val is partly phantom" worry was overstated.
+
+**Integrity suite status:** #1 bundle-PnL reconciliation ✅, #2 data price-consistency ✅ (both now
+gates). Still to add: cash/position conservation, fee totals, weight conservation, and the big one —
+**look-ahead / causality**.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
