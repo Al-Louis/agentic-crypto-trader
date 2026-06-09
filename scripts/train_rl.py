@@ -64,6 +64,7 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
     obs = env.reset(start=env._min_start)
     fees = trades = 0
     raw_actions, records = [], []
+    shaping = {"giveback": 0.0, "realized": 0.0, "turnover": 0.0}
     done = False
     while not done:
         norm = vecnorm.normalize_obs(obs.reshape(1, -1)) if vecnorm is not None else obs.reshape(1, -1)
@@ -74,8 +75,10 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
                         "trades_usd": info["trades_usd"], "trade_fees": info["trade_fees"]})
         fees += info["cost"]
         trades += 1 if info["cost"] > 0 else 0
+        for key in shaping:
+            shaping[key] += info[key]
     return (np.asarray(env.equity_curve, dtype=float), fees, trades, raw_actions, records,
-            list(env.tokens))
+            list(env.tokens), shaping)
 
 
 def _load_token_ohlcv(token):
@@ -165,6 +168,15 @@ def main() -> None:
     p.add_argument("--publish-target", default=None, help="default: env APENTIC_PUBLISH_TARGET")
     p.add_argument("--action-mode", default="exposure", choices=["exposure", "weights"],
                    help="exposure=scalar dial on vol-top8 (C); weights=per-token allocation (B)")
+    p.add_argument("--reward-mode", default="sharpe",
+                   choices=["sharpe", "giveback", "realized", "turnover"],
+                   help="reward shaping: sharpe=control (MTM Sharpe); giveback=penalize surrendered "
+                        "unrealized gains; realized=reward locked-in profit; turnover=penalize churn")
+    p.add_argument("--rich-obs", action="store_true",
+                   help="add per-token unrealized-gain + distance-below-recent-high observations")
+    p.add_argument("--gb-lambda", type=float, default=10.0, help="giveback penalty weight")
+    p.add_argument("--turn-lambda", type=float, default=0.5, help="turnover penalty weight")
+    p.add_argument("--realized-lambda", type=float, default=10.0, help="realized-profit reward weight")
     p.add_argument("--step-bars", type=int, default=24)
     p.add_argument("--episode-steps", type=int, default=30)
     p.add_argument("--ent-coef", type=float, default=0.2,    # post-mortem: low ent_coef → "always-wait" collapse
@@ -190,7 +202,10 @@ def main() -> None:
     train_r, val_r, test_r = time_split(returns)
     eval_r = test_r if args.eval_split == "test" else val_r    # tune on val; final verdict on test
     env_kwargs = dict(step_bars=args.step_bars, episode_steps=args.episode_steps,
-                      warmup=168, action_mode=args.action_mode, seed=args.seed)
+                      warmup=168, action_mode=args.action_mode, seed=args.seed,
+                      reward_mode=args.reward_mode, rich_obs=args.rich_obs,
+                      gb_lambda=args.gb_lambda, turn_lambda=args.turn_lambda,
+                      realized_lambda=args.realized_lambda)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id,
                    timesteps=0, total=args.timesteps)
@@ -220,7 +235,7 @@ def main() -> None:
 
     # ---- evaluate on the held-out split, build + publish the bundle ----
     write_progress(out, state="running", phase="evaluate")
-    equity, fees, trades, raw_actions, records, universe = evaluate_policy(
+    equity, fees, trades, raw_actions, records, universe, shaping = evaluate_policy(
         model, venv, eval_r, btc_close, liq, env_kwargs)
     print(f"[eval] total allocation weight: min={min(raw_actions):+.3f} "
           f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} (0 ⇒ all cash)")
@@ -261,10 +276,14 @@ def main() -> None:
     # accurate trade-level stats from the real per-token markers: the panel was counting rebalance
     # *days* as "trades" (and win/loss were empty / in $). FIFO round-trips per token, return-%.
     metrics.update(trade_stats(token_trades))
+    metrics["reward_mode"] = args.reward_mode
+    metrics["eval_giveback"] = shaping["giveback"]        # mode diagnostics for the cross-run compare
+    metrics["eval_realized_usd"] = shaping["realized"]
+    metrics["eval_turnover_usd"] = shaping["turnover"]
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
         token_candles=token_candles, token_trades=token_trades, universe=universe,
-        model_name=f"PPO {args.action_mode} ({args.timesteps:,} steps)",
+        model_name=f"PPO {args.action_mode}/{args.reward_mode} ({args.timesteps:,} steps)",
         action_mode=args.action_mode, regime=args.eval_split,
         timestamp=datetime.now(timezone.utc).isoformat())
 
@@ -276,10 +295,11 @@ def main() -> None:
     write_progress(out, state="complete", run_id=args.run_id,
                    total_return=report.total_return_pct, sharpe=report.sharpe_ratio,
                    max_drawdown=report.max_drawdown_pct, trades=trades)
-    print(f"[train_rl] {args.run_id}: return {report.total_return_pct:+.1%}, "
+    print(f"[train_rl] {args.run_id} [{args.reward_mode}]: return {report.total_return_pct:+.1%}, "
           f"Sharpe {report.sharpe_ratio:.2f}, maxDD {report.max_drawdown_pct:.1%}, "
-          f"trades {metrics['total_trades']} (over {trades} rebalance days), "
-          f"win {metrics['win_rate']:.0%}, avg win {metrics['avg_win_pct']:+.1%}")
+          f"trades {metrics['total_trades']}, win {metrics['win_rate']:.0%}, "
+          f"PF {metrics['profit_factor']:.2f}, avg win {metrics['avg_win_pct']:+.1%}, "
+          f"turnover ${shaping['turnover']:,.0f}, realized ${shaping['realized']:,.0f}")
 
 
 if __name__ == "__main__":

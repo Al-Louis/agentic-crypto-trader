@@ -36,7 +36,9 @@ class PortfolioEnv:
                  capital: float = 10_000.0, lp_fee_bps: float = DEFAULT_LP_FEE_BPS,
                  gas_usd: float = DEFAULT_GAS_USD, ema_span: int = 72, dd_soft: float = 0.15,
                  dd_gate: float = 0.30, dd_lambda: float = 2.0, sharpe_eta: float = 0.04,
-                 action_mode: str = "exposure", seed: int | None = None):
+                 action_mode: str = "exposure", reward_mode: str = "sharpe",
+                 rich_obs: bool = False, gb_lambda: float = 10.0, turn_lambda: float = 0.5,
+                 realized_lambda: float = 10.0, seed: int | None = None):
         self.returns = returns.sort_index()
         # ffill *and* bfill: no leading NaN if the panel starts before the anchor (else a NaN
         # flows into the obs at warmup and the policy emits NaN actions).
@@ -50,9 +52,17 @@ class PortfolioEnv:
         self.eta = sharpe_eta
         self.action_mode = action_mode                  # "exposure" (C, scalar) | "weights" (B, k-vector)
         self.action_dim = 1 if action_mode == "exposure" else self.k
+        # reward shaping (compared head-to-head): "sharpe"=control; "giveback"=penalize surrendered
+        # unrealized gains (learned trailing-stop); "realized"=reward locked-in profit; "turnover"=
+        # penalize churn. All hold obs + seed constant so the *reward* is the only variable.
+        self.reward_mode = reward_mode
+        self.rich_obs = bool(rich_obs) and action_mode == "weights"
+        self.gb_lambda, self.turn_lambda, self.realized_lambda = gb_lambda, turn_lambda, realized_lambda
         self.n_bars = len(self.returns)
-        # weights mode needs per-token obs (3 each: recent return, vol, current weight) + 2 market
-        self.obs_dim = N_OBS if action_mode == "exposure" else 3 * self.k + 2
+        # weights mode: per-token obs (recent return, vol, current weight) + 2 market; rich_obs adds
+        # 2 more per token (unrealized gain since entry, distance below recent high) → profit-taking info
+        per_tok = 5 if self.rich_obs else 3
+        self.obs_dim = N_OBS if action_mode == "exposure" else per_tok * self.k + 2
         self.rng = np.random.default_rng(seed)
 
         self._min_start = warmup
@@ -70,6 +80,8 @@ class PortfolioEnv:
         win = self.returns.iloc[self.start - self.warmup:self.start]   # causal universe pick
         self.tokens = list(win.std().sort_values(ascending=False).head(self.k).index)
         self.pos = pd.Series(0.0, index=self.tokens)
+        self.basis = pd.Series(0.0, index=self.tokens)   # cost basis (USD invested) per held token
+        self.peak_ret = pd.Series(0.0, index=self.tokens)  # high-water unrealized return since last trade
         self.cash = self.equity = self.peak = self.capital
         self.exposure = 0.0
         self.step_count = 0
@@ -83,16 +95,27 @@ class PortfolioEnv:
         eq_start = float(self.pos.sum() + self.cash)
         decision_time = int(self.returns.index[self.i])  # bar timestamp at this rebalance
 
-        cost = 0.0                                        # rebalance, charging AMM cost on turnover
+        cost = realized = turnover = 0.0                  # rebalance, charging AMM cost on turnover
         trades_usd: dict = {}
         trade_fees: dict = {}
         for t in self.tokens:
             trade = float(fracs[t]) * eq_start - float(self.pos[t])
             if abs(trade) >= 1.0:
                 c = amm_cost_usd(trade, self.liquidity.get(t, 0.0), self.lp_fee_bps, self.gas_usd)
+                v = float(self.pos[t])
+                if trade > 0:                             # buy: add to cost basis
+                    self.basis[t] += trade
+                else:                                     # sell: realize the proportional gain, shrink basis
+                    f = min(1.0, -trade / v) if v > 0 else 0.0
+                    realized += f * (v - float(self.basis[t]))   # locked-in PnL on the sold fraction
+                    self.basis[t] *= (1.0 - f)
                 self.cash -= trade + c
                 self.pos[t] += trade
+                # re-anchor the high-water mark to the post-trade unrealized return (so adding/trimming
+                # never registers as a "giveback"; only price decline on a *held* position does)
+                self.peak_ret[t] = self.pos[t] / self.basis[t] - 1.0 if self.basis[t] > 1e-9 else 0.0
                 cost += c
+                turnover += abs(trade)
                 trades_usd[t] = trade                     # +buy / −sell, for per-token markers
                 trade_fees[t] = c
         self.exposure = float(fracs.sum())
@@ -102,16 +125,31 @@ class PortfolioEnv:
         seg = self.returns.iloc[self.i + 1:end + 1].reindex(columns=self.tokens).fillna(0.0).to_numpy()
         if len(seg):
             vals = self.pos.to_numpy() * np.cumprod(1.0 + seg, axis=0)   # [bars × k]
+            tok_high = vals.max(axis=0)                   # intra-step per-token high (quantity fixed)
             eq_path = vals.sum(axis=1) + self.cash
             self.pos = pd.Series(vals[-1], index=self.tokens)
             eq_new = float(eq_path[-1])
             self.peak = max(self.peak, float(eq_path.max()))
             trough = float(eq_path.min())
         else:
+            tok_high = self.pos.to_numpy()
             eq_new = float(self.pos.sum() + self.cash)
             self.peak = max(self.peak, eq_new)
             trough = eq_new
         self.i = end
+
+        # giveback: unrealized gain surrendered from each held position's high-water mark, weighted by
+        # position size. Held quantity is fixed across the step, so this is purely price-driven — a
+        # learned trailing-stop signal that *selling* (the agent's choice) never triggers.
+        basis = self.basis.to_numpy()
+        safe = basis > 1e-9
+        denom = np.where(safe, basis, 1.0)
+        end_ret = np.where(safe, self.pos.to_numpy() / denom - 1.0, 0.0)
+        high_ret = np.where(safe, tok_high / denom - 1.0, 0.0)
+        peak = np.maximum(self.peak_ret.to_numpy(), high_ret)
+        self.peak_ret = pd.Series(peak, index=self.tokens)
+        w = self.pos.to_numpy() / (eq_new if eq_new > 0 else 1.0)
+        giveback = float(np.sum(w * np.clip(peak - end_ret, 0.0, None)))
 
         step_ret = eq_new / eq_start - 1.0 if eq_start > 0 else 0.0
         self.equity = eq_new
@@ -120,10 +158,17 @@ class PortfolioEnv:
         self.equity_curve.append(eq_new)
 
         reward = self._dsr(step_ret) - self.dd_lambda * self._dd_penalty(dd)
+        if self.reward_mode == "giveback":               # penalize riding a winner back down
+            reward -= self.gb_lambda * giveback
+        elif self.reward_mode == "realized" and eq_start > 0:   # reward banking the profit
+            reward += self.realized_lambda * (realized / eq_start)
+        elif self.reward_mode == "turnover" and eq_start > 0:   # penalize the churn (PF-0.38 bleed)
+            reward -= self.turn_lambda * (turnover / eq_start)
         self.step_count += 1
         done = (self.step_count >= self.episode_steps or self.i >= self.n_bars - 1 or eq_new <= 0)
         info = {"equity": eq_new, "drawdown": dd, "exposure": self.exposure, "cost": cost,
                 "step_return": step_ret, "time": decision_time,
+                "giveback": giveback, "realized": realized, "turnover": turnover,
                 "weights": {t: float(fracs[t]) for t in self.tokens},
                 "trades_usd": trades_usd, "trade_fees": trade_fees}
         return self._obs(), float(reward), bool(done), info
@@ -182,5 +227,11 @@ class PortfolioEnv:
                 rec = float((1.0 + self.returns.iloc[w0:i + 1][t].fillna(0.0)).prod() - 1.0)
                 tvol = float(win[t].std()) if len(win) > 1 else 0.0
                 feats += [rec, tvol, float(self.pos[t]) / eq]
+                if self.rich_obs:                          # profit-taking info: how much gain it holds,
+                    b = float(self.basis[t])               # and how far the token is below its recent high
+                    ur = float(self.pos[t]) / b - 1.0 if b > 1e-9 else 0.0
+                    pr = (1.0 + win[t].fillna(0.0)).cumprod()
+                    dh = float(pr.iloc[-1] / pr.max() - 1.0) if len(pr) else 0.0
+                    feats += [ur, dh]
             obs = [*feats, btc_trend, dd]
         return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
