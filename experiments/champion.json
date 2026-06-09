@@ -1,17 +1,24 @@
 {
   "champion": {
-    "mode": "turnover",
-    "by_legal_mean": true,
-    "dd_gate": 0.3,
-    "mean_return": 1.2652973749924328,
-    "mean_maxdd": 0.2964128938050633,
-    "worst_maxdd": 0.41091233319072334,
-    "timesteps": 100000,
-    "git": null,
-    "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode turnover --rich-obs --eval-split val --timesteps 100000 --n-envs 6 --seed <0|1|2>   (defaults: ent_coef 0.2, lr 3e-4, step_bars 24)"
+    "n": 3,
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "mean_return": 1.5647601503740722,
+    "mean_maxdd": 0.2787422142167724,
+    "mean_sharpe": 4.7855461397356125,
+    "mean_pf": 2.4285678247478812,
+    "worst_maxdd": 0.3783978260964977,
+    "timesteps": 1000000,
+    "git": "2c92a2f",
+    "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 15.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
+    "legal_mean": true,
+    "config_label": "ppo2-real-give"
   },
-  "modes": {
-    "giveback": {
+  "configs": {
+    "ppo-giveback": {
       "n": 3,
       "seeds": [
         0,
@@ -25,9 +32,10 @@
       "worst_maxdd": 0.4048402827657488,
       "timesteps": 100000,
       "git": null,
+      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-giveback-s<seed>",
       "legal_mean": true
     },
-    "realized": {
+    "ppo-realized": {
       "n": 3,
       "seeds": [
         0,
@@ -41,9 +49,10 @@
       "worst_maxdd": 0.414553970296206,
       "timesteps": 100000,
       "git": null,
+      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-realized-s<seed>",
       "legal_mean": false
     },
-    "sharpe": {
+    "ppo-sharpe": {
       "n": 3,
       "seeds": [
         0,
@@ -57,9 +66,10 @@
       "worst_maxdd": 0.4282831911761509,
       "timesteps": 100000,
       "git": null,
+      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-sharpe-s<seed>",
       "legal_mean": false
     },
-    "turnover": {
+    "ppo-turnover": {
       "n": 3,
       "seeds": [
         0,
@@ -73,6 +83,109 @@
       "worst_maxdd": 0.41091233319072334,
       "timesteps": 100000,
       "git": null,
+      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-turnover-s<seed>",
+      "legal_mean": true
+    },
+    "ppo2-real": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 0.8309028928297888,
+      "mean_maxdd": 0.2533396544776087,
+      "mean_sharpe": 5.122008026907619,
+      "mean_pf": 1.5426446132887934,
+      "worst_maxdd": 0.2661472557319371,
+      "timesteps": 1000000,
+      "git": "2c92a2f",
+      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
+      "legal_mean": true
+    },
+    "ppo2-real-combo": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 0.8344215880631927,
+      "mean_maxdd": 0.2653802355840705,
+      "mean_sharpe": 5.153728797651625,
+      "mean_pf": 1.4532050697746894,
+      "worst_maxdd": 0.3214559284549532,
+      "timesteps": 1000000,
+      "git": "2c92a2f",
+      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 10.0 --turn-lambda 1.5 --realized-lambda 10.0 --dd-lambda 4.0 --seed <0|1|2>",
+      "legal_mean": true
+    },
+    "ppo2-real-dd5": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 0.9409105643081034,
+      "mean_maxdd": 0.2645729362823503,
+      "mean_sharpe": 5.168524518762359,
+      "mean_pf": 1.5453596073611695,
+      "worst_maxdd": 0.3005811036391158,
+      "timesteps": 1000000,
+      "git": "2c92a2f",
+      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 5.0 --seed <0|1|2>",
+      "legal_mean": true
+    },
+    "ppo2-real-give": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 1.5647601503740722,
+      "mean_maxdd": 0.2787422142167724,
+      "mean_sharpe": 4.7855461397356125,
+      "mean_pf": 2.4285678247478812,
+      "worst_maxdd": 0.3783978260964977,
+      "timesteps": 1000000,
+      "git": "2c92a2f",
+      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 15.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
+      "legal_mean": true
+    },
+    "ppo2-real-turn1": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 0.6604602607666816,
+      "mean_maxdd": 0.2552099969795221,
+      "mean_sharpe": 4.7363582667727435,
+      "mean_pf": 2.410499231743665,
+      "worst_maxdd": 0.2552099969795221,
+      "timesteps": 1000000,
+      "git": "2c92a2f",
+      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 1.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
+      "legal_mean": true
+    },
+    "ppo2-real-turn3": {
+      "n": 3,
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "mean_return": 0.6611897653043513,
+      "mean_maxdd": 0.2561077947420345,
+      "mean_sharpe": 4.737017982799178,
+      "mean_pf": 2.4288141845949687,
+      "worst_maxdd": 0.2579033902670593,
+      "timesteps": 1000000,
+      "git": "2c92a2f",
+      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 3.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
       "legal_mean": true
     }
   },
