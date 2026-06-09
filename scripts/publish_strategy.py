@@ -94,23 +94,26 @@ def main():
     config.load_dotenv()
     target = config.get("APENTIC_PUBLISH_TARGET") or DEFAULT_TARGET
     dist = config.get("APENTIC_CLOUDFRONT_DIST_ID") or DEFAULT_CF
+    split = (sys.argv[1] if len(sys.argv) > 1 else "test").lower()   # "test" (default) or "val"
     from train_rl import load_data, time_split
     returns, btc, anchor, liq = load_data()
-    _, _, test_r = time_split(returns)
-    ts = returns.index.get_loc(test_r.index[0])
-    warmed = returns.iloc[ts - WARMUP:]                 # warm up on PRE-test data -> trade from day 1
-    d0, d1 = int(test_r.index[0]), int(test_r.index[-1])
-    uni = select_vol_tokens(test_r, 8)
+    train_r, val_r, test_r = time_split(returns)
+    split_r = {"test": test_r, "val": val_r}[split]
+    tag, sfx = split.upper(), ("-v4" if split == "test" else "-val")
+    loc = returns.index.get_loc(split_r.index[0])
+    warmed = returns.iloc[max(0, loc - WARMUP):]        # warm up on PRE-window data -> trade from day 1
+    d0, d1 = int(split_r.index[0]), int(split_r.index[-1])
+    uni = select_vol_tokens(split_r, 8)                 # universe ranked on the window being shown
     vol = build_volume_panel(uni, returns.index)
-    print(f"publishing TEST strategies (rung0 = intra-day event-driven; universe {uni}) -> {target}")
+    print(f"publishing {tag} strategies (rung0 = intra-day event-driven; universe {uni}) -> {target}")
     # rung-0: event-driven, evaluated EVERY hour (no daily clock); holds run untrimmed
     eq, rec, fee = run_rung0(warmed, build_rung0(warmed, tokens=uni, volume=vol), liq)
-    publish_bundle("rung0-rotation-v4", "Rung-0 rotation + sharp surge + trend gate (TEST)", eq, rec, fee,
-                   target, dist, d0, d1)
+    publish_bundle(f"rung0-rotation{sfx}", f"Rung-0 rotation + sharp surge + trend gate ({tag})",
+                   eq, rec, fee, target, dist, d0, d1)
     # baselines: daily-rebalanced by design
     for rid, name, fn in [
-            ("voltop8-test", "vol-top8 plain hold (TEST)", build_candidate(warmed, tokens=uni, overlay="none")),
-            ("trend50-test", "vol-top8 trend50 (TEST)", build_candidate(warmed, btc, tokens=uni, overlay="trend50"))]:
+            (f"voltop8-{split}", f"vol-top8 plain hold ({tag})", build_candidate(warmed, tokens=uni, overlay="none")),
+            (f"trend50-{split}", f"vol-top8 trend50 ({tag})", build_candidate(warmed, btc, tokens=uni, overlay="trend50"))]:
         eqb, recb, feeb = run_instrumented(warmed, fn, liq)
         publish_bundle(rid, name, eqb, recb, feeb, target, dist, d0, d1)
 
