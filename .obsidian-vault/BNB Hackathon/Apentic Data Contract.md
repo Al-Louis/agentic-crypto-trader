@@ -26,6 +26,8 @@ self-contained summary for the frontend's **overview / leaderboard screen**. Fet
   champion_criterion: "…",                              // how `champion` was chosen
   configs: [ {                                          // sorted by mean_return desc
      config_label, timesteps, n, seeds:[…],
+     split,                 // "val" = tuning window; "test" = frozen OOS verdict — DON'T compare across
+     baseline,              // this config's own split baseline (val and test differ — never share a column)
      mean_return, mean_maxdd, worst_maxdd, mean_sharpe, mean_pf,
      legal_mean,            // mean DD under the gate
      gate_safe_worst,       // WORST seed under the gate — the deployment-honest badge

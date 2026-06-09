@@ -82,6 +82,7 @@ def main():
             "run_id": rid,
             "config_label": sm.group(1) if sm else rid,
             "mode": prov.get("reward_mode") or m.get("reward_mode", "?"),
+            "split": prov.get("eval_split", "val"),       # val = tuning; test = frozen OOS verdict
             "seed": prov.get("seed", int(sm.group(2)) if sm else None),
             "timesteps": steps,
             "git": prov.get("git_commit"),
@@ -134,13 +135,16 @@ def main():
 
     def cfg_card(label, v):
         runs_d = sorted(by_cfg[label], key=lambda r: r["seed"] if r["seed"] is not None else -1)
+        cfg_base = next((r["baseline"] for r in runs_d if r["baseline"] is not None), None)
         return {
             "config_label": label, "timesteps": v["timesteps"], "n": v["n"], "seeds": v["seeds"],
+            "split": runs_d[0]["split"] if runs_d else "val",   # val=tuning, test=frozen OOS verdict
+            "baseline": cfg_base,                               # this config's own split baseline
             "mean_return": v["mean_return"], "mean_maxdd": v["mean_maxdd"],
             "worst_maxdd": v["worst_maxdd"], "mean_sharpe": v["mean_sharpe"], "mean_pf": v["mean_pf"],
             "legal_mean": v["legal_mean"],
             "gate_safe_worst": v["worst_maxdd"] is not None and v["worst_maxdd"] < args.dd_gate,
-            "beats_baseline": baseline_ret is not None and v["mean_return"] > baseline_ret,
+            "beats_baseline": cfg_base is not None and v["mean_return"] > cfg_base,
             "git": v["git"], "reproduce": v["reproduce"],
             "seeds_detail": [{"seed": r["seed"], "return": r["return"], "maxdd": r["maxdd"],
                               "sharpe": r["sharpe"], "pf": r["pf"], "run_id": r["run_id"]}
