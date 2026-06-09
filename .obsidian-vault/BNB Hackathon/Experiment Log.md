@@ -36,8 +36,12 @@ drawdown** — a mean under the gate with a worst seed over it is *not* yet comp
 
 ## Current champion
 
-**`turnover`** — best mean return among configs whose **mean** drawdown clears the gate.
-Provisional: its *worst* seed still breaches (see standings). Reproduce: `champion.json`.
+- **Deployment-honest (worst-seed under gate): `ppo2-real`** — realized engine, 1M steps, no extra
+  brake. **+83.1% @ all 3 seeds under 30% DD** (worst 26.6%), Sharpe 5.12. The trustworthy pick.
+- **Highest mean return (mean-legal, but tail-risky): `ppo2-real-give`** — +156.5% @ 27.9% mean DD,
+  but worst seed breaches at 37.8%. `champion.json` records this one (the build_ledger rule is
+  still mean-DD); **recommendation: tighten the rule to worst-seed**, which makes `ppo2-real`
+  official. Reproduce commands: `experiments/champion.json`.
 
 ## Standings — Reward-Shaping Sweep #1
 
@@ -66,11 +70,61 @@ Provisional: its *worst* seed still breaches (see standings). Reproduce: `champi
   *reliably* survives the gate across seeds. For a one-shot live run we need comfortable margin,
   not a mean grazing the line.
 
+## Standings — Reward-Shaping Sweep #2 (1M-step composite frontier)
+
+- **Config:** `composite` reward (realized engine + brakes by lambda), `weights`, `--rich-obs`,
+  **1M timesteps**, `val`, seeds {0,1,2}. Provenance-stamped (≈ commit `2c92a2f`).
+- **Baseline (same window):** +78.7%.
+
+| config | brake | mean ret | mean DD | worst-seed DD | Sharpe | worst-seed legal? |
+|--------|-------|----------|---------|---------------|--------|------|
+| real-give | giveback 15 | **+156.5%** | 27.9% | 37.8% | 4.79 | ❌ tail-risky |
+| real-dd5 | dd-penalty 5 | +94.1% | 26.5% | 30.1% | 5.17 | ❌ (barely) |
+| real-combo | all three | +83.4% | 26.5% | 32.1% | 5.15 | ❌ |
+| **real** ⭐ | none | +83.1% | 25.3% | **26.6%** | 5.12 | ✅ |
+| real-turn3 | turnover 3 | +66.1% | 25.6% | **25.8%** | 4.74 | ✅ |
+| real-turn1 | turnover 1 | +66.0% | 25.5% | **25.5%** | 4.74 | ✅ |
+
+### Headline finding — more training regularizes the engine (the +198% was froth)
+
+`ppo-realized`@100k vs `ppo2-real`@1M are the **identical reward** — only training length differs:
+
+| | return | worst-seed DD | Sharpe |
+|--|--------|---------------|--------|
+| realized @ 100k | +198.2% | 41.5% | 4.75 |
+| **real @ 1M** | +83.1% | **26.6%** | **5.12** |
+
+More training **halved the return but slashed the drawdown and raised the Sharpe.** The +198% was
+an **undertrained, high-variance** policy making wild concentrated bets that landed on this window —
+froth that looks like genius and dies in production. At convergence the same reward yields a calmer,
+**gate-safe, higher-Sharpe** policy. The ledger caught this on its first comparison; without it we'd
+have chased the mirage.
+
+- **Best deployment pick:** `ppo2-real` (+83.1%, all seeds <30% DD). The engine at full training
+  needs no extra brake.
+- **`real-give`** is the interesting lever — the giveback brake *raised* mean return over the bare
+  engine (+156% vs +83%) at low mean DD, but its worst seed breaches (37.8%): buys return with tail
+  risk. Tunable, not yet one-shot-safe.
+- **Sobering:** at convergence the gate-safe configs (+66–94%) sit ~*at* the +78.7% baseline; only
+  tail-risky `real-give` clearly beats it. And this is still **val** (the tuning window). The earlier
+  "RL decisively beats baseline" softens. **OOS is now the decisive question.**
+
+### Fee/turnover consistency audit (resolved)
+
+Sweep-#2 fees came in far lower than Sweep #1 at *similar trade counts* — verified **consistent, not
+a bug**: **fees track dollar turnover, not trade count.** The `fee/turnover` rate is ~constant at
+**0.4–0.6%** (the AMM cost rate) across every run. The 1M policies make similar-count but **much
+smaller** trades (fee/trade $12 → $3; turnover $440k → $195k), so fees fall proportionally. Same
+convergence fingerprint as the drawdown drop — the well-trained policy is calmer *and cheaper* to
+run (smaller trades also cut slippage: effective rate 0.6% → 0.4%).
+
 ### Decided next
 
-Make the reward terms **composable** (currently mutually exclusive) and run Sweep #2 to hunt for
-**max return subject to worst-seed DD < 30%** — likely `realized`'s engine + a drawdown/turnover
-brake. Then confirm on the **frozen test split**. See [[Strategy Logic]].
+The val edge over baseline is now thin for gate-safe configs, so **OOS validation is decisive, not
+optional**: run `ppo2-real` (and `real-give`) on the **frozen test split**, then **walk-forward
+across a downturn window**. If +83% holds OOS/through a bear regime → a real, deployable edge; if it
+collapses → the val numbers were regime-luck. Also: **tighten the champion rule to worst-seed**. See
+[[Strategy Logic]], [[Market Conditions]].
 
 ## Thesis (the lens for reading all of the above)
 

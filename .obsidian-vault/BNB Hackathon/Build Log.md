@@ -345,6 +345,25 @@ backstop throughout — held conclusions, wide search.
 - Re-anchored: realized-volatility capture **is** the edge (not the S&P 500); the ~30% drawdown DQ
   gate is the only hard constraint. Stop importing tradfi skepticism / writing approaches off early.
 
+## 2026-06-09 (overnight) — Sweep #2 (1M-step composite frontier) + fee audit
+
+### Composable rewards + the 1M frontier (→ [[Experiment Log]])
+- Made the shaping terms composable (`--reward-mode composite` stacks giveback + realized +
+  turnover by their lambdas; `--dd-lambda` exposes the drawdown brake). Ran 6 configs × 3 seeds ×
+  **1M steps** overnight — realized's engine + drawdown brakes of increasing strength.
+- **Headline: more training regularizes the engine.** `realized`@100k (+198%, worst-DD 41.5%, Sh
+  4.75) vs the *identical reward* `real`@1M (+83%, worst-DD **26.6%**, Sh **5.12**). The +198% was
+  undertrained high-variance froth; convergence trades return for a gate-safe, higher-Sharpe policy.
+  **Deployment champion = `ppo2-real`** (+83.1%, all seeds <30% DD). `real-give` is higher (+156.5%)
+  but its worst seed breaches (37.8%). Sobering: gate-safe configs now sit ~*at* the +78.7% baseline
+  on **val** — so OOS/regime validation is now the decisive next step (frozen test + walk-forward).
+
+### Fee/turnover consistency audit (→ [[Experiment Log]])
+- Sweep-#2 fees far lower at similar trade counts → verified **fees track dollar turnover, not trade
+  count** (rate ~constant 0.4–0.6% = the AMM cost). 1M policies trade similar-count but **smaller**
+  (fee/trade $12 → $3; turnover $440k → $195k). Same convergence fingerprint as the DD drop — the
+  trained policy is calmer *and* cheaper (smaller trades cut slippage, 0.6% → 0.4%). Not a bug.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
