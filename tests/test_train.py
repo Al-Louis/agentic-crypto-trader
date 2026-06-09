@@ -93,3 +93,15 @@ def test_fetch_artifact_and_derive_from_local_bundle(tmp_path):
     baseline, days = derive_baseline_and_days(base, "zec-ema168-b0.04")
     assert abs(baseline - (-0.5)) < 1e-9   # 5/10 - 1
     assert abs(days - 3.0) < 1e-9
+
+
+# ---- MCP loop tool ----------------------------------------------------------
+def test_mcp_list_experiments_data(tmp_path):
+    from trader.mcp_server.server import list_experiments_data
+    reg = Registry(tmp_path / "experiments")
+    reg.register(C.demo_config("ZEC"))
+    reg.record("exp-001", run_id="zec-x", diagnosis={"verdict": "fail", "failed": ["activity_ok"]})
+    out = list_experiments_data(tmp_path / "experiments")
+    assert out["experiments"] == [{
+        "id": "exp-001", "config": C.demo_config("ZEC"), "run_id": "zec-x",
+        "parent_id": None, "verdict": "fail", "failed": ["activity_ok"]}]

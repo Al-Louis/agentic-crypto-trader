@@ -179,6 +179,30 @@ CloudFront** over its own internet (no tailnet haul-back). Verified at
   subdomain; SimpleCORS already allows it). Then this same path serves real RL training runs — the
   telemetry half is done.
 
+### ✅ Frontend live + training-loop machinery (2026-06-09)
+
+- **Frontend wired:** `PUBLIC_APENTIC_DATA=https://data.alexlouis.dev`; the dashboard renders
+  published runs. **Multi-run verified** — HUMA + ZEC both in the manifest after sequential
+  dispatches (manifest merge + CloudFront invalidation both correct).
+- **Loop machinery (autonomy Level B), scaffolded on the demo before the RL env** — the
+  near-autonomous train → diagnose → tune cycle the user envisions:
+  - `trader.train`: **config** (RL-extensible dicts + stable key), **registry** (JSON
+    experiment store with config → run → result **lineage**), **diagnose** (deterministic
+    gates — drawdown DQ, positive Sharpe, fee drag, beats-baseline, ≥1-trade/day — the honest
+    "did it actually improve?" so the loop can't chase a reward-hacked run).
+  - `trader.train.loop.run_iteration` + `scripts/train_loop.py`: register → dispatch
+    (`remote_train`) → fetch the **published** bundle from the CDN (not the tailnet) → derive
+    baseline+days from it → diagnose → record. Proven end-to-end: a HUMA `ema120` config
+    dispatched, published, fetched, diagnosed **FAIL** with all 5 gates active.
+  - MCP **analysis tools** (🟢 READ): `list_experiments`, `experiment` (+lineage),
+    `diagnose_run`. Dispatch stays on the CLI until it gains a background variant for long runs.
+  - **Autonomy decision:** Level **B** now (mechanical loop automated; reward/curriculum
+    changes Claude-proposed + human-gated; bounded hyperparam sweeps OK), Level **C**
+    (scheduled overnight) next. Guardrails: val/frozen-test split + beat-baseline criterion to
+    avoid the loop **meta-overfitting**; "improve" means beat the vol-tilt baseline OOS, not
+    training reward.
+- **+10 tests (150 total).** Next: `remote_train` background submit (long runs) + the **RL env**.
+
 ### In flight / next
 
 - ✅ **Desktop training host — stood up & verified.** Runs inside a fresh dedicated WSL2 distro
