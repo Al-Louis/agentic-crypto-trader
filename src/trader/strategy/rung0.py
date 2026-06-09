@@ -25,7 +25,7 @@ from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
 from trader.strategy.candidate import select_vol_tokens
 
 
-def build_rung0(returns: pd.DataFrame, k: int = 8, ema_span: int = 72, stop_k: float = 0.11,
+def build_rung0(returns: pd.DataFrame, k: int = 8, ema_span: int = 72, stop_k: float = 0.25,
                 cooldown: int = 48, max_weight: float = 0.25, tokens: list[str] | None = None,
                 volume: pd.DataFrame | None = None, vol_mult: float = 2.5, vol_spike: int = 24,
                 vol_base: int = 168):
