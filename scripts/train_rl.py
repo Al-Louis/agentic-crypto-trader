@@ -138,7 +138,9 @@ def main() -> None:
     print(f"[eval] total allocation weight: min={min(raw_actions):+.3f} "
           f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} (0 ⇒ all cash)")
 
-    report = PerformanceMetrics.compute_all(equity, steps_per_year=HOURS_PER_YEAR)
+    # the eval equity curve is one point per *step* (step_bars hours each), so annualize per step
+    steps_per_year = HOURS_PER_YEAR / args.step_bars
+    report = PerformanceMetrics.compute_all(equity, steps_per_year=steps_per_year)
     metrics = ap.metrics_to_frontend(report)
     metrics["total_trades"] = trades
     metrics["total_fees_paid"] = fees
