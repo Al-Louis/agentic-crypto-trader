@@ -29,19 +29,22 @@ from trader.strategy.candidate import select_vol_tokens
 
 
 def build_rung0(returns: pd.DataFrame, k: int = 8, ema_span: int = 72, breakout_n: int = 72,
-                stop_k: float = 0.11, cooldown: int = 2, max_weight: float = 0.25):
+                stop_k: float = 0.11, cooldown: int = 2, max_weight: float = 0.25,
+                tokens: list[str] | None = None):
     """Return a stateful backtester weights-fn for the rung-0 disciplined trend-hold strategy.
 
     Args:
-        returns: alt returns panel (vol-top-k universe is picked from it, matching the baseline).
+        returns: alt returns panel (vol-top-k universe is picked from it unless `tokens` is given).
         k: universe size (vol-top-k).
         ema_span: trend-EMA span in bars (72 = ~3 days hourly — catches multi-day moves, not noise).
         breakout_n: a new high over this many bars confirms entry.
         stop_k: trailing-stop fraction off the rolling peak (0.11 = exit 11% below the high).
         cooldown: rebalances to wait after an exit before re-entry is allowed.
         max_weight: per-token weight cap.
+        tokens: explicit universe (overrides vol-selection) — pass a *fixed* set when rebuilding fresh
+            state per window in a walk-forward sweep, so the universe doesn't drift between windows.
     """
-    universe = select_vol_tokens(returns, k)
+    universe = list(tokens) if tokens is not None else select_vol_tokens(returns, k)
     st = {t: {"held": False, "origin": None, "peak": None, "exit_reb": -10 ** 9,
               "prior_origin": None} for t in universe}
     counter = {"reb": 0}
