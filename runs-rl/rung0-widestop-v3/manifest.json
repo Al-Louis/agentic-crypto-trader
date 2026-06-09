@@ -1,0 +1,46 @@
+[
+  {
+    "id": "rung0-widestop-v3",
+    "model_name": "Rung-0 volume-ignition, wide stop 25% (TEST)",
+    "timestamp": "2026-06-09T22:26:43.761287+00:00",
+    "n_episodes": 1,
+    "regime": "test",
+    "symbol": "PORTFOLIO",
+    "simulation": false,
+    "kind": "portfolio",
+    "universe": [
+      {
+        "symbol": "B",
+        "slug": "B"
+      },
+      {
+        "symbol": "Q",
+        "slug": "Q"
+      },
+      {
+        "symbol": "SIREN",
+        "slug": "SIREN"
+      },
+      {
+        "symbol": "SKYAI",
+        "slug": "SKYAI"
+      },
+      {
+        "symbol": "TAC",
+        "slug": "TAC"
+      },
+      {
+        "symbol": "TAG",
+        "slug": "TAG"
+      },
+      {
+        "symbol": "UB",
+        "slug": "UB"
+      },
+      {
+        "symbol": "ZEC",
+        "slug": "ZEC"
+      }
+    ]
+  }
+]

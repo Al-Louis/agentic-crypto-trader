@@ -1,0 +1,46 @@
+[
+  {
+    "id": "rung0-intraday-v2",
+    "model_name": "Rung-0 volume-ignition, intra-day v2 (TEST)",
+    "timestamp": "2026-06-09T22:10:17.727455+00:00",
+    "n_episodes": 1,
+    "regime": "test",
+    "symbol": "PORTFOLIO",
+    "simulation": false,
+    "kind": "portfolio",
+    "universe": [
+      {
+        "symbol": "B",
+        "slug": "B"
+      },
+      {
+        "symbol": "Q",
+        "slug": "Q"
+      },
+      {
+        "symbol": "SIREN",
+        "slug": "SIREN"
+      },
+      {
+        "symbol": "SKYAI",
+        "slug": "SKYAI"
+      },
+      {
+        "symbol": "TAC",
+        "slug": "TAC"
+      },
+      {
+        "symbol": "TAG",
+        "slug": "TAG"
+      },
+      {
+        "symbol": "UB",
+        "slug": "UB"
+      },
+      {
+        "symbol": "ZEC",
+        "slug": "ZEC"
+      }
+    ]
+  }
+]

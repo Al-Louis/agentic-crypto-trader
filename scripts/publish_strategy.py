@@ -105,7 +105,7 @@ def main():
     print(f"publishing TEST strategies (rung0 = intra-day event-driven; universe {uni}) -> {target}")
     # rung-0: event-driven, evaluated EVERY hour (no daily clock); holds run untrimmed
     eq, rec, fee = run_rung0(warmed, build_rung0(warmed, tokens=uni, volume=vol), liq)
-    publish_bundle("rung0-widestop-v3", "Rung-0 volume-ignition, wide stop 25% (TEST)", eq, rec, fee,
+    publish_bundle("rung0-rotation-v4", "Rung-0 rotation + sharp surge + trend gate (TEST)", eq, rec, fee,
                    target, dist, d0, d1)
     # baselines: daily-rebalanced by design
     for rid, name, fn in [

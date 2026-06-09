@@ -1,0 +1,43 @@
+{
+  "model_name": "Rung-0 volume-ignition, intra-day (TEST)",
+  "kind": "portfolio",
+  "action_mode": "rule",
+  "universe": [
+    {
+      "symbol": "B",
+      "slug": "B"
+    },
+    {
+      "symbol": "Q",
+      "slug": "Q"
+    },
+    {
+      "symbol": "SIREN",
+      "slug": "SIREN"
+    },
+    {
+      "symbol": "SKYAI",
+      "slug": "SKYAI"
+    },
+    {
+      "symbol": "TAC",
+      "slug": "TAC"
+    },
+    {
+      "symbol": "TAG",
+      "slug": "TAG"
+    },
+    {
+      "symbol": "UB",
+      "slug": "UB"
+    },
+    {
+      "symbol": "ZEC",
+      "slug": "ZEC"
+    }
+  ],
+  "regime": "test",
+  "n_episodes": 1,
+  "indicators_used": [],
+  "available_indicators": []
+}

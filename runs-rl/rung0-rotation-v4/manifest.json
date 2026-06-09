@@ -1,0 +1,46 @@
+[
+  {
+    "id": "rung0-rotation-v4",
+    "model_name": "Rung-0 rotation + sharp surge + trend gate (TEST)",
+    "timestamp": "2026-06-09T23:10:23.722354+00:00",
+    "n_episodes": 1,
+    "regime": "test",
+    "symbol": "PORTFOLIO",
+    "simulation": false,
+    "kind": "portfolio",
+    "universe": [
+      {
+        "symbol": "B",
+        "slug": "B"
+      },
+      {
+        "symbol": "Q",
+        "slug": "Q"
+      },
+      {
+        "symbol": "SIREN",
+        "slug": "SIREN"
+      },
+      {
+        "symbol": "SKYAI",
+        "slug": "SKYAI"
+      },
+      {
+        "symbol": "TAC",
+        "slug": "TAC"
+      },
+      {
+        "symbol": "TAG",
+        "slug": "TAG"
+      },
+      {
+        "symbol": "UB",
+        "slug": "UB"
+      },
+      {
+        "symbol": "ZEC",
+        "slug": "ZEC"
+      }
+    ]
+  }
+]

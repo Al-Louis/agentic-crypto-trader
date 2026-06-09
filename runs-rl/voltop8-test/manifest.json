@@ -1,0 +1,46 @@
+[
+  {
+    "id": "voltop8-test",
+    "model_name": "vol-top8 plain hold (TEST)",
+    "timestamp": "2026-06-09T23:10:34.262149+00:00",
+    "n_episodes": 1,
+    "regime": "test",
+    "symbol": "PORTFOLIO",
+    "simulation": false,
+    "kind": "portfolio",
+    "universe": [
+      {
+        "symbol": "B",
+        "slug": "B"
+      },
+      {
+        "symbol": "Q",
+        "slug": "Q"
+      },
+      {
+        "symbol": "SIREN",
+        "slug": "SIREN"
+      },
+      {
+        "symbol": "SKYAI",
+        "slug": "SKYAI"
+      },
+      {
+        "symbol": "TAC",
+        "slug": "TAC"
+      },
+      {
+        "symbol": "TAG",
+        "slug": "TAG"
+      },
+      {
+        "symbol": "UB",
+        "slug": "UB"
+      },
+      {
+        "symbol": "ZEC",
+        "slug": "ZEC"
+      }
+    ]
+  }
+]

@@ -24,8 +24,8 @@ import pandas as pd  # noqa: E402
 from train_rl import build_volume_panel, load_data, time_split  # noqa: E402
 from trader.strategy.candidate import select_vol_tokens  # noqa: E402
 
-WARMUP, EMA, STOP, COOL, VMULT, VSPK, VBASE = 168, 72, 0.25, 48, 2.5, 24, 168
-RUN_ID = "rung0-widestop-v3"
+WARMUP, EMA, STOP, COOL, VMULT, VSPK, VBASE, VFAST = 168, 72, 0.25, 48, 2.5, 24, 168, 4
+RUN_ID = "rung0-rotation-v4"
 
 
 def candle_closes(token):
@@ -53,10 +53,12 @@ def replay(warmed, t, vol):
         if t in vol.columns:
             v = vol[t].loc[:idx[i]].to_numpy()
             if len(v) > VBASE:
-                recent, base = v[-VSPK:].mean(), v[-VBASE:-VSPK].mean()
+                recent, base = v[-VFAST:].mean(), v[-VBASE:-VFAST].mean()   # sharp surge window
                 ratio = recent / base if base > 0 else float("nan")
                 spike = base > 0 and recent >= VMULT * base
         rising = i >= VSPK and price > float(px.iloc[i - VSPK])
+        e_prev = float(ema.iloc[i - VFAST]) if i >= VFAST else e
+        trend = price > e and e >= e_prev                                  # above a rising EMA
         cooled = (bar - exit_reb) >= COOL
         reclaimed = prior is None or price > prior
         act, stop_hit, ema_hit = "-", False, False
@@ -68,9 +70,9 @@ def replay(warmed, t, vol):
                 act = "SELL(stop)" if stop_hit else "SELL(ema)"
             else:
                 act = "hold"
-        elif spike and rising and cooled and reclaimed:
+        elif spike and rising and trend and cooled and reclaimed:
             held, origin, peak, act = True, price, price, "BUY"
-        rows[i_now] = dict(px=price, ema=e, ratio=ratio, spike=spike, rising=rising,
+        rows[i_now] = dict(px=price, ema=e, ratio=ratio, spike=spike, rising=rising, trend=trend,
                            cooled=cooled, reclaimed=reclaimed, prior=prior, st=held, act=act)
         bar += 1
     return rows
@@ -88,7 +90,7 @@ def trace(warmed, vol, token, start, end, note=""):
     c0 = next((cnd[ts] for ts in win if ts in cnd), None)
     print(f"\n== {token}  {start:%b %d %H:%M} - {end:%b %d %H:%M} UTC  {note} ==")
     print(f"  {'time':14}{'cndl$':>9}{'cndD%':>7}{'pxD%':>7}{'volX':>6}"
-          f"{'spk':>4}{'ris':>4}{'cool':>5}{'rec':>4}{'st':>4}  act")
+          f"{'spk':>4}{'ris':>4}{'trd':>4}{'cool':>5}{'rec':>4}{'st':>4}  act")
     for ts in win:
         r = rows[ts]
         c = cnd.get(ts)
@@ -98,8 +100,8 @@ def trace(warmed, vol, token, start, end, note=""):
         when = dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%b%d %H:%M")
         print(f"  {when:14}{cs:>9}{cd:>7}{pd_:>7}{r['ratio']:>6.1f}"
               f"{'Y' if r['spike'] else '.':>4}{'Y' if r['rising'] else '.':>4}"
-              f"{'Y' if r['cooled'] else '.':>5}{'Y' if r['reclaimed'] else '.':>4}"
-              f"{'H' if r['st'] else '.':>4}  {r['act']}")
+              f"{'Y' if r['trend'] else '.':>4}{'Y' if r['cooled'] else '.':>5}"
+              f"{'Y' if r['reclaimed'] else '.':>4}{'H' if r['st'] else '.':>4}  {r['act']}")
 
 
 def main():
