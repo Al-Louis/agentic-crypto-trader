@@ -199,6 +199,10 @@ def main() -> None:
                         "composite=stack all three by their lambdas (set a lambda to 0 to disable)")
     p.add_argument("--rich-obs", action="store_true",
                    help="add per-token unrealized-gain + distance-below-recent-high observations")
+    p.add_argument("--rung0-obs", action="store_true",
+                   help="add rung-0's per-token signals (ignite flag, volume-surge ratio, price/EMA "
+                        "cushion) to the observation (weights mode only) — train the policy WITH the "
+                        "rung-0 rules as inputs. rung-0 params are fixed; only the random window varies")
     p.add_argument("--gb-lambda", type=float, default=10.0, help="giveback penalty weight")
     p.add_argument("--turn-lambda", type=float, default=0.5, help="turnover penalty weight")
     p.add_argument("--realized-lambda", type=float, default=10.0, help="realized-profit reward weight")
@@ -231,12 +235,16 @@ def main() -> None:
     returns, btc_close, anchor, liq = load_data()
     train_r, val_r, test_r = time_split(returns)
     eval_r = test_r if args.eval_split == "test" else val_r    # tune on val; final verdict on test
+    volume = None
+    if args.rung0_obs:                                         # per-token volume panel for rung-0 signals
+        volume = build_volume_panel(list(returns.columns), returns.index)
+        print(f"[rung0-obs] built volume panel: {volume.shape[1]} tokens x {volume.shape[0]} bars")
     env_kwargs = dict(step_bars=args.step_bars, episode_steps=args.episode_steps,
                       warmup=168, action_mode=args.action_mode, seed=args.seed,
                       reward_mode=args.reward_mode, rich_obs=args.rich_obs,
                       gb_lambda=args.gb_lambda, turn_lambda=args.turn_lambda,
                       realized_lambda=args.realized_lambda, dd_lambda=args.dd_lambda,
-                      rerank_every=args.rerank_every)
+                      rerank_every=args.rerank_every, volume=volume, rung0_obs=args.rung0_obs)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id,
                    timesteps=0, total=args.timesteps)
@@ -326,12 +334,13 @@ def main() -> None:
         "ent_coef": args.ent_coef, "lr": args.lr, "eval_split": args.eval_split,
         "gb_lambda": args.gb_lambda, "turn_lambda": args.turn_lambda,
         "realized_lambda": args.realized_lambda, "dd_lambda": args.dd_lambda,
-        "rerank_every": args.rerank_every,
+        "rerank_every": args.rerank_every, "rung0_obs": args.rung0_obs,
     }
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
         token_candles=token_candles, token_trades=token_trades, universe=universe,
-        model_name=f"PPO {args.action_mode}/{args.reward_mode} s{args.seed} ({args.timesteps:,} steps)",
+        model_name=f"PPO {args.action_mode}/{args.reward_mode}{'+rung0' if args.rung0_obs else ''} "
+                   f"s{args.seed} ({args.timesteps:,} steps)",
         action_mode=args.action_mode, regime=args.eval_split,
         timestamp=datetime.now(timezone.utc).isoformat())
 

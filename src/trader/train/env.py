@@ -26,6 +26,7 @@ from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
 
 N_OBS = 6  # [btc_trend, btc_recent_return, drawdown, exposure, last_step_return, realized_vol]
 DSR_CLIP = 10.0  # the differential Sharpe is unstable when variance is tiny / a return spikes
+SURGE_CLIP, CUSHION_CLIP = 10.0, 1.0  # bound the rung-0 obs features (volume ratio, price/EMA-1)
 
 
 class PortfolioEnv:
@@ -39,6 +40,8 @@ class PortfolioEnv:
                  action_mode: str = "exposure", reward_mode: str = "sharpe",
                  rich_obs: bool = False, gb_lambda: float = 10.0, turn_lambda: float = 0.5,
                  realized_lambda: float = 10.0, rerank_every: int = 0,
+                 volume: pd.DataFrame | None = None, rung0_obs: bool = False,
+                 vol_mult: float = 2.5, vol_spk: int = 24, vol_base: int = 168, vol_fast: int = 4,
                  seed: int | None = None):
         self.returns = returns.sort_index()
         # ffill *and* bfill: no leading NaN if the panel starts before the anchor (else a NaN
@@ -63,9 +66,31 @@ class PortfolioEnv:
         # universe fixed for a whole episode goes stale — rank corr falls to ~0.3 within a week)
         self.rerank_every = int(rerank_every)
         self.n_bars = len(self.returns)
+        # rung-0 signal features (action B only): per-token [ignite, surge, cushion] precomputed once
+        # over the whole panel — causal (cumprod/rolling/shift use only past bars), scale-invariant
+        # ratios, so a global cumprod equals an episode-local one. This is "the rung-0 rules as inputs"
+        # the policy learns to allocate from. Fixed rung-0 params; only the random window varies.
+        self.rung0_obs = bool(rung0_obs) and action_mode == "weights"
+        if self.rung0_obs:
+            if volume is None:
+                raise ValueError("rung0_obs=True requires a `volume` panel aligned to returns.index")
+            vol = volume.reindex(self.returns.index).fillna(0.0)
+            px = (1.0 + self.returns.fillna(0.0)).cumprod()
+            ema = px.ewm(span=ema_span, adjust=False).mean()
+            vrec = vol.rolling(vol_fast, min_periods=1).mean()                    # sharp recent surge
+            vbase = vol.shift(vol_fast).rolling(max(vol_base - vol_fast, 1), min_periods=1).mean()
+            surge = (vrec / vbase.replace(0.0, np.nan)).fillna(0.0)
+            cushion = px / ema - 1.0                                              # price vs trend-EMA
+            rising = px / px.shift(vol_spk) - 1.0                                 # price rise over lookback
+            ema_up = ema >= ema.shift(vol_fast)
+            ignite = ((surge >= vol_mult) & (rising > 0) & (cushion > 0) & ema_up).astype(float)
+            self._r0_ignite = ignite.to_numpy()
+            self._r0_surge = surge.clip(0.0, SURGE_CLIP).to_numpy()
+            self._r0_cushion = cushion.clip(-CUSHION_CLIP, CUSHION_CLIP).to_numpy()
+            self._r0_col = {t: j for j, t in enumerate(self.returns.columns)}
         # weights mode: per-token obs (recent return, vol, current weight) + 2 market; rich_obs adds
-        # 2 more per token (unrealized gain since entry, distance below recent high) → profit-taking info
-        per_tok = 5 if self.rich_obs else 3
+        # 2 (unrealized gain, distance below recent high); rung0_obs adds 3 (ignite, surge, cushion)
+        per_tok = 3 + (2 if self.rich_obs else 0) + (3 if self.rung0_obs else 0)
         self.obs_dim = N_OBS if action_mode == "exposure" else per_tok * self.k + 2
         self.rng = np.random.default_rng(seed)
 
@@ -275,5 +300,9 @@ class PortfolioEnv:
                     pr = (1.0 + win[t].fillna(0.0)).cumprod()
                     dh = float(pr.iloc[-1] / pr.max() - 1.0) if len(pr) else 0.0
                     feats += [ur, dh]
+                if self.rung0_obs:                          # rung-0's own decision inputs, as features
+                    j = self._r0_col[t]
+                    feats += [float(self._r0_ignite[i, j]), float(self._r0_surge[i, j]),
+                              float(self._r0_cushion[i, j])]
             obs = [*feats, btc_trend, dd]
         return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
