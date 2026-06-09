@@ -37,7 +37,9 @@ class PortfolioEnv:
                  dd_gate: float = 0.30, dd_lambda: float = 2.0, sharpe_eta: float = 0.04,
                  seed: int | None = None):
         self.returns = returns.sort_index()
-        self.btc = btc_close.reindex(self.returns.index).ffill()
+        # ffill *and* bfill: no leading NaN if the panel starts before the anchor (else a NaN
+        # flows into the obs at warmup and the policy emits NaN actions).
+        self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
         self.liquidity = liquidity
         self.k, self.step_bars, self.episode_steps = k, step_bars, episode_steps
@@ -142,5 +144,6 @@ class PortfolioEnv:
         dd = (self.peak - self.equity) / self.peak if self.peak > 0 else 0.0
         port = self.returns.iloc[max(i - self.warmup, 0):i + 1][self.tokens].mean(axis=1)
         vol = float(port.std()) if len(port) > 1 else 0.0
-        return np.array([btc_trend, btc_ret, dd, self.exposure, self._last_return, vol],
-                        dtype=np.float32)
+        obs = np.array([btc_trend, btc_ret, dd, self.exposure, self._last_return, vol],
+                       dtype=np.float32)
+        return np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)   # never feed NaN to the policy
