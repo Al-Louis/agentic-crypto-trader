@@ -169,14 +169,17 @@ def main() -> None:
     p.add_argument("--action-mode", default="exposure", choices=["exposure", "weights"],
                    help="exposure=scalar dial on vol-top8 (C); weights=per-token allocation (B)")
     p.add_argument("--reward-mode", default="sharpe",
-                   choices=["sharpe", "giveback", "realized", "turnover"],
+                   choices=["sharpe", "giveback", "realized", "turnover", "composite"],
                    help="reward shaping: sharpe=control (MTM Sharpe); giveback=penalize surrendered "
-                        "unrealized gains; realized=reward locked-in profit; turnover=penalize churn")
+                        "unrealized gains; realized=reward locked-in profit; turnover=penalize churn; "
+                        "composite=stack all three by their lambdas (set a lambda to 0 to disable)")
     p.add_argument("--rich-obs", action="store_true",
                    help="add per-token unrealized-gain + distance-below-recent-high observations")
     p.add_argument("--gb-lambda", type=float, default=10.0, help="giveback penalty weight")
     p.add_argument("--turn-lambda", type=float, default=0.5, help="turnover penalty weight")
     p.add_argument("--realized-lambda", type=float, default=10.0, help="realized-profit reward weight")
+    p.add_argument("--dd-lambda", type=float, default=2.0,
+                   help="drawdown-proximity penalty weight (the brake toward the DQ gate)")
     p.add_argument("--step-bars", type=int, default=24)
     p.add_argument("--episode-steps", type=int, default=30)
     p.add_argument("--ent-coef", type=float, default=0.2,    # post-mortem: low ent_coef → "always-wait" collapse
@@ -205,7 +208,7 @@ def main() -> None:
                       warmup=168, action_mode=args.action_mode, seed=args.seed,
                       reward_mode=args.reward_mode, rich_obs=args.rich_obs,
                       gb_lambda=args.gb_lambda, turn_lambda=args.turn_lambda,
-                      realized_lambda=args.realized_lambda)
+                      realized_lambda=args.realized_lambda, dd_lambda=args.dd_lambda)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id,
                    timesteps=0, total=args.timesteps)
@@ -294,7 +297,7 @@ def main() -> None:
         "n_envs": args.n_envs, "step_bars": args.step_bars, "episode_steps": args.episode_steps,
         "ent_coef": args.ent_coef, "lr": args.lr, "eval_split": args.eval_split,
         "gb_lambda": args.gb_lambda, "turn_lambda": args.turn_lambda,
-        "realized_lambda": args.realized_lambda,
+        "realized_lambda": args.realized_lambda, "dd_lambda": args.dd_lambda,
     }
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,

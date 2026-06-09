@@ -158,11 +158,12 @@ class PortfolioEnv:
         self.equity_curve.append(eq_new)
 
         reward = self._dsr(step_ret) - self.dd_lambda * self._dd_penalty(dd)
-        if self.reward_mode == "giveback":               # penalize riding a winner back down
+        comp = self.reward_mode == "composite"           # composite: stack all terms by their lambdas
+        if comp or self.reward_mode == "giveback":        # penalize riding a winner back down
             reward -= self.gb_lambda * giveback
-        elif self.reward_mode == "realized" and eq_start > 0:   # reward banking the profit
+        if (comp or self.reward_mode == "realized") and eq_start > 0:   # reward banking the profit
             reward += self.realized_lambda * (realized / eq_start)
-        elif self.reward_mode == "turnover" and eq_start > 0:   # penalize the churn (PF-0.38 bleed)
+        if (comp or self.reward_mode == "turnover") and eq_start > 0:   # penalize the churn
             reward -= self.turn_lambda * (turnover / eq_start)
         self.step_count += 1
         done = (self.step_count >= self.episode_steps or self.i >= self.n_bars - 1 or eq_new <= 0)
