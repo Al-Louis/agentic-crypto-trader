@@ -402,6 +402,23 @@ RL-learns-allocation-from-scratch, as built, has **no generalizable edge**. Caug
   A/B on test > regularize hard > reframe RL as a *tuner on the baseline* (the baseline is what
   generalizes). Power outage mid-run; resumable runner added so OOS finished cleanly.
 
+## 2026-06-09 (cont.) — Silent re-rank accounting bug + simulation-integrity guard
+
+Caught only by reading the actual trades: BANANAS31 showed a **−$2,144 loss on a −4% price move**.
+The re-rank liquidation of a departed token updated cash but **never recorded a sell marker**, so
+per-token PnL / win-rate / profit-factor / fees didn't reconcile with the equity curve for
+re-ranked runs (**reconciliation gap $3,467**). Headline return/DD/Sharpe were *always* correct
+(equity includes the liquidations) — only per-token **attribution** was broken.
+
+- **Fix** (`1d26881`): `_rerank` returns the forced sells; `step` records them as markers. Gap
+  **$3,467 → $30**, verified via `diag_token_pnl.py` reconciliation. The A/B rerank arm re-ran clean.
+- **Guard:** the per-token-PnL-vs-equity **reconciliation check** is now the gate for this class of
+  silent accounting bug — run it on a bundle before trusting any per-token analysis.
+- **Open concern (→ trustworthy sim):** other silent integrity issues may lurk and are *not* easily
+  spotted by eye — price-series consistency (r_alt vs candles per token), look-ahead leakage, fee
+  double-counts, weight/position conservation. **Plan: a conservation/invariant audit suite** run
+  across every bundle + as synthetic-data tests, so corruption is caught automatically, not by luck.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
