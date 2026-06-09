@@ -148,6 +148,51 @@ models. A `/workflows` script can drive *train → evaluate → diagnose → ret
 clears the bar or is abandoned. Host question (a CPU-core-bound, env-stepping workload — not
 GPU) is deferred to [[Remote Capabilities]].
 
+## As-built (2026-06-09) — the loop + the exposure-overlay env
+
+The train → evaluate → diagnose **loop is built and proven end-to-end** on real hardware; the
+RL **env + trainer are built**, pending a desktop smoke run. Deliberately **simpler than the
+ported TradeSim design** — start from the validated baseline, beat it first, add complexity
+only if it earns its way in.
+
+**The loop (autonomy Level B)** — `trader.train`: `config` (RL-extensible dicts + stable key),
+`registry` (JSON experiment store with config→run→result **lineage**), `diagnose` (gates
+below), `loop.run_iteration` (dispatch → fetch the published bundle from `data.alexlouis.dev` →
+diagnose → record), `scripts/train_loop.py`. MCP read tools: `list_experiments` / `experiment`
+/ `diagnose_run`. **Gates** (the post-mortem's discipline, encoded): drawdown DQ, positive
+Sharpe, fee drag, **beats-baseline** (vs the token buy&hold / vol-tilt), ≥1-trade/day.
+"Improve" = beat the baseline **OOS**, not training reward.
+
+**The env** — `trader.train.env.PortfolioEnv` (plain numpy/pandas, torch-free so it's testable
+on the laptop; gymnasium adapter `gym_env.GymPortfolioEnv` for sb3):
+- **Action C (exposure overlay):** exposure ∈ [0,1] → `exposure/k` on each vol-top8 token
+  (universe picked causally from the warmup window). Starts from the validated vol-tilt it
+  can't underperform by construction; widens to full weights (B) later, eval/baseline
+  unchanged. *(A cross-sectional allocator — not TradeSim's single-asset `Discrete(3)`; the
+  discrete-beats-continuous finding was for single-asset entry timing, a different problem.)*
+- **Reward** (the earned shape): **differential (online) Sharpe** increment − **quadratic
+  drawdown-proximity penalty** ramping to the ~30% DQ. **AMM cost is netted into equity, NOT
+  in the reward** — exactly the post-mortem's fee-blind fix. Intra-step equity path for honest
+  drawdown; next-bar execution; no look-ahead.
+- **Obs (first cut, 6-dim):** BTC trend (vs EMA), BTC recent return, drawdown, current
+  exposure, last-step return, realized vol. *Deferred:* the 28-indicator
+  `GroupedIndicatorExtractor` — expand only if the policy plateaus for lack of signal.
+
+**The trainer** — `scripts/train_rl.py` (DESKTOP-only): time-split train/val/frozen-test, PPO
+**MlpPolicy** on **SubprocVecEnv + VecNormalize** (`n_envs ≈ cores`), eval on held-out val →
+Apentic bundle → self-publish, `progress.json` throughout for fire-and-poll
+(`remote_train.submit_background` / `poll`). *Deferred:* RecurrentPPO/LSTM + the grouped
+extractor (the converged TradeSim config) until the simple MlpPolicy is shown to beat — or
+clearly can't beat — the baseline.
+
+**Curriculum status:** the env samples random windows from the training split; **synthetic
+crash injection** (`trader.sim.crash`) to carry the bear/crash regime the ~6-month bull sample
+lacks is the next step — a *real* sampler, not cosmetic (the post-mortem's #1 lesson). The
+frozen-test split is reserved; tuning happens on validation to avoid the loop meta-overfitting.
+
+**Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
+is a valid result the `beats_baseline` gate is built to surface.
+
 ## Is RL worth it here? (candid)
 
 A single 7-day live ranking is a hostile setting for a learned policy. Both sides honestly:

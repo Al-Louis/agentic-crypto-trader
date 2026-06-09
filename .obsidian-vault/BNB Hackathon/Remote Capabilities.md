@@ -90,7 +90,11 @@ tools**, not interactive jobs — so it runs unattended on the training host and
 workflow-drivable from the principal host.
 
 - `start_training` (config → run id) spawns the run; `training_status` (run id → metrics)
-  polls progress. The host fires-and-polls rather than blocking.
+  polls progress. The host fires-and-polls rather than blocking. **As-built:**
+  `remote_train.submit_background` launches the job **detached** (`nohup` over SSH) and returns
+  immediately; `poll` reads the job's `progress.json` (terminal `state` wins) with a `kill -0`
+  liveness fallback — so an hours-long RL run never blocks the orchestrator, and the desktop
+  self-publishes (no haul-back).
 - The full **train → evaluate → diagnose** loop runs remotely: `evaluate_model` against
   held-out data, `diagnose_run` for rule-based failure-mode checks (under-random,
   over-trading, fee drag, drawdown). Internals and reward design → [[AI Training]]; backtest
@@ -177,14 +181,16 @@ where that quoting and `mkdir -p` break and `rsync` is absent; (2) the Windows-s
 runs unmodified and CPU-only torch installs cleanly.
 
 **Setup shape (keyless host):**
-- Repo cloned into the **Linux FS** at `~/agentic-crypto-trader` (*not* `/mnt/...` — cross-OS
-  file access throttles git/rsync/env-stepping). This path is `SSHExecutor.remote_workdir`.
-- venv: `pip install -e ".[data,dev,remote]"` + the **CPU torch wheel**
-  (`--index-url https://download.pytorch.org/whl/cpu`) + `stable-baselines3 sb3-contrib
-  gymnasium`. The **`remote` extra (boto3) IS now installed here** — per the publishing
-  revision above, the **job self-publishes to AWS S3 + CloudFront from the desktop** (no
-  laptop-side haul-back). Desktop `.env`: scoped AWS creds + `APENTIC_PUBLISH_TARGET=
-  s3://alexlouis-apentic-data/apentic/data` + `APENTIC_CLOUDFRONT_DIST_ID=ESSV4WVWKTQ9F`.
+- Repo cloned into the **Linux FS** at `/root/agentic-crypto-trader` (= `~`; *not* under
+  `/mnt/...` — cross-OS file access throttles git/rsync/env-stepping). This is
+  `SSHExecutor.remote_workdir`. **Update gotcha:** this clone's git `origin` is a stale-prone
+  **P:-drive mirror** (`/mnt/p/Development/Projects/agentic-crypto-trader`), not GitHub — to
+  update it: pull the P: mirror from GitHub (it has auth), then `git -C /root/… pull origin main`.
+- venv: `pip install -e ".[data,dev,remote,training]"` + the **CPU torch wheel**
+  (`--index-url https://download.pytorch.org/whl/cpu`). `remote` (boto3) self-publishes from
+  here; `training` (gymnasium + stable-baselines3 + sb3-contrib) trains PPO here. Desktop
+  `.env`: scoped AWS creds + `APENTIC_PUBLISH_TARGET=s3://alexlouis-apentic-data` +
+  `APENTIC_CLOUDFRONT_DIST_ID=E14F268NIY6WLZ` (the dedicated `data.alexlouis.dev` distribution).
 - Reachability: **Tailscale SSH** (`tailscale up --ssh`) chosen over installing
   `openssh-server` — tailscaled terminates the session (identity-based, no key files), works
   under WSL2 userspace networking, and the artifact bundle streams back as a **tar over the

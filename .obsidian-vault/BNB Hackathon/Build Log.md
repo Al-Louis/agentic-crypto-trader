@@ -203,6 +203,29 @@ CloudFront** over its own internet (no tailnet haul-back). Verified at
     training reward.
 - **+10 tests (150 total).** Next: `remote_train` background submit (long runs) + the **RL env**.
 
+### RL training stack built (2026-06-09)
+
+The full path from "dispatch a config" to "trained policy scored on the dashboard" now exists
+(detail: [[AI Training]] as-built). Deliberately simpler than the ported TradeSim design —
+beat the baseline first, add complexity only if earned.
+
+- **`trader.train.env.PortfolioEnv`** — cross-sectional **exposure-overlay** env (action C),
+  pure numpy/pandas so it's testable without torch (laptop Py3.14 has none). Action = exposure
+  ∈ [0,1] on the vol-top8; reward = **differential Sharpe − quadratic drawdown-proximity
+  penalty**, AMM cost netted into equity (not in the reward — the post-mortem's fee-blind fix);
+  causal universe + features, intra-step drawdown. **8 tests.**
+- **`gym_env.GymPortfolioEnv`** — gymnasium adapter for sb3; passes `check_env`.
+- **`remote_train` background submit** — `executor.launch`/`read_progress`/`is_alive`
+  (Local + SSH via `nohup`) + `submit_background`/`poll`. Fire-and-poll for hours-long runs;
+  status from the job's `progress.json` (terminal state wins) + liveness fallback. **+2 tests.**
+- **`scripts/train_rl.py`** (DESKTOP-only, torch) — time-split train/val/frozen-test, PPO
+  MlpPolicy on `SubprocVecEnv + VecNormalize`, eval on held-out val → Apentic bundle →
+  self-publish, `progress.json` throughout. Composes tested modules; **PPO glue pending a
+  desktop smoke run** (`--timesteps 5000`). +1 (152 total).
+- **Next:** desktop smoke-run the trainer (install `.[training]`), fix glue, then a real run →
+  `diagnose_run` scores it vs the vol-tilt baseline. Small wiring: an `rl` config kind so
+  `train_loop` dispatches `train_rl` via `submit_background`.
+
 ### In flight / next
 
 - ✅ **Desktop training host — stood up & verified.** Runs inside a fresh dedicated WSL2 distro
