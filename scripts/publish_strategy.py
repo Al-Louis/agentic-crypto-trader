@@ -67,15 +67,19 @@ def run_instrumented(returns, weights_fn, liq, capital=10_000.0):
     return pd.Series(eq, index=returns.index), records, fees
 
 
-def publish(run_id, model_name, returns, weights_fn, liq, target, dist):
+def publish(run_id, model_name, returns, weights_fn, liq, target, dist, d0, d1):
+    """`returns` includes a pre-window warmup; [d0, d1] is the window we display/score (trading
+    starts at d0 because the warmup is now PRE-window data, not carved from the window)."""
     eq, records, fees = run_instrumented(returns, weights_fn, liq)
+    eq = eq.loc[d0:d1]                                  # display only the window (drop the warmup region)
+    records = [r for r in records if d0 <= r["time"] <= d1]
+    fees = sum(sum(r["trade_fees"].values()) for r in records)
     universe = sorted({t for rec in records for t in rec["weights"]}
                       | {t for rec in records for t in rec["trades_usd"]})
     rep = PerformanceMetrics.compute_all(eq.iloc[::REBAL].to_numpy(), steps_per_year=365)
     metrics = ap.metrics_to_frontend(rep)
     metrics["total_fees_paid"] = fees
-    t0, t1 = int(returns.index[0]), int(returns.index[-1])
-    weights, candles, trades = build_portfolio_artifacts(records, universe, t0, t1)
+    weights, candles, trades = build_portfolio_artifacts(records, universe, d0, d1)
     metrics.update(trade_stats(trades))
     out = os.path.join("runs-rl", run_id)
     os.makedirs(out, exist_ok=True)
@@ -95,14 +99,17 @@ def main():
     from train_rl import load_data, time_split
     returns, btc, anchor, liq = load_data()
     _, _, test_r = time_split(returns)
+    ts = returns.index.get_loc(test_r.index[0])
+    warmed = returns.iloc[ts - WARMUP:]                 # warm up on PRE-test data -> trade from day 1
+    d0, d1 = int(test_r.index[0]), int(test_r.index[-1])
     uni = select_vol_tokens(test_r, 8)
-    print(f"publishing TEST-split strategies (universe {uni}) -> {target}")
-    publish("rung0-test", "Rung-0 disciplined trend-hold (TEST)", test_r,
-            build_rung0(test_r, tokens=uni), liq, target, dist)
-    publish("voltop8-test", "vol-top8 plain hold (TEST)", test_r,
-            build_candidate(test_r, tokens=uni, overlay="none"), liq, target, dist)
-    publish("trend50-test", "vol-top8 trend50 (TEST)", test_r,
-            build_candidate(test_r, btc, tokens=uni, overlay="trend50"), liq, target, dist)
+    print(f"publishing TEST strategies (warmed from pre-window; universe {uni}) -> {target}")
+    publish("rung0-test", "Rung-0 disciplined trend-hold (TEST)", warmed,
+            build_rung0(warmed, tokens=uni), liq, target, dist, d0, d1)
+    publish("voltop8-test", "vol-top8 plain hold (TEST)", warmed,
+            build_candidate(warmed, tokens=uni, overlay="none"), liq, target, dist, d0, d1)
+    publish("trend50-test", "vol-top8 trend50 (TEST)", warmed,
+            build_candidate(warmed, btc, tokens=uni, overlay="trend50"), liq, target, dist, d0, d1)
 
 
 if __name__ == "__main__":
