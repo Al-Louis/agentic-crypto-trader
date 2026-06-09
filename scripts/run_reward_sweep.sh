@@ -8,11 +8,11 @@
 #
 # Usage (detached, survives logout):
 #   nohup bash scripts/run_reward_sweep.sh [TIMESTEPS] ["SEEDS"] > runs-rl/sweep.log 2>&1 &
-#   # e.g.  nohup bash scripts/run_reward_sweep.sh 500000 "0 1 2" > runs-rl/sweep.log 2>&1 &
+#   # e.g.  nohup bash scripts/run_reward_sweep.sh 100000 "0 1 2" > runs-rl/sweep.log 2>&1 &
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-TIMESTEPS="${1:-500000}"
+TIMESTEPS="${1:-100000}"
 SEEDS="${2:-0 1 2}"
 MODES="sharpe giveback realized turnover"
 PY=.venv/bin/python
