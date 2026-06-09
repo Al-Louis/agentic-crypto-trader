@@ -40,6 +40,13 @@ def load_data():
         sym = os.path.basename(f)[:-len("_factor.parquet")]
         ret[sym] = pd.read_parquet(f).set_index("timestamp")["r_alt"]
     returns = np.expm1(pd.DataFrame(ret).sort_index())              # log → simple
+    # the opening bar of each token has no valid prior price, so any return computed there is a data
+    # artifact (e.g. ZEC's spurious +253.8% first bar — it desynced r_alt from the candle prices by
+    # +173pt). Zero each token's first valid return → r_alt reconciles to the candles (audit #2).
+    for col in returns.columns:
+        first = returns[col].first_valid_index()
+        if first is not None:
+            returns.loc[first, col] = 0.0
     anchor = pd.read_parquet(os.path.join("data", "anchor", "BTC_USDT", "1h.parquet"))
     anchor = anchor.set_index("timestamp").sort_index()
     if anchor.index.max() > 1e12:                  # anchor is ms; factor returns are seconds — align
