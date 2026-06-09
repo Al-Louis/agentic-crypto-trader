@@ -119,6 +119,41 @@ def build_portfolio_artifacts(records, universe, t0, t1):
     return weights, token_candles, token_trades
 
 
+def trade_stats(token_trades):
+    """Per-token FIFO round-trips → trade-level metrics.
+
+    `avg_win_pct`/`avg_loss_pct` are **return fractions** (round-trip PnL ÷ entry notional,
+    consistent with `total_return_pct`), NOT dollars — fixes the misnamed $-as-% field.
+    """
+    usd, pct, n = [], [], 0
+    for marks in token_trades.values():
+        n += len(marks)
+        lots = []                                          # FIFO open buys: [price, qty, fee]
+        for m in marks:
+            price = m.get("price") or 0.0
+            if not price:
+                continue
+            qty, fee = m["usd"] / price, m.get("fee", 0.0)
+            if m["side"] == "buy":
+                lots.append([price, qty, fee])
+            elif lots:                                     # sell closes the oldest open buy
+                bp, bq, bfee = lots[0]
+                q = min(qty, bq)
+                pnl = (price - bp) * q - fee - bfee
+                usd.append(pnl)
+                pct.append(pnl / (bp * q) if bp * q else 0.0)
+                lots.pop(0) if qty >= bq else lots[0].__setitem__(1, bq - qty)
+    wins = [p for p in usd if p > 0]
+    losses = [p for p in usd if p <= 0]
+    return {
+        "total_trades": n,
+        "win_rate": len(wins) / max(len(usd), 1),
+        "profit_factor": float(sum(wins) / (abs(sum(losses)) + 1e-10)),
+        "avg_win_pct": float(np.mean([p for p in pct if p > 0])) if any(p > 0 for p in pct) else 0.0,
+        "avg_loss_pct": float(np.mean([p for p in pct if p <= 0])) if any(p <= 0 for p in pct) else 0.0,
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--timesteps", type=int, default=300_000)
@@ -222,22 +257,8 @@ def main() -> None:
         records, universe, int(eval_r.index[0]), int(eval_r.index[-1]))
 
     # accurate trade-level stats from the real per-token markers: the panel was counting rebalance
-    # *days* as "trades" (and win/loss were empty). FIFO round-trips per token, fees included.
-    from trader.sim.metrics import PerformanceMetrics as _PM
-    from trader.sim.metrics import Trade as _Trade
-    pnls, n_trades = [], 0
-    for marks in token_trades.values():
-        trs = [_Trade(side=m["side"], quantity=(m["usd"] / m["price"] if m["price"] else 0.0),
-                      price=(m["price"] or 0.0), fee=m.get("fee", 0.0)) for m in marks]
-        n_trades += len(trs)
-        pnls += _PM._compute_trade_pnls(trs)
-    wins = [p for p in pnls if p > 0]
-    losses = [p for p in pnls if p <= 0]
-    metrics["total_trades"] = n_trades
-    metrics["win_rate"] = len(wins) / max(len(pnls), 1)
-    metrics["profit_factor"] = float(sum(wins) / (abs(sum(losses)) + 1e-10))
-    metrics["avg_win_pct"] = float(np.mean(wins)) if wins else 0.0
-    metrics["avg_loss_pct"] = float(np.mean(losses)) if losses else 0.0
+    # *days* as "trades" (and win/loss were empty / in $). FIFO round-trips per token, return-%.
+    metrics.update(trade_stats(token_trades))
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
         token_candles=token_candles, token_trades=token_trades, universe=universe,
@@ -255,7 +276,8 @@ def main() -> None:
                    max_drawdown=report.max_drawdown_pct, trades=trades)
     print(f"[train_rl] {args.run_id}: return {report.total_return_pct:+.1%}, "
           f"Sharpe {report.sharpe_ratio:.2f}, maxDD {report.max_drawdown_pct:.1%}, "
-          f"trades {n_trades} (over {trades} rebalance days), win {metrics['win_rate']:.0%}")
+          f"trades {metrics['total_trades']} (over {trades} rebalance days), "
+          f"win {metrics['win_rate']:.0%}, avg win {metrics['avg_win_pct']:+.1%}")
 
 
 if __name__ == "__main__":

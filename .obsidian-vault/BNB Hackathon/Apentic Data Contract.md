@@ -25,7 +25,7 @@ plus per-token behaviour. Per `<run_id>/`:
 
 | File | Shape | Use |
 |------|-------|-----|
-| `metrics.json` | `MetricsReport` | portfolio risk panel (return, Sharpe, maxDD, fees…) |
+| `metrics.json` | `MetricsReport` | portfolio risk panel. **All `*_pct` fields are fractions** (×100 for display), incl. `avg_win_pct`/`avg_loss_pct` (per-round-trip *return*, not $); `total_trades` = individual trades (not rebalance days) |
 | `equity_curve.json` | `EquityPoint[]` | portfolio NAV |
 | `weights.json` | `[{ time, weights: { SYMBOL: frac } }]` per step | **allocation-over-time** (cash = 1 − Σ). Stacked-area / heatmap. |
 | `run_info.json` | `{ model_name, kind:"portfolio", action_mode, universe:[{symbol,slug}], regime, … }` | the held universe + model meta |
