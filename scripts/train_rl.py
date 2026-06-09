@@ -140,8 +140,10 @@ def trade_stats(token_trades):
                 bp, bq, bfee = lots[0]
                 q = min(qty, bq)
                 pnl = (price - bp) * q - fee - bfee
-                usd.append(pnl)
-                pct.append(pnl / (bp * q) if bp * q else 0.0)
+                notional = bp * q
+                usd.append(pnl)                            # real $ PnL (for win_rate / profit_factor)
+                rt = pnl / notional if notional > 1e-6 else 0.0
+                pct.append(max(-1.0, min(rt, 10.0)))       # clip dust/extreme-price fee artifacts
                 lots.pop(0) if qty >= bq else lots[0].__setitem__(1, bq - qty)
     wins = [p for p in usd if p > 0]
     losses = [p for p in usd if p <= 0]
