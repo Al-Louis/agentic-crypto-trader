@@ -262,17 +262,23 @@ regime it's meant to gate on (confounds the "cash optimal" result), and `candles
 empty (no baseline gate, blank chart). Fixed (align anchor → seconds). Added the **frozen-test
 split** + a real **vol-tilt baseline head-to-head** to the trainer for honest validation.
 
-**Frozen-test verdict (3 seeds) — RL loses to the vol-tilt on every axis.** Policy returns
-**−5.8% / +10.0% / +15.6%** (seed-unstable; 2 of 3 breach the 30% DQ at 33.7% / 40.7%) vs the
-deterministic **vol-tilt(trend50): +25.7%, Sharpe 2.76, 22.0% maxDD**. So the loop's first real
-question — *can RL beat the validated baseline OOS?* — answers **no, robustly**: the simple
-strategy wins on return, Sharpe, drawdown **and** stability; the RL allocator churns (fee drag)
-and is unreliable. A **well-earned negative result**, consistent with the whole thesis (scarce
-alpha, entry timing dead, the post-mortem's bull-only breakeven). The discipline (frozen test +
-baseline gate + multi-seed) did exactly its job — it stopped a flattering-but-worse policy
-(+18% on one val window) from masquerading as progress. **Stance: the vol-tilt remains the
-strategy candidate; RL is a thoroughly-documented null.** Remaining RL lever (low EV): a
-turnover penalty to cut the fee drag — unlikely to close a 15-pt gap + the DQ breaches.
+**First frozen-test data point — NOT a verdict.** At the smallest, feature-poorest config
+(**50k steps**, **6/26 bare scalar obs, zero technical indicators**, no curriculum, one
+timeframe), the policy loses to the vol-tilt across 3 seeds: returns **−5.8% / +10.0% / +15.6%**
+(seed-unstable, 2/3 breach the 30% DQ) vs deterministic **vol-tilt(trend50): +25.7%, Sharpe
+2.76, 22.0% maxDD**. The frozen-test discipline earned its keep — it caught that the +18% val
+number was a mirage (one window + the then-dead regime signal). **But this is the *start line*
+of RL exploration, not the finish.** 50k steps is ~1% of TradeSim's converged ~5M; the obs has
+none of TradeSim's ~28 indicators + grouped-attention extractor; no staged curriculum, no
+timeframe variation. The loop pipeline exists precisely to widen this search — concluding here
+would defeat its purpose. **Exploration roadmap** (highest leverage first): (1) **richer
+observations** — fold the existing factor features (residual, β, resid_mom, R²) + technical
+indicators per token into the obs; (2) **far larger timestep budgets** (300k → 1M → 5M+, via
+overnight Level-C background runs); (3) **staged regime curriculum** + synthetic-crash injection
+(the post-mortem's #1 lesson); (4) **timeframe / rebalance-cadence** variation; (5) the
+**grouped-extractor + RecurrentPPO** architecture once features are rich; (6) **reward
+refinement** (turnover penalty for the fee drag). Frozen-test + baseline-gate stays the honesty
+backstop throughout — held conclusions, wide search.
 
 ### In flight / next
 
