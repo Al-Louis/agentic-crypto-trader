@@ -17,8 +17,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from remote_train import publish  # noqa: E402
+import importlib  # noqa: E402
+
 from trader import config  # noqa: E402
+
+publish = importlib.import_module("remote_train.publish")  # submodule, not the re-exported fn
 
 SWEEP = re.compile(r"^ppo-(sharpe|giveback|realized|turnover)-s(\d+)$")
 

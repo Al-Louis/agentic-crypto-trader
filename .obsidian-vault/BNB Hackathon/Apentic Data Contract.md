@@ -13,6 +13,32 @@ entry's `kind`.
     universe?: [{ symbol, slug }] } ]   // portfolio only
 ```
 
+## leaderboard.json — training-progress overview (top-level)
+
+Published by `scripts/build_ledger.py --publish` (separate from the per-run bundles). A
+self-contained summary for the frontend's **overview / leaderboard screen**. Fetch
+`https://data.alexlouis.dev/leaderboard.json` (no-cache; invalidated on each publish).
+
+```
+{ generated, dd_gate, totals:{ runs, configs },
+  baseline:        { name, return_pct, window },        // vol-tilt overlay, same window
+  champion:        { config_label, mean_return, mean_maxdd, worst_maxdd, mean_sharpe, reproduce, … },
+  champion_criterion: "…",                              // how `champion` was chosen
+  configs: [ {                                          // sorted by mean_return desc
+     config_label, timesteps, n, seeds:[…],
+     mean_return, mean_maxdd, worst_maxdd, mean_sharpe, mean_pf,
+     legal_mean,            // mean DD under the gate
+     gate_safe_worst,       // WORST seed under the gate — the deployment-honest badge
+     beats_baseline, git, reproduce,
+     seeds_detail: [ { seed, return, maxdd, sharpe, pf, run_id } ]   // per-seed drill-down
+  } ] }
+```
+
+All `*_return` / `*_maxdd` are **fractions** (×100 for display). Suggested render: a leaderboard
+table sorted by `mean_return`, the `champion` highlighted, a `baseline.return_pct` reference line,
+a **gate-safe badge** from `gate_safe_worst` (not `legal_mean` — worst-seed is the honest bar), and
+an expandable per-config seed breakdown from `seeds_detail`.
+
 ## Single-asset run (`kind` absent) — the demo / TradeSim-style
 Per `<run_id>/`: `trades.json` (`RoundTrip[]`), `metrics.json` (`MetricsReport`),
 `candles.json` (`CandleData[]` of the one symbol), `equity_curve.json` (`EquityPoint[]`),

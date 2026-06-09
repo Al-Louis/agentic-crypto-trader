@@ -19,12 +19,19 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.request
 from collections import defaultdict
+from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 HOST = "https://data.alexlouis.dev"
 SEEDED = re.compile(r"^(.*)-s(\d+)$")   # any seeded run: <config-label>-s<seed>
 OUT_DIR = "experiments"
+# public infra IDs (not secrets — protected by IAM creds, not obscurity); override via CLI / env
+DEFAULT_TARGET = "s3://alexlouis-apentic-data"
+DEFAULT_CF_DIST = "E14F268NIY6WLZ"
 
 
 def fetch(u):
@@ -49,6 +56,10 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--host", default=HOST)
     p.add_argument("--dd-gate", type=float, default=0.30)
+    p.add_argument("--publish", action="store_true",
+                   help="publish leaderboard.json to the Apentic data host for the frontend overview")
+    p.add_argument("--publish-target", default=None, help=f"default: env or {DEFAULT_TARGET}")
+    p.add_argument("--cloudfront-dist", default=None, help=f"default: env or {DEFAULT_CF_DIST}")
     args = p.parse_args()
 
     man = fetch(f"{args.host}/manifest.json")
@@ -118,6 +129,38 @@ def main():
     with open(os.path.join(OUT_DIR, "champion.json"), "w", encoding="utf-8") as f:
         json.dump({"champion": champion, "configs": summary, "dd_gate": args.dd_gate}, f, indent=2)
 
+    # ---- leaderboard.json: a self-contained training-progress overview for the frontend ----
+    baseline_ret = next((r["baseline"] for r in rows if r["baseline"] is not None), None)
+
+    def cfg_card(label, v):
+        runs_d = sorted(by_cfg[label], key=lambda r: r["seed"] if r["seed"] is not None else -1)
+        return {
+            "config_label": label, "timesteps": v["timesteps"], "n": v["n"], "seeds": v["seeds"],
+            "mean_return": v["mean_return"], "mean_maxdd": v["mean_maxdd"],
+            "worst_maxdd": v["worst_maxdd"], "mean_sharpe": v["mean_sharpe"], "mean_pf": v["mean_pf"],
+            "legal_mean": v["legal_mean"],
+            "gate_safe_worst": v["worst_maxdd"] is not None and v["worst_maxdd"] < args.dd_gate,
+            "beats_baseline": baseline_ret is not None and v["mean_return"] > baseline_ret,
+            "git": v["git"], "reproduce": v["reproduce"],
+            "seeds_detail": [{"seed": r["seed"], "return": r["return"], "maxdd": r["maxdd"],
+                              "sharpe": r["sharpe"], "pf": r["pf"], "run_id": r["run_id"]}
+                             for r in runs_d],
+        }
+
+    leaderboard = {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "dd_gate": args.dd_gate,
+        "totals": {"runs": len(rows), "configs": len(summary)},
+        "baseline": {"name": "vol-tilt(trend50)", "return_pct": baseline_ret, "window": "val"},
+        "champion": champion,
+        "champion_criterion": ("best mean return under the mean-DD gate; see each config's "
+                               "gate_safe_worst for the deployment-honest worst-seed view"),
+        "configs": [cfg_card(label, v) for label, v in
+                    sorted(summary.items(), key=lambda x: -x[1]["mean_return"])],
+    }
+    with open(os.path.join(OUT_DIR, "leaderboard.json"), "w", encoding="utf-8") as f:
+        json.dump(leaderboard, f, indent=2)
+
     print(f"ledger: {len(rows)} runs -> {OUT_DIR}/ledger.jsonl\n")
     print(f"{'config':22}{'n':>3}{'mean ret':>10}{'mean DD':>9}{'worst DD':>9}{'Sharpe':>8}{'legal?':>8}")
     for label, v in sorted(summary.items(), key=lambda x: -x[1]["mean_return"]):
@@ -128,6 +171,20 @@ def main():
         print(f"\nCHAMPION (best mean return under {args.dd_gate:.0%} DD gate): "
               f"{champ}  +{champion['mean_return']*100:.1f}% @ {champion['mean_maxdd']*100:.1f}% "
               f"mean DD (worst seed {(champion['worst_maxdd'] or 0)*100:.1f}%)")
+
+    print(f"\nleaderboard -> {OUT_DIR}/leaderboard.json ({len(leaderboard['configs'])} configs)")
+    if args.publish:
+        import importlib  # noqa: PLC0415
+        pub = importlib.import_module("remote_train.publish")  # the submodule, not the re-exported fn
+        from trader import config  # noqa: PLC0415
+        config.load_dotenv()
+        target = args.publish_target or config.get("APENTIC_PUBLISH_TARGET") or DEFAULT_TARGET
+        dist = args.cloudfront_dist or config.get("APENTIC_CLOUDFRONT_DIST_ID") or DEFAULT_CF_DIST
+        data = json.dumps(leaderboard, indent=2).encode()
+        pub.put_bytes(f"{target}/leaderboard.json", data, "application/json", "no-cache, max-age=0")
+        inv = pub.invalidate_cloudfront(dist, ["/leaderboard.json"]) if dist else None
+        print(f"published leaderboard.json -> {target}"
+              + (f" (+ CloudFront invalidation {inv})" if inv else ""))
 
 
 if __name__ == "__main__":
