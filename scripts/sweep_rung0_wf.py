@@ -1,4 +1,7 @@
-"""Walk-forward (multi-window) threshold sweep for rung 0 — the robust way to spend the risk budget.
+"""STALE — predates the event-driven rung0 (old daily weights-fn + no volume signal); update to
+`run_rung0` + `build_volume_panel` before re-running.
+
+Walk-forward (multi-window) threshold sweep for rung 0 — the robust way to spend the risk budget.
 
 The single-window sweep overfit (val +167% -> test -17%/44%). This instead scores each config across
 many random **7-day windows** (the competition's unit) drawn from train+val, and selects by the

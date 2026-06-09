@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from trader.strategy.rung0 import build_rung0
+from trader.strategy.rung0 import build_rung0, run_rung0
 
 
 def _runup_then_bleed(n=240):
@@ -33,29 +33,39 @@ def _runup_then_bleed(n=240):
     return returns, volume
 
 
-def _fn(returns, volume, **kw):
+def _step(returns, volume, **kw):
     return build_rung0(returns, k=1, ema_span=10, volume=volume, vol_mult=2.5, vol_spike=4,
-                       vol_base=20, **kw)
+                       vol_base=20, cooldown=8, **kw)
+
+
+def _held_timeline(step, returns, lo=30):
+    held, tl = set(), []
+    for i in range(lo, len(returns)):                 # evaluated EVERY bar (intra-day)
+        ent, exi = step(returns.iloc[: i + 1])
+        held |= set(ent)
+        held -= set(exi)
+        tl.append((i, "RUN" in held))
+    return tl
 
 
 def test_rung0_ignites_on_volume_then_stands_aside():
     returns, volume = _runup_then_bleed()
-    fn = _fn(returns, volume, stop_k=0.1, cooldown=2)
-    held = []
-    for i in range(30, len(returns), 5):              # mimic the backtester's per-rebalance calls
-        w = fn(returns.iloc[: i + 1])
-        held.append((i, float(w.get("RUN", 0.0)) if len(w) else 0.0))
-
-    assert any(w > 0 for i, w in held if 48 <= i <= 100), "must enter on the volume spike + run"
-    deadzone = [w for i, w in held if i >= 140]
-    assert all(w == 0 for w in deadzone), f"no volume spike in the dead-zone → stand aside, got {deadzone}"
+    tl = _held_timeline(_step(returns, volume, stop_k=0.1), returns)
+    assert any(h for i, h in tl if 48 <= i <= 100), "must enter on the volume spike + run"
+    assert not any(h for i, h in tl if i >= 140), "no volume spike in the dead-zone → stand aside"
 
 
 def test_rung0_no_entry_without_volume_spike():
     returns, volume = _runup_then_bleed()
     flat = volume.copy()
     flat["RUN"] = 100.0                               # remove the spike: same runup, no ignition
-    fn = _fn(returns, flat, stop_k=0.1, cooldown=2)
-    for i in range(30, len(returns), 5):
-        w = fn(returns.iloc[: i + 1])
-        assert (float(w.get("RUN", 0.0)) if len(w) else 0.0) == 0.0, "no spike → never enters"
+    tl = _held_timeline(_step(returns, flat, stop_k=0.1), returns)
+    assert not any(h for _, h in tl), "no spike → never enters"
+
+
+def test_run_rung0_event_driven_executes():
+    returns, volume = _runup_then_bleed()
+    liq = {c: 1e9 for c in returns.columns}
+    eq, records, fees = run_rung0(returns, _step(returns, volume, stop_k=0.1), liq, warmup=30)
+    assert any(rec["trades_usd"] for rec in records), "should execute at least one entry"
+    assert eq.iloc[-1] != eq.iloc[0], "equity should move once it trades"

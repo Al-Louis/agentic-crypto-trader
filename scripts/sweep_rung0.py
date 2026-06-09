@@ -1,4 +1,7 @@
-"""Rung-0.5 threshold sweep: rung-0 is dialed too conservative (uses only ~12% of a 30% DD budget).
+"""STALE — predates the event-driven rung0 (uses the old daily weights-fn + no volume signal). Update
+to `run_rung0` + `build_volume_panel` before re-running.
+
+Rung-0.5 threshold sweep: rung-0 is dialed too conservative (uses only ~12% of a 30% DD budget).
 Grid-search the four discipline knobs on VAL, pick the most aggressive config that stays under the
 gate, then VERIFY on the frozen TEST split (selection happens on val only — test is the honest read).
 
