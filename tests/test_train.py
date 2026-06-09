@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from trader.train import config as C
 from trader.train.diagnose import diagnose
+from trader.train.loop import demo_run_id, derive_baseline_and_days, fetch_artifact
 from trader.train.registry import Registry
 
 
@@ -73,3 +74,22 @@ def test_registry_lineage_root_first(tmp_path):
     b = reg.register(C.demo_config(ema=120), parent_id=a.id)
     c = reg.register(C.demo_config(ema=96), parent_id=b.id)
     assert [e.id for e in reg.lineage(c.id)] == [a.id, b.id, c.id]
+
+
+# ---- loop helpers -----------------------------------------------------------
+def test_demo_run_id():
+    assert demo_run_id(C.demo_config("ZEC", 168, 0.04)) == "zec-ema168-b0.04"
+
+
+def test_fetch_artifact_and_derive_from_local_bundle(tmp_path):
+    run = tmp_path / "zec-ema168-b0.04"
+    run.mkdir()
+    (run / "metrics.json").write_text('{"total_return_pct": -0.4}')
+    (run / "candles.json").write_text('[{"close": 10.0, "time": 1000}, {"close": 5.0, "time": 2000}]')
+    (run / "equity_curve.json").write_text('[{"time": 0}, {"time": 259200}]')  # 3 days
+    base = str(tmp_path)
+
+    assert fetch_artifact(base, "zec-ema168-b0.04", "metrics.json")["total_return_pct"] == -0.4
+    baseline, days = derive_baseline_and_days(base, "zec-ema168-b0.04")
+    assert abs(baseline - (-0.5)) < 1e-9   # 5/10 - 1
+    assert abs(days - 3.0) < 1e-9

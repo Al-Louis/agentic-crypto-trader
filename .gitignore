@@ -35,6 +35,7 @@ data/*.csv
 /tradesim_handoff_seed/
 /tradesim_handoff_seed.zip
 runs/
+experiments/
 models/
 *.log
 logs/

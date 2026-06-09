@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from trader.train.config import config_key, demo_config
 from trader.train.diagnose import Gate, diagnose
+from trader.train.loop import demo_run_id, fetch_artifact, run_iteration
 from trader.train.registry import Experiment, Registry
 
-__all__ = ["demo_config", "config_key", "diagnose", "Gate", "Registry", "Experiment"]
+__all__ = ["demo_config", "config_key", "diagnose", "Gate", "Registry", "Experiment",
+           "run_iteration", "demo_run_id", "fetch_artifact"]
