@@ -131,6 +131,42 @@ def test_reward_bounded_on_high_vol_returns():
     assert all(abs(x) <= 12.0 for x in rewards)        # DSR clipped to ±10, dd penalty up to ~2
 
 
+# ---- action B (weights mode) ------------------------------------------------
+def test_weights_mode_dims():
+    returns, btc = _panel()
+    env = PortfolioEnv(returns, btc, _deep_liq(returns), k=8, action_mode="weights", episode_steps=5)
+    assert env.action_dim == 8 and env.obs_dim == 3 * 8 + 2
+    obs = env.reset(start=300)
+    assert obs.shape == (3 * 8 + 2,)
+
+
+def test_weights_mode_allocates_and_normalizes():
+    returns, btc = _const_panel(0.001)
+    liq = {t: 5_000_000.0 for t in returns.columns}
+    env = PortfolioEnv(returns, btc, liq, k=4, action_mode="weights", episode_steps=5)
+
+    env.reset(start=300)                                  # all-0.5 sums to 2 → normalized to Σ=1
+    _, _, _, info = env.step(np.full(4, 0.5, dtype=np.float32))
+    assert info["cost"] > 0 and abs(info["exposure"] - 1.0) < 1e-6
+
+    env.reset(start=300)                                  # one token at 0.3 → 30% invested, rest cash
+    a = np.zeros(4, dtype=np.float32)
+    a[0] = 0.3
+    _, _, _, info = env.step(a)
+    assert abs(info["exposure"] - 0.3) < 1e-6
+
+
+def test_weights_mode_gym_adapter_conforms():
+    pytest.importorskip("gymnasium")
+    from gymnasium.utils.env_checker import check_env
+
+    from trader.train.gym_env import GymPortfolioEnv
+    returns, btc = _panel()
+    env = GymPortfolioEnv(returns, btc, _deep_liq(returns), k=6, action_mode="weights", episode_steps=8)
+    assert env.action_space.shape == (6,) and env.observation_space.shape == (3 * 6 + 2,)
+    check_env(env, skip_render_check=True)
+
+
 def test_too_short_series_raises():
     returns, btc = _panel(n_bars=200)
     try:

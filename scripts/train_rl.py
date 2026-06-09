@@ -66,7 +66,7 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
     while not done:
         norm = vecnorm.normalize_obs(obs.reshape(1, -1)) if vecnorm is not None else obs.reshape(1, -1)
         action, _ = model.predict(norm, deterministic=True)
-        raw_actions.append(float(np.asarray(action).reshape(-1)[0]))   # pre-clip policy output
+        raw_actions.append(float(np.asarray(action).reshape(-1).sum()))  # total allocation weight
         obs, _, done, info = env.step(np.asarray(action).reshape(-1))
         fees += info["cost"]
         trades += 1 if info["cost"] > 0 else 0
@@ -80,6 +80,8 @@ def main() -> None:
     p.add_argument("--run-id", default="ppo-exposure")
     p.add_argument("--out", default=None, help="artifact dir (default: ./runs-rl/<run-id>)")
     p.add_argument("--publish-target", default=None, help="default: env APENTIC_PUBLISH_TARGET")
+    p.add_argument("--action-mode", default="exposure", choices=["exposure", "weights"],
+                   help="exposure=scalar dial on vol-top8 (C); weights=per-token allocation (B)")
     p.add_argument("--step-bars", type=int, default=24)
     p.add_argument("--episode-steps", type=int, default=30)
     p.add_argument("--ent-coef", type=float, default=0.2,    # post-mortem: low ent_coef → "always-wait" collapse
@@ -102,7 +104,7 @@ def main() -> None:
     returns, btc_close, anchor, liq = load_data()
     train_r, val_r, _test_r = time_split(returns)
     env_kwargs = dict(step_bars=args.step_bars, episode_steps=args.episode_steps,
-                      warmup=168, seed=args.seed)
+                      warmup=168, action_mode=args.action_mode, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id,
                    timesteps=0, total=args.timesteps)
@@ -133,9 +135,8 @@ def main() -> None:
     # ---- evaluate on held-out validation, build + publish the bundle ----
     write_progress(out, state="running", phase="evaluate")
     equity, fees, trades, raw_actions = evaluate_policy(model, venv, val_r, btc_close, liq, env_kwargs)
-    print(f"[eval] raw policy action: min={min(raw_actions):+.3f} "
-          f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} "
-          f"(>0 ⇒ takes exposure; clipped to [0,1])")
+    print(f"[eval] total allocation weight: min={min(raw_actions):+.3f} "
+          f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} (0 ⇒ all cash)")
 
     report = PerformanceMetrics.compute_all(equity, steps_per_year=HOURS_PER_YEAR)
     metrics = ap.metrics_to_frontend(report)
@@ -151,7 +152,7 @@ def main() -> None:
 
     entry = ap.export_run(
         out, args.run_id, equity=eq_series, metrics=metrics, trades=[], candles=candles,
-        symbol="PORTFOLIO", model_name=f"PPO exposure-overlay ({args.timesteps:,} steps)",
+        symbol="PORTFOLIO", model_name=f"PPO {args.action_mode} ({args.timesteps:,} steps)",
         regime="val", n_episodes=1, indicators_used=["exposure"],
         timestamp=datetime.now(timezone.utc).isoformat())
 

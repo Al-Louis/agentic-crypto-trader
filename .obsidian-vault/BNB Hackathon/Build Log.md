@@ -226,6 +226,25 @@ beat the baseline first, add complexity only if earned.
   `diagnose_run` scores it vs the vol-tilt baseline. Small wiring: an `rl` config kind so
   `train_loop` dispatches `train_rl` via `submit_background`.
 
+### First RL result: exposure-overlay → cash (2026-06-09)
+
+The RL pipeline is **proven end-to-end on the desktop** — config → PPO (vectorized, CPU) →
+eval → published bundle → live on `data.alexlouis.dev`, scored by the loop's gates. The smoke
+process found + fixed two real bugs: **NaN obs** (BTC anchor `ffill` left leading NaN →
+NaN actions → fixed with `bfill` + `nan_to_num`) and the **differential-Sharpe reward
+exploding to ±18k** (near-zero variance estimate → fixed with a denom floor + clip to ±10, the
+post-mortem's reward-clipping lesson). Reward is now O(1).
+
+**First honest result — action C (exposure overlay) learns *cash is optimal*.** The
+deterministic policy mean is ≤0 (sb3 clips to the 0 floor) for every observation: with a
+Sharpe-based, ruin-aware reward, *committing* to the vol-top8 is risk-adjusted-negative, so the
+agent stays flat (it earns lucky +reward while exploring, but its best estimate is cash). This
+**independently rediscovers the project's core finding** — alpha is scarce; holding these
+tokens isn't worth it (cash 0% beats the −40% heuristic baselines). Caveats: always-cash is
+**degenerate for the competition** (fails ≥1-trade/day → DQ), and it's one config on one split.
+→ Build **action B** (allocate/weight tokens, not just dial exposure) — cash-vs-hold is too
+thin a lever to show learning; allocation is where the vol-tilt edge lives.
+
 ### In flight / next
 
 - ✅ **Desktop training host — stood up & verified.** Runs inside a fresh dedicated WSL2 distro

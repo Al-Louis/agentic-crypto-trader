@@ -10,19 +10,24 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from trader.train.env import N_OBS, PortfolioEnv
+from trader.train.env import PortfolioEnv
 
 
 class GymPortfolioEnv(gym.Env):
-    """Wrap the plain `PortfolioEnv` in the Gymnasium API (Box action/obs, terminated/truncated)."""
+    """Wrap the plain `PortfolioEnv` in the Gymnasium API (Box action/obs, terminated/truncated).
+
+    Action/obs dimensions come from the core env's `action_mode` — scalar exposure (C) or a
+    k-vector of weights (B).
+    """
 
     metadata = {"render_modes": []}
 
     def __init__(self, returns, btc_close, liquidity, **env_kwargs):
         super().__init__()
         self.core = PortfolioEnv(returns, btc_close, liquidity, **env_kwargs)
-        self.action_space = spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(N_OBS,),
+        self.action_space = spaces.Box(low=0.0, high=1.0, shape=(self.core.action_dim,),
+                                       dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.core.obs_dim,),
                                             dtype=np.float32)
 
     def reset(self, *, seed=None, options=None):

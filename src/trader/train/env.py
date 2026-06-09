@@ -36,7 +36,7 @@ class PortfolioEnv:
                  capital: float = 10_000.0, lp_fee_bps: float = DEFAULT_LP_FEE_BPS,
                  gas_usd: float = DEFAULT_GAS_USD, ema_span: int = 72, dd_soft: float = 0.15,
                  dd_gate: float = 0.30, dd_lambda: float = 2.0, sharpe_eta: float = 0.04,
-                 seed: int | None = None):
+                 action_mode: str = "exposure", seed: int | None = None):
         self.returns = returns.sort_index()
         # ffill *and* bfill: no leading NaN if the panel starts before the anchor (else a NaN
         # flows into the obs at warmup and the policy emits NaN actions).
@@ -48,8 +48,11 @@ class PortfolioEnv:
         self.lp_fee_bps, self.gas_usd = lp_fee_bps, gas_usd
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
         self.eta = sharpe_eta
+        self.action_mode = action_mode                  # "exposure" (C, scalar) | "weights" (B, k-vector)
+        self.action_dim = 1 if action_mode == "exposure" else self.k
         self.n_bars = len(self.returns)
-        self.obs_dim = N_OBS
+        # weights mode needs per-token obs (3 each: recent return, vol, current weight) + 2 market
+        self.obs_dim = N_OBS if action_mode == "exposure" else 3 * self.k + 2
         self.rng = np.random.default_rng(seed)
 
         self._min_start = warmup
@@ -76,20 +79,18 @@ class PortfolioEnv:
         return self._obs()
 
     def step(self, action) -> tuple[np.ndarray, float, bool, dict]:
-        exposure = float(np.clip(np.asarray(action).reshape(-1)[0], 0.0, 1.0))
+        fracs = self._target_fracs(action)               # per-token target fractions (Σ ≤ 1)
         eq_start = float(self.pos.sum() + self.cash)
 
-        # rebalance to exposure/k on each vol-top8 token (charge AMM cost on turnover)
-        target = (exposure / self.k) * eq_start
-        cost = 0.0
+        cost = 0.0                                        # rebalance, charging AMM cost on turnover
         for t in self.tokens:
-            trade = target - float(self.pos[t])
+            trade = float(fracs[t]) * eq_start - float(self.pos[t])
             if abs(trade) >= 1.0:
                 c = amm_cost_usd(trade, self.liquidity.get(t, 0.0), self.lp_fee_bps, self.gas_usd)
                 self.cash -= trade + c
                 self.pos[t] += trade
                 cost += c
-        self.exposure = exposure
+        self.exposure = float(fracs.sum())
 
         # advance step_bars bars; capture the intra-step equity path for an honest drawdown
         end = min(self.i + self.step_bars, self.n_bars - 1)
@@ -116,11 +117,23 @@ class PortfolioEnv:
         reward = self._dsr(step_ret) - self.dd_lambda * self._dd_penalty(dd)
         self.step_count += 1
         done = (self.step_count >= self.episode_steps or self.i >= self.n_bars - 1 or eq_new <= 0)
-        info = {"equity": eq_new, "drawdown": dd, "exposure": exposure, "cost": cost,
+        info = {"equity": eq_new, "drawdown": dd, "exposure": self.exposure, "cost": cost,
                 "step_return": step_ret}
         return self._obs(), float(reward), bool(done), info
 
     # -- pieces -------------------------------------------------------------
+    def _target_fracs(self, action) -> pd.Series:
+        """Map an action to per-token target fractions (Σ ≤ 1, remainder cash)."""
+        a = np.asarray(action, dtype=float).reshape(-1)
+        if self.action_mode == "exposure":               # C: one dial, equal-weight the vol-top8
+            e = float(np.clip(a[0], 0.0, 1.0))
+            return pd.Series(e / self.k, index=self.tokens)
+        w = np.clip(a[:self.k], 0.0, 1.0)                 # B: per-token weights, normalized if Σ>1
+        s = float(w.sum())
+        if s > 1.0:
+            w = w / s
+        return pd.Series(w, index=self.tokens)
+
     def _dsr(self, r: float) -> float:
         """Differential (online) Sharpe increment — Moody & Saffell. 0 until variance exists.
 
@@ -144,12 +157,23 @@ class PortfolioEnv:
         i = self.i
         ema = float(self.btc_ema.iloc[i])
         btc_trend = float(self.btc.iloc[i]) / ema - 1.0 if ema else 0.0
-        j = max(i - self.step_bars, 0)
-        prev = float(self.btc.iloc[j])
-        btc_ret = float(self.btc.iloc[i]) / prev - 1.0 if prev else 0.0
         dd = (self.peak - self.equity) / self.peak if self.peak > 0 else 0.0
-        port = self.returns.iloc[max(i - self.warmup, 0):i + 1][self.tokens].mean(axis=1)
-        vol = float(port.std()) if len(port) > 1 else 0.0
-        obs = np.array([btc_trend, btc_ret, dd, self.exposure, self._last_return, vol],
-                       dtype=np.float32)
-        return np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)   # never feed NaN to the policy
+
+        if self.action_mode == "exposure":               # 6-dim market/portfolio state
+            j = max(i - self.step_bars, 0)
+            prev = float(self.btc.iloc[j])
+            btc_ret = float(self.btc.iloc[i]) / prev - 1.0 if prev else 0.0
+            port = self.returns.iloc[max(i - self.warmup, 0):i + 1][self.tokens].mean(axis=1)
+            vol = float(port.std()) if len(port) > 1 else 0.0
+            obs = [btc_trend, btc_ret, dd, self.exposure, self._last_return, vol]
+        else:                                             # per-token features (so it can choose) + market
+            eq = self.equity if self.equity > 0 else 1.0
+            win = self.returns.iloc[max(i - self.warmup, 0):i + 1]
+            w0 = max(i - self.step_bars, 0)
+            feats: list[float] = []
+            for t in self.tokens:                          # tokens are in vol-rank order → stable mapping
+                rec = float((1.0 + self.returns.iloc[w0:i + 1][t].fillna(0.0)).prod() - 1.0)
+                tvol = float(win[t].std()) if len(win) > 1 else 0.0
+                feats += [rec, tvol, float(self.pos[t]) / eq]
+            obs = [*feats, btc_trend, dd]
+        return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
