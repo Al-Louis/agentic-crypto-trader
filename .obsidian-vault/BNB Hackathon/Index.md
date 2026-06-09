@@ -22,6 +22,7 @@ This is the map of content (MOC) for my entry into the [[BNB Hack - AI Trading A
 - [[Real-time Monitoring]] - Monitoring wallets, trade executions, fund transfers
 - [[Social Media Scanner]] - X.com scanner for breaking news such as hacks or adoption
 - [[Remote Capabilities]] - Training AI from host computer, results dashboards, CI/CD
+- [[Apentic Data Contract]] - The static-JSON contract between training and the web frontend
 - [[Build Log]] - Chronological record of what's been built and the key decisions behind it
 
 ## Rules / Requirements
