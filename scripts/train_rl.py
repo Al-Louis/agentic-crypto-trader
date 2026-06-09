@@ -77,8 +77,12 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
         trades += 1 if info["cost"] > 0 else 0
         for key in shaping:
             shaping[key] += info[key]
+    # union of every token traded (the universe rotates when rerank_every>0), final leaders first,
+    # so the bundle's per-token candles/markers cover all names the agent touched
+    seen = {t for r in records for t in r["weights"]}
+    universe = list(env.tokens) + [t for t in sorted(seen) if t not in env.tokens]
     return (np.asarray(env.equity_curve, dtype=float), fees, trades, raw_actions, records,
-            list(env.tokens), shaping)
+            universe, shaping)
 
 
 def _load_token_ohlcv(token):
@@ -180,6 +184,9 @@ def main() -> None:
     p.add_argument("--realized-lambda", type=float, default=10.0, help="realized-profit reward weight")
     p.add_argument("--dd-lambda", type=float, default=2.0,
                    help="drawdown-proximity penalty weight (the brake toward the DQ gate)")
+    p.add_argument("--rerank-every", type=int, default=0,
+                   help="re-pick the vol-top-k every N rebalances (0=once at episode start; 1=daily). "
+                        "Microcap vol is bursty/rotational so a fixed-for-the-episode universe goes stale")
     p.add_argument("--step-bars", type=int, default=24)
     p.add_argument("--episode-steps", type=int, default=30)
     p.add_argument("--ent-coef", type=float, default=0.2,    # post-mortem: low ent_coef → "always-wait" collapse
@@ -208,7 +215,8 @@ def main() -> None:
                       warmup=168, action_mode=args.action_mode, seed=args.seed,
                       reward_mode=args.reward_mode, rich_obs=args.rich_obs,
                       gb_lambda=args.gb_lambda, turn_lambda=args.turn_lambda,
-                      realized_lambda=args.realized_lambda, dd_lambda=args.dd_lambda)
+                      realized_lambda=args.realized_lambda, dd_lambda=args.dd_lambda,
+                      rerank_every=args.rerank_every)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id,
                    timesteps=0, total=args.timesteps)
@@ -298,6 +306,7 @@ def main() -> None:
         "ent_coef": args.ent_coef, "lr": args.lr, "eval_split": args.eval_split,
         "gb_lambda": args.gb_lambda, "turn_lambda": args.turn_lambda,
         "realized_lambda": args.realized_lambda, "dd_lambda": args.dd_lambda,
+        "rerank_every": args.rerank_every,
     }
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,

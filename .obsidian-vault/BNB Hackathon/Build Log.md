@@ -364,6 +364,24 @@ backstop throughout — held conclusions, wide search.
   (fee/trade $12 → $3; turnover $440k → $195k). Same convergence fingerprint as the DD drop — the
   trained policy is calmer *and* cheaper (smaller trades cut slippage, 0.6% → 0.4%). Not a bug.
 
+## 2026-06-09 (cont.) — Universe-selection churn + dynamic re-ranking
+
+### Churn diagnostic
+- `scripts/diag_universe_churn.py`: the vol-top-k universe is picked **once** at episode start and
+  held for the whole window. Measured how fast that goes stale (daily re-picks across the series):
+  set churn is gentle (**0.52 names/day**) but the **rank order collapses** — rank corr 0.85 (1d) →
+  **0.32 (7d)** → **0.17 (30d)**. Over a 30-step episode ~2.4/8 names rotate and the positional
+  slot-map is ≈shuffled. Stable core (Q 93%, SIREN 81%, UB/B/TAG ~72%) + rotating fringe (ZEC 64%,
+  COAI/TAC ~50%). This is why ZEC was in the val universe (vol-rank 5) but out of test (rank 10).
+
+### Dynamic re-ranking (opt-in)
+- env **`rerank_every`** (0 = once at start; 1 = daily): re-picks the vol-top-k every N rebalances —
+  liquidates names leaving the universe to cash, carries retained, starts entrants flat — so the
+  positional slot-map tracks the *current* vol leaders instead of a stale snapshot. Tested (rotation
+  + no-orphaned-positions + equity-never-minted invariants; 14 env tests pass). `train_rl
+  --rerank-every`, in provenance. **Default off**; recommended **daily** for the generalization work
+  (also makes the task more stationary across regimes, which should aid OOS transfer).
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

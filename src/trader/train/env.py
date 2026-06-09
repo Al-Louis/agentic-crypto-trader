@@ -38,7 +38,8 @@ class PortfolioEnv:
                  dd_gate: float = 0.30, dd_lambda: float = 2.0, sharpe_eta: float = 0.04,
                  action_mode: str = "exposure", reward_mode: str = "sharpe",
                  rich_obs: bool = False, gb_lambda: float = 10.0, turn_lambda: float = 0.5,
-                 realized_lambda: float = 10.0, seed: int | None = None):
+                 realized_lambda: float = 10.0, rerank_every: int = 0,
+                 seed: int | None = None):
         self.returns = returns.sort_index()
         # ffill *and* bfill: no leading NaN if the panel starts before the anchor (else a NaN
         # flows into the obs at warmup and the policy emits NaN actions).
@@ -58,6 +59,9 @@ class PortfolioEnv:
         self.reward_mode = reward_mode
         self.rich_obs = bool(rich_obs) and action_mode == "weights"
         self.gb_lambda, self.turn_lambda, self.realized_lambda = gb_lambda, turn_lambda, realized_lambda
+        # >0: re-pick the vol-top-k every N rebalances (bursty microcap vol rotates fast, so a
+        # universe fixed for a whole episode goes stale — rank corr falls to ~0.3 within a week)
+        self.rerank_every = int(rerank_every)
         self.n_bars = len(self.returns)
         # weights mode: per-token obs (recent return, vol, current weight) + 2 market; rich_obs adds
         # 2 more per token (unrealized gain since entry, distance below recent high) → profit-taking info
@@ -77,8 +81,7 @@ class PortfolioEnv:
         self.start = int(start) if start is not None else int(
             self.rng.integers(self._min_start, self._max_start))
         self.i = self.start
-        win = self.returns.iloc[self.start - self.warmup:self.start]   # causal universe pick
-        self.tokens = list(win.std().sort_values(ascending=False).head(self.k).index)
+        self.tokens = self._pick_universe(self.start)                  # causal vol-top-k pick
         self.pos = pd.Series(0.0, index=self.tokens)
         self.basis = pd.Series(0.0, index=self.tokens)   # cost basis (USD invested) per held token
         self.peak_ret = pd.Series(0.0, index=self.tokens)  # high-water unrealized return since last trade
@@ -172,9 +175,36 @@ class PortfolioEnv:
                 "giveback": giveback, "realized": realized, "turnover": turnover,
                 "weights": {t: float(fracs[t]) for t in self.tokens},
                 "trades_usd": trades_usd, "trade_fees": trade_fees}
+        # re-rank the traded set for the NEXT step (after info, so it describes the step just traded;
+        # before _obs, so the next observation/action target the fresh universe)
+        if self.rerank_every and not done and self.step_count % self.rerank_every == 0:
+            self._rerank()
         return self._obs(), float(reward), bool(done), info
 
     # -- pieces -------------------------------------------------------------
+    def _pick_universe(self, at: int) -> list:
+        """Causal vol-top-k: the k highest-vol tokens over the warmup window ending at bar `at`."""
+        win = self.returns.iloc[max(at - self.warmup, 0):at]
+        return list(win.std().sort_values(ascending=False).head(self.k).index)
+
+    def _rerank(self) -> None:
+        """Re-pick the vol-top-k for the next step; liquidate names leaving the universe to cash,
+        carry over retained names' position/basis/peak, start entrants flat. Keeps the positional
+        slot-map pinned to the *current* vol leaders instead of a stale episode-start snapshot."""
+        new_tokens = self._pick_universe(self.i)
+        if new_tokens == self.tokens:
+            return
+        for t in self.tokens:                             # sell anything dropping out → cash
+            if t not in new_tokens and abs(float(self.pos[t])) >= 1.0:
+                v = float(self.pos[t])
+                c = amm_cost_usd(-v, self.liquidity.get(t, 0.0), self.lp_fee_bps, self.gas_usd)
+                self.cash += v - c
+        self.pos = self.pos.reindex(new_tokens).fillna(0.0)
+        self.basis = self.basis.reindex(new_tokens).fillna(0.0)
+        self.peak_ret = self.peak_ret.reindex(new_tokens).fillna(0.0)
+        self.tokens = new_tokens
+        self.equity = float(self.pos.sum() + self.cash)
+
     def _target_fracs(self, action) -> pd.Series:
         """Map an action to per-token target fractions (Σ ≤ 1, remainder cash)."""
         a = np.asarray(action, dtype=float).reshape(-1)

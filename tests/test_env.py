@@ -174,3 +174,42 @@ def test_too_short_series_raises():
         raise AssertionError("expected ValueError for too-short series")
     except ValueError:
         pass
+
+
+def _rotating_panel(n_bars=1500, n_tokens=12, seed=0):
+    """Panel whose per-token vol leadership rotates over time, so the vol-top-k changes mid-episode."""
+    rng = np.random.default_rng(seed)
+    idx = pd.RangeIndex(n_bars) * 3600 + IDX0
+    cols = [f"T{i}" for i in range(n_tokens)]
+    t = np.arange(n_bars)
+    scale = np.empty((n_bars, n_tokens))
+    for i in range(n_tokens):                            # token i's vol peaks at phase i → rotation
+        scale[:, i] = 0.01 + 0.07 * np.exp(-((t - (i / n_tokens) * n_bars) ** 2) / (2 * (n_bars / 7) ** 2))
+    returns = pd.DataFrame(rng.normal(0, 1, (n_bars, n_tokens)) * scale, index=idx, columns=cols)
+    btc = pd.Series(np.cumprod(1 + rng.normal(0, 0.005, n_bars)) * 50_000.0, index=idx)
+    return returns, btc
+
+
+def test_rerank_rotates_universe_and_never_mints_money():
+    """rerank_every>0 re-picks the vol-top-k mid-episode: the traded set rotates, departed names are
+    liquidated to cash (no orphaned positions), and rotation never creates equity. Default (0) is fixed."""
+    returns, btc = _rotating_panel()
+    rng = np.random.default_rng(1)
+
+    def run(rerank_every):
+        env = PortfolioEnv(returns, btc, _deep_liq(returns), k=8, action_mode="weights",
+                           rich_obs=True, episode_steps=40, rerank_every=rerank_every, seed=1)
+        env.reset(start=env._min_start, seed=1)
+        seen = {tuple(env.tokens)}
+        for _ in range(40):
+            obs, reward, done, info = env.step(rng.random(8))
+            assert np.all(np.isfinite(obs)) and np.isfinite(reward)
+            assert set(env.pos.index) == set(env.tokens)         # no orphaned positions on rotation
+            assert env.equity <= info["equity"] + 1e-6           # rotation never mints money
+            seen.add(tuple(env.tokens))
+            if done:
+                break
+        return len(seen)
+
+    assert run(0) == 1                                            # fixed universe by default
+    assert run(1) > 1                                            # re-ranking rotates the traded set
