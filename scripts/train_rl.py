@@ -63,16 +63,59 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
     env = PortfolioEnv(returns_win, btc_close, liq, **{**env_kwargs, "episode_steps": steps})
     obs = env.reset(start=env._min_start)
     fees = trades = 0
-    raw_actions = []
+    raw_actions, records = [], []
     done = False
     while not done:
         norm = vecnorm.normalize_obs(obs.reshape(1, -1)) if vecnorm is not None else obs.reshape(1, -1)
         action, _ = model.predict(norm, deterministic=True)
         raw_actions.append(float(np.asarray(action).reshape(-1).sum()))  # total allocation weight
         obs, _, done, info = env.step(np.asarray(action).reshape(-1))
+        records.append({"time": info["time"], "weights": info["weights"],
+                        "trades_usd": info["trades_usd"]})
         fees += info["cost"]
         trades += 1 if info["cost"] > 0 else 0
-    return np.asarray(env.equity_curve, dtype=float), fees, trades, raw_actions
+    return (np.asarray(env.equity_curve, dtype=float), fees, trades, raw_actions, records,
+            list(env.tokens))
+
+
+def _load_token_ohlcv(token):
+    dirs = glob.glob(os.path.join("data", "ohlcv", "hour_1", f"{token}_*"))
+    if not dirs:
+        return None
+    files = sorted(glob.glob(os.path.join(dirs[0], "*.parquet")))
+    df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    return df.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
+
+
+def _price_at(win, tm):
+    if win.empty:
+        return None
+    idx = (win["timestamp"] - tm).abs().idxmin()
+    return float(win.loc[idx, "close"])
+
+
+def build_portfolio_artifacts(records, universe, t0, t1):
+    """From the per-step eval records → weights-over-time + per-token candles & buy/sell markers."""
+    from trader.report import apentic as ap
+    weights = [{"time": r["time"], "weights": r["weights"]} for r in records]
+    token_candles, token_trades = {}, {}
+    for t in universe:
+        ohlcv = _load_token_ohlcv(t)
+        if ohlcv is None:
+            token_candles[t], token_trades[t] = [], []
+            continue
+        win = ohlcv[(ohlcv["timestamp"] >= t0) & (ohlcv["timestamp"] <= t1)]
+        token_candles[t] = ap.candles_from_ohlcv(win)
+        marks = []
+        for r in records:
+            tr = r["trades_usd"].get(t)
+            if tr is None:
+                continue
+            marks.append({"time": r["time"], "price": _price_at(win, r["time"]),
+                          "side": "buy" if tr > 0 else "sell", "usd": abs(tr),
+                          "weight": r["weights"].get(t, 0.0)})
+        token_trades[t] = marks
+    return weights, token_candles, token_trades
 
 
 def main() -> None:
@@ -139,7 +182,8 @@ def main() -> None:
 
     # ---- evaluate on the held-out split, build + publish the bundle ----
     write_progress(out, state="running", phase="evaluate")
-    equity, fees, trades, raw_actions = evaluate_policy(model, venv, eval_r, btc_close, liq, env_kwargs)
+    equity, fees, trades, raw_actions, records, universe = evaluate_policy(
+        model, venv, eval_r, btc_close, liq, env_kwargs)
     print(f"[eval] total allocation weight: min={min(raw_actions):+.3f} "
           f"mean={float(np.mean(raw_actions)):+.3f} max={max(raw_actions):+.3f} (0 ⇒ all cash)")
 
@@ -155,7 +199,6 @@ def main() -> None:
     sb, wu = args.step_bars, env_kwargs["warmup"]
     positions = [min(wu + k * sb, len(eval_r) - 1) for k in range(len(equity))]
     eq_series = pd.Series(equity, index=eval_r.index[positions])
-    candles = ap.candles_from_ohlcv(anchor.loc[eval_r.index[0]:eval_r.index[-1]].reset_index())
 
     # ---- honest head-to-head: the validated vol-tilt on the SAME window, same backtester ----
     from trader.sim.backtest import run_xs_backtest
@@ -173,10 +216,14 @@ def main() -> None:
           f"vol-tilt {base_ret:+.1%} (Sh {base_report.sharpe_ratio:.2f}) on {args.eval_split} → "
           f"{'BEATS' if report.total_return_pct > base_ret else 'loses to'} baseline")
 
-    entry = ap.export_run(
-        out, args.run_id, equity=eq_series, metrics=metrics, trades=[], candles=candles,
-        symbol="PORTFOLIO", model_name=f"PPO {args.action_mode} ({args.timesteps:,} steps)",
-        regime="val", n_episodes=1, indicators_used=["exposure"],
+    # ---- portfolio bundle: allocation-over-time + per-token candles & buy/sell markers ----
+    weights, token_candles, token_trades = build_portfolio_artifacts(
+        records, universe, int(eval_r.index[0]), int(eval_r.index[-1]))
+    entry = ap.export_portfolio_run(
+        out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
+        token_candles=token_candles, token_trades=token_trades, universe=universe,
+        model_name=f"PPO {args.action_mode} ({args.timesteps:,} steps)",
+        action_mode=args.action_mode, regime=args.eval_split,
         timestamp=datetime.now(timezone.utc).isoformat())
 
     target = args.publish_target or config.get("APENTIC_PUBLISH_TARGET")

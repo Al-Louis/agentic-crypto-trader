@@ -10,6 +10,7 @@ from __future__ import annotations
 from trader.report.apentic import (
     candles_from_ohlcv,
     equity_points,
+    export_portfolio_run,
     export_run,
     metrics_to_frontend,
     publish_run,
@@ -19,7 +20,7 @@ from trader.report.apentic import (
 )
 
 __all__ = [
-    "export_run", "roundtrips_from_position", "metrics_to_frontend",
+    "export_run", "export_portfolio_run", "roundtrips_from_position", "metrics_to_frontend",
     "candles_from_ohlcv", "equity_points",
     "upsert_manifest", "upsert_manifest_at", "publish_run",
 ]

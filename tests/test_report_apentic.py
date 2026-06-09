@@ -124,6 +124,30 @@ def test_invalidation_path_root_vs_prefix():
     assert ap._invalidation_path("s3://bucket/apentic/data") == "/apentic/data/*"  # apex path behavior
 
 
+def test_export_portfolio_run_writes_allocation_and_per_token_layers(tmp_path):
+    idx = pd.RangeIndex(3) * 86400 + 1_700_000_000
+    equity = pd.Series([10_000.0, 10_500, 11_000], index=idx)
+    m = ap.metrics_to_frontend(PerformanceMetrics.compute_all(equity.to_numpy()))
+    weights = [{"time": int(idx[0]), "weights": {"ZEC": 0.5, "HUMA": 0.3}}]
+    candle = {"time": int(idx[0]), "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "episode": 0}
+    token_candles = {"ZEC": [candle], "HUMA": []}
+    token_trades = {"ZEC": [{"time": int(idx[0]), "price": 1.0, "side": "buy", "usd": 5000, "weight": 0.5}],
+                    "HUMA": []}
+
+    entry = ap.export_portfolio_run(
+        tmp_path, "ppo-x", equity=equity, metrics=m, weights=weights, token_candles=token_candles,
+        token_trades=token_trades, universe=["ZEC", "HUMA"], model_name="PPO weights",
+        timestamp="2026-06-09T00:00:00+00:00")
+
+    run = tmp_path / "ppo-x"
+    assert (run / "weights.json").exists() and (run / "equity_curve.json").exists()
+    assert json.loads((run / "tk_ZEC_trades.json").read_text())[0]["side"] == "buy"
+    ri = json.loads((run / "run_info.json").read_text())
+    assert ri["kind"] == "portfolio" and ri["universe"][0]["symbol"] == "ZEC"
+    man = json.loads((tmp_path / "manifest.json").read_text())
+    assert man[0]["kind"] == "portfolio" and entry["symbol"] == "PORTFOLIO"
+
+
 def test_upsert_manifest_replaces_same_id(tmp_path):
     mpath = tmp_path / "manifest.json"
     ap.upsert_manifest(mpath, {"id": "a", "model_name": "v1"})

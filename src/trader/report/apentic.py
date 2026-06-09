@@ -15,6 +15,7 @@ is decided (vault "Remote Capabilities").
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -166,6 +167,49 @@ def export_run(out_dir: Path | str, run_id: str, *, equity: pd.Series, metrics: 
     entry = {"id": run_id, "model_name": model_name, "timestamp": timestamp,
              "n_episodes": n_episodes, "regime": regime, "symbol": symbol,
              "simulation": simulation}
+    upsert_manifest(out_dir / "manifest.json", entry)
+    return entry
+
+
+def _slug(token: str) -> str:
+    """URL/file-safe token name (symbols can contain odd chars)."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", str(token)) or "tok"
+
+
+def export_portfolio_run(out_dir: Path | str, run_id: str, *, equity: pd.Series, metrics: dict,
+                         weights: list[dict], token_candles: dict[str, list],
+                         token_trades: dict[str, list], universe: list[str], model_name: str,
+                         timestamp: str, action_mode: str = "weights", regime: str = "",
+                         simulation: bool = False) -> dict:
+    """Write a **portfolio** run bundle (vs the single-asset `export_run`).
+
+    Layout under ``<out_dir>/<run_id>/``:
+      - metrics.json / equity_curve.json     — portfolio NAV + risk panel
+      - weights.json                         — allocation over time: ``[{time, weights:{sym:w}}]``
+      - run_info.json                        — model + ``universe`` ([{symbol, slug}], action_mode)
+      - tk_<slug>_candles.json / _trades.json — per held token: its candles + buy/sell markers
+    The frontend renders the allocation view from the first group and the per-token candle+marker
+    drill-down from the last. Manifest entry carries ``kind:"portfolio"`` + the universe.
+    """
+    out_dir = Path(out_dir)
+    run_dir = out_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    uni = [{"symbol": t, "slug": _slug(t)} for t in universe]
+
+    _dump(run_dir / "metrics.json", metrics)
+    _dump(run_dir / "equity_curve.json", equity_points(equity))
+    _dump(run_dir / "weights.json", weights)
+    _dump(run_dir / "run_info.json",
+          {"model_name": model_name, "kind": "portfolio", "action_mode": action_mode,
+           "universe": uni, "regime": regime, "n_episodes": 1, "indicators_used": [],
+           "available_indicators": []})
+    for u in uni:
+        _dump(run_dir / f"tk_{u['slug']}_candles.json", token_candles.get(u["symbol"], []))
+        _dump(run_dir / f"tk_{u['slug']}_trades.json", token_trades.get(u["symbol"], []))
+
+    entry = {"id": run_id, "model_name": model_name, "timestamp": timestamp, "n_episodes": 1,
+             "regime": regime, "symbol": "PORTFOLIO", "simulation": simulation,
+             "kind": "portfolio", "universe": uni}
     upsert_manifest(out_dir / "manifest.json", entry)
     return entry
 
