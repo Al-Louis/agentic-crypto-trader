@@ -18,6 +18,9 @@ dev = ["pytest>=8"]
 data = ["pandas>=2.2", "pyarrow>=15", "ta>=0.11", "ccxt>=4.4"]
 # Remote training: publish run bundles to S3 / Cloudflare R2 (the generic `remote_train` pkg)
 remote = ["boto3>=1.34"]
+# RL training (desktop host only): gymnasium adapter + PPO. torch is installed CPU-only there
+# (the env itself is pure numpy/pandas and needs none of this — see trader.train.env).
+training = ["gymnasium>=0.29", "stable-baselines3>=2.3", "sb3-contrib>=2.3"]
 
 [project.scripts]
 trader-mcp = "trader.mcp_server.__main__:main"
