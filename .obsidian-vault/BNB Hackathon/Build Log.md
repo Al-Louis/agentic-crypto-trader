@@ -382,6 +382,26 @@ backstop throughout — held conclusions, wide search.
   --rerank-every`, in provenance. **Default off**; recommended **daily** for the generalization work
   (also makes the task more stationary across regimes, which should aid OOS transfer).
 
+## 2026-06-09 (cont.) — Frozen-test OOS verdict: the edge did not generalize
+
+The decisive test (→ [[Experiment Log]]). The two configs that beat the val baseline, run on the
+**never-touched test split** (a calmer regime; vol-tilt baseline +25.7% @ 22% DD, gate-safe):
+
+- `real`: val +83% → **test +11.1%** (−15 pts vs baseline, all seeds breach the gate).
+- `real-give`: val +156% → **test −1.8%** (−27 pts, 39–49% DD).
+
+**Both collapsed OOS — the simple vol-tilt baseline beat the RL agent on both *and* stayed gate-safe.**
+The +83–156% val numbers were **regime/era overfitting**, confirmed (the universe-churn finding and
+the memorization hypothesis both pointed here). This is the *earned* conclusion of the full pipeline
+(rich obs → 1M convergence → multi-seed → clean frozen window), not a premature write-off:
+RL-learns-allocation-from-scratch, as built, has **no generalizable edge**. Caught before any capital.
+
+- **Champion = none** (`build_ledger` now requires passing OOS: split=test, beats test baseline,
+  worst-seed under gate). Split-aware leaderboard published; `experiments/champion.json` = `null`.
+- **Next — generalization redesign:** train across regimes (walk-forward) > the `rerank_every` 0-vs-1
+  A/B on test > regularize hard > reframe RL as a *tuner on the baseline* (the baseline is what
+  generalizes). Power outage mid-run; resumable runner added so OOS finished cleanly.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

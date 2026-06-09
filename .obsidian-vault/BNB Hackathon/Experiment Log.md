@@ -36,12 +36,10 @@ drawdown** — a mean under the gate with a worst seed over it is *not* yet comp
 
 ## Current champion
 
-- **Deployment-honest (worst-seed under gate): `ppo2-real`** — realized engine, 1M steps, no extra
-  brake. **+83.1% @ all 3 seeds under 30% DD** (worst 26.6%), Sharpe 5.12. The trustworthy pick.
-- **Highest mean return (mean-legal, but tail-risky): `ppo2-real-give`** — +156.5% @ 27.9% mean DD,
-  but worst seed breaches at 37.8%. `champion.json` records this one (the build_ledger rule is
-  still mean-DD); **recommendation: tighten the rule to worst-seed**, which makes `ppo2-real`
-  official. Reproduce commands: `experiments/champion.json`.
+**None.** No config has passed frozen-test OOS (the rule: split=test, beats its test baseline, AND
+worst-seed maxDD under the gate). The val champions (`ppo2-real` +83%, `ppo2-real-give` +156%) both
+**collapsed out-of-sample** — see the OOS verdict below. `champion.json` records `null`, honestly.
+The val numbers were regime/era overfitting, confirmed by the held-out test.
 
 ## Standings — Reward-Shaping Sweep #1
 
@@ -118,13 +116,38 @@ smaller** trades (fee/trade $12 → $3; turnover $440k → $195k), so fees fall 
 convergence fingerprint as the drawdown drop — the well-trained policy is calmer *and cheaper* to
 run (smaller trades also cut slippage: effective rate 0.6% → 0.4%).
 
-### Decided next
+## Standings — Frozen-Test OOS Verdict (the honest result)
 
-The val edge over baseline is now thin for gate-safe configs, so **OOS validation is decisive, not
-optional**: run `ppo2-real` (and `real-give`) on the **frozen test split**, then **walk-forward
-across a downturn window**. If +83% holds OOS/through a bear regime → a real, deployable edge; if it
-collapses → the val numbers were regime-luck. Also: **tighten the champion rule to worst-seed**. See
-[[Strategy Logic]], [[Market Conditions]].
+The two configs that beat the val baseline, run on the **never-touched test split** (model trains on
+`train` as always; only the eval window changed). Test is a calmer regime — **vol-tilt baseline
++25.7%, Sharpe 2.76, maxDD 22.0% (gate-safe)**.
+
+| config | val (tuning) | **test (OOS)** | mean DD | worst DD | vs test baseline |
+|--------|-------------|----------------|---------|----------|------------------|
+| `real` | +83.1% | **+11.1%** (+13.0/+18.6/+1.6) | 33.3% | 34.4% | **−15 pts** |
+| `real-give` | +156.5% | **−1.8%** (−11.0/+7.1/−1.4) | 42.9% | 49.5% | **−27 pts** |
+
+### Verdict — the edge did not generalize
+
+- **Both collapsed OOS** — they underperform the simple vol-tilt baseline *and* breach the drawdown
+  gate (which they respected on val). The +83–156% was **regime/era overfitting**, confirmed.
+- **The dumb baseline beat the RL agent OOS, on both, while staying gate-safe.** The hand-tuned
+  heuristic generalizes; the learned policy does not. That is the single most important clue.
+- This is **not** a premature write-off — it's the *earned* conclusion of the full pipeline (rich
+  obs → 1M convergence → multi-seed → clean frozen window). RL-learns-allocation-from-scratch, as
+  built, has **no generalizable edge**. The frozen test caught it before any capital.
+
+### Decided next — the generalization redesign
+
+The direction is set by the clue (baseline generalizes, RL overfits):
+1. **Train across regimes, not one bull window** — walk-forward / multiple windows incl. bear/chop.
+   The biggest lever.
+2. **Dynamic universe re-ranking** (`rerank_every`, built [[Build Log]]) — A/B 0 vs 1 *on test*: does
+   a more stationary task close the OOS gap? Cheap, decisive.
+3. **Regularize hard** — smaller net, higher entropy, shorter training (the 1M froth = too much
+   capacity for the data).
+4. **Reframe RL as a tuner on top of the baseline**, not a from-scratch allocator — the baseline is
+   what generalizes. See [[Strategy Logic]], [[Market Conditions]], [[Trading Strategies]].
 
 ## Thesis (the lens for reading all of the above)
 
