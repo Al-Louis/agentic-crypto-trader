@@ -261,8 +261,18 @@ allocator, but fee-heavy → cut turnover."
 regime it's meant to gate on (confounds the "cash optimal" result), and `candles.json` published
 empty (no baseline gate, blank chart). Fixed (align anchor → seconds). Added the **frozen-test
 split** + a real **vol-tilt baseline head-to-head** to the trainer for honest validation.
-**Skeptical stance holds:** +18% is *one* val window; the verdict that counts is beat-the-vol-tilt
-on the *frozen test* across seeds.
+
+**Frozen-test verdict (3 seeds) — RL loses to the vol-tilt on every axis.** Policy returns
+**−5.8% / +10.0% / +15.6%** (seed-unstable; 2 of 3 breach the 30% DQ at 33.7% / 40.7%) vs the
+deterministic **vol-tilt(trend50): +25.7%, Sharpe 2.76, 22.0% maxDD**. So the loop's first real
+question — *can RL beat the validated baseline OOS?* — answers **no, robustly**: the simple
+strategy wins on return, Sharpe, drawdown **and** stability; the RL allocator churns (fee drag)
+and is unreliable. A **well-earned negative result**, consistent with the whole thesis (scarce
+alpha, entry timing dead, the post-mortem's bull-only breakeven). The discipline (frozen test +
+baseline gate + multi-seed) did exactly its job — it stopped a flattering-but-worse policy
+(+18% on one val window) from masquerading as progress. **Stance: the vol-tilt remains the
+strategy candidate; RL is a thoroughly-documented null.** Remaining RL lever (low EV): a
+turnover penalty to cut the fee drag — unlikely to close a 15-pt gap + the DQ breaches.
 
 ### In flight / next
 
