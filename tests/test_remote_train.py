@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import re
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 import remote_train as rt
@@ -139,6 +141,39 @@ def test_invalidate_cloudfront_calls_boto3(monkeypatch):
     assert calls["DistributionId"] == "DIST"
     assert calls["InvalidationBatch"]["Paths"]["Items"] == ["/apentic/data/*"]
     assert calls["InvalidationBatch"]["CallerReference"] == "ref1"
+
+
+def test_poll_state_from_terminal_progress(tmp_path):
+    # Hand-build a run dir; a terminal progress.state must win regardless of liveness.
+    store = tmp_path / "runs"
+    run_dir = store / "j-001"
+    art = run_dir / "artifacts"
+    art.mkdir(parents=True)
+    (run_dir / "spec.json").write_text('{"artifact_subdir": "artifacts"}')
+    (run_dir / "status.json").write_text('{"run_id":"j-001","state":"running","executor":"local"}')
+    (run_dir / "handle.json").write_text(
+        json.dumps({"executor": "local", "pid": 999999999, "artifact_dir": str(art)}))
+    rt.write_progress(art, state="complete", episode=7)
+
+    st = rt.poll("j-001", store=store, executor=LocalExecutor())
+    assert st.state == "succeeded" and st.progress["episode"] == 7
+
+
+def test_submit_background_launches_and_completes(tmp_path):
+    # no literal braces: entrypoint args pass through str.format for {artifact_dir} substitution
+    code = ("import sys,json,pathlib;"
+            "p=pathlib.Path(sys.argv[1]);p.mkdir(parents=True,exist_ok=True);"
+            "d=dict(state='complete',ok=1);"
+            "(p/'progress.json').write_text(json.dumps(d))")
+    spec = JobSpec(name="bg", entrypoint=[sys.executable, "-c", code, "{artifact_dir}"])
+    st = rt.submit_background(spec, executor=LocalExecutor(), store=tmp_path / "runs")
+    assert st.state in ("running", "succeeded")
+    for _ in range(250):                              # poll up to ~5s for the detached job
+        st = rt.poll(st.run_id, store=tmp_path / "runs", executor=LocalExecutor())
+        if st.done:
+            break
+        time.sleep(0.02)
+    assert st.state == "succeeded" and (st.progress or {}).get("ok") == 1
 
 
 def test_remote_train_never_imports_trader():

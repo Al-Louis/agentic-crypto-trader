@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from trader.train.env import N_OBS, PortfolioEnv
 
@@ -101,6 +102,22 @@ def test_drawdown_penalty_on_crash_keeps_reward_finite():
     assert all(np.isfinite(r) for r in rewards)
     assert info["drawdown"] > 0.15                    # penalty zone reached
     assert min(rewards) < 0.0                          # the penalty bit
+
+
+def test_gym_adapter_conforms_and_steps():
+    pytest.importorskip("gymnasium")        # adapter test only where gymnasium is installed
+    from gymnasium.utils.env_checker import check_env
+
+    from trader.train.gym_env import GymPortfolioEnv
+    returns, btc = _panel()
+    env = GymPortfolioEnv(returns, btc, _deep_liq(returns), episode_steps=8)
+    check_env(env, skip_render_check=True)   # gymnasium's API conformance check
+
+    obs, info = env.reset(seed=0)
+    assert obs.shape == (N_OBS,) and isinstance(info, dict)
+    obs, reward, terminated, truncated, info = env.step(np.array([0.5], dtype=np.float32))
+    assert obs.shape == (N_OBS,) and np.isfinite(reward)
+    assert isinstance(terminated, bool) and truncated is False
 
 
 def test_too_short_series_raises():

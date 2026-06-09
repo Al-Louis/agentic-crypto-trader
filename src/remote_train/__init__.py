@@ -20,13 +20,13 @@ from remote_train.publish import (
     publish,
     put_bytes,
 )
-from remote_train.runner import list_runs, status, submit
+from remote_train.runner import list_runs, poll, status, submit, submit_background
 from remote_train.spec import JobSpec, RunStatus
 
 __all__ = [
     "JobSpec", "RunStatus",
     "LocalExecutor", "SSHExecutor",
-    "submit", "status", "list_runs",
+    "submit", "submit_background", "poll", "status", "list_runs",
     "publish", "get_bytes", "put_bytes", "join", "invalidate_cloudfront",
     "write_progress", "read_progress",
 ]

@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import shlex
 import subprocess
 import tarfile
 from pathlib import Path
 
+from remote_train.progress import read_progress as _read_progress_file
 from remote_train.spec import JobSpec
 
 
@@ -41,6 +43,33 @@ class LocalExecutor:
                 stdout=log, stderr=subprocess.STDOUT, text=True,
             )
         return proc.returncode
+
+    # -- background (fire-and-poll) -----------------------------------------
+    def launch(self, spec: JobSpec, run_dir: Path, artifact_dir: Path, log_path: Path) -> dict:
+        """Start the job detached and return a handle (the job self-reports via progress.json)."""
+        argv, extra_env = _substitute(spec, run_dir, artifact_dir)
+        env = {**os.environ, **extra_env}
+        flags = ({"start_new_session": True} if os.name == "posix"
+                 else {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)})
+        log = open(log_path, "w", encoding="utf-8", errors="replace")  # noqa: SIM115 - child owns it
+        proc = subprocess.Popen(argv, cwd=spec.workdir, env=env,  # noqa: S603
+                                stdout=log, stderr=subprocess.STDOUT, **flags)
+        return {"executor": "local", "pid": proc.pid, "artifact_dir": str(artifact_dir)}
+
+    def read_progress(self, handle: dict) -> dict | None:
+        return _read_progress_file(Path(handle["artifact_dir"]))
+
+    def is_alive(self, handle: dict) -> bool:
+        pid = handle.get("pid")
+        if not pid:
+            return False
+        if os.name != "posix":
+            return True   # os.kill(pid,0) *terminates* on Windows — rely on progress.json state
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except OSError:
+            return False
 
 
 class SSHExecutor:
@@ -129,3 +158,46 @@ class SSHExecutor:
                 log.write(f"[ssh] artifact fetch attempt {attempt}/{attempts}: {last}\n")
         log.write(f"[ssh] artifact fetch failed after {attempts} attempts ({last})\n")
         return 1
+
+    # -- background (fire-and-poll) -----------------------------------------
+    def launch(self, spec: JobSpec, run_dir: Path, artifact_dir: Path, log_path: Path) -> dict:
+        """`nohup` the job detached on the host; return a handle. Status comes from progress.json."""
+        remote_run = f"{self.remote_workdir}/.runs/{run_dir.name}"
+        remote_artifacts = f"{remote_run}/{spec.artifact_subdir}"
+        sub = {"run_dir": remote_run, "artifact_dir": remote_artifacts}
+        argv = " ".join(shlex.quote(a.format(**sub)) for a in spec.entrypoint)
+        envs = " ".join(f"{k}={shlex.quote(v.format(**sub))}" for k, v in spec.env.items())
+        parts = [f"cd {shlex.quote(self.remote_workdir)}"]
+        if spec.repo_ref:
+            parts.append(f"git fetch --quiet && git checkout --quiet {shlex.quote(spec.repo_ref)}")
+        parts.append((f"{envs} " if envs else "") + argv)
+        inner = " && ".join(parts)
+        remote_cmd = (f"mkdir -p {shlex.quote(remote_artifacts)}; "
+                      f"nohup sh -c {shlex.quote(inner)} > {shlex.quote(remote_run)}/run.log 2>&1 "
+                      f"& echo $!")
+        proc = subprocess.run([self.ssh, *self.BASE_OPTS, *self.ssh_opts, self.host, remote_cmd],  # noqa: S603
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        pid = proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else ""
+        Path(log_path).write_text(f"[ssh] launched detached pid={pid}\n{proc.stderr}",
+                                  encoding="utf-8")
+        return {"executor": "ssh", "host": self.host, "remote_run": remote_run,
+                "remote_artifacts": remote_artifacts, "pid": pid}
+
+    def read_progress(self, handle: dict) -> dict | None:
+        cmd = f"cat {shlex.quote(handle['remote_artifacts'])}/progress.json 2>/dev/null"
+        proc = subprocess.run([self.ssh, *self.BASE_OPTS, *self.ssh_opts, handle["host"], cmd],  # noqa: S603
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            return json.loads(proc.stdout) if proc.stdout.strip() else None
+        except json.JSONDecodeError:
+            return None
+
+    def is_alive(self, handle: dict) -> bool:
+        pid = handle.get("pid")
+        if not pid:
+            return False
+        proc = subprocess.run(  # noqa: S603
+            [self.ssh, *self.BASE_OPTS, *self.ssh_opts, handle["host"],
+             f"kill -0 {shlex.quote(str(pid))} 2>/dev/null && echo 1 || echo 0"],
+            stdout=subprocess.PIPE, text=True)
+        return proc.stdout.strip() == "1"
