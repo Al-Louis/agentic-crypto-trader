@@ -22,8 +22,9 @@ self-contained summary for the frontend's **overview / leaderboard screen**. Fet
 ```
 { generated, dd_gate, totals:{ runs, configs },
   baseline:        { name, return_pct, window },        // vol-tilt overlay, same window
-  champion:        { config_label, mean_return, mean_maxdd, worst_maxdd, mean_sharpe, reproduce, … },
-  champion_criterion: "…",                              // how `champion` was chosen
+  champion:        { config_label, mean_return, mean_maxdd, worst_maxdd, mean_sharpe, reproduce, … }
+                   | null,                              // NULL when no config has passed OOS — handle it
+  champion_criterion: "…",                              // passed frozen test: split=test, beats test base, worst-seed under gate
   configs: [ {                                          // sorted by mean_return desc
      config_label, timesteps, n, seeds:[…],
      split,                 // "val" = tuning window; "test" = frozen OOS verdict — DON'T compare across
