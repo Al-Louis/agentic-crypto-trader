@@ -120,12 +120,21 @@ def main():
             "mean_sharpe": mean("sharpe"), "mean_pf": mean("pf"),
             "worst_maxdd": max((x["maxdd"] for x in rs if x["maxdd"] is not None), default=None),
             "timesteps": rs[0].get("timesteps"), "git": rs[0].get("git"),
+            "split": rs[0].get("split", "val"),
+            "baseline": next((x["baseline"] for x in rs if x["baseline"] is not None), None),
             "reproduce": reproduce_cmd(rs[0].get("config"), label),
             "legal_mean": mean("maxdd") < args.dd_gate,
         }
 
-    legal = {k: v for k, v in summary.items() if v["legal_mean"]}
-    champ = max((legal or summary), key=lambda k: summary[k]["mean_return"]) if summary else None
+    # Champion must have PASSED the frozen test: split=test, beats its test baseline, AND worst-seed
+    # drawdown under the gate. None ⇒ nothing has generalized out-of-sample yet (the honest state).
+    def _passed_oos(v):
+        return (v.get("split") == "test" and v["worst_maxdd"] is not None
+                and v["worst_maxdd"] < args.dd_gate
+                and v["baseline"] is not None and v["mean_return"] > v["baseline"])
+
+    oos_ok = {k: v for k, v in summary.items() if _passed_oos(v)}
+    champ = max(oos_ok, key=lambda k: summary[k]["mean_return"]) if oos_ok else None
     champion = dict(summary[champ], config_label=champ) if champ else None
     with open(os.path.join(OUT_DIR, "champion.json"), "w", encoding="utf-8") as f:
         json.dump({"champion": champion, "configs": summary, "dd_gate": args.dd_gate}, f, indent=2)
@@ -157,8 +166,8 @@ def main():
         "totals": {"runs": len(rows), "configs": len(summary)},
         "baseline": {"name": "vol-tilt(trend50)", "return_pct": baseline_ret, "window": "val"},
         "champion": champion,
-        "champion_criterion": ("best mean return under the mean-DD gate; see each config's "
-                               "gate_safe_worst for the deployment-honest worst-seed view"),
+        "champion_criterion": ("PASSED frozen-test OOS: split=test, beats its test baseline, AND "
+                               "worst-seed maxDD under the gate. null = nothing generalized yet."),
         "configs": [cfg_card(label, v) for label, v in
                     sorted(summary.items(), key=lambda x: -x[1]["mean_return"])],
     }
@@ -166,15 +175,18 @@ def main():
         json.dump(leaderboard, f, indent=2)
 
     print(f"ledger: {len(rows)} runs -> {OUT_DIR}/ledger.jsonl\n")
-    print(f"{'config':22}{'n':>3}{'mean ret':>10}{'mean DD':>9}{'worst DD':>9}{'Sharpe':>8}{'legal?':>8}")
-    for label, v in sorted(summary.items(), key=lambda x: -x[1]["mean_return"]):
-        print(f"{label:22}{v['n']:>3}{v['mean_return']*100:>+9.1f}%{v['mean_maxdd']*100:>8.1f}%"
-              f"{(v['worst_maxdd'] or 0)*100:>8.1f}%{v['mean_sharpe']:>8.2f}"
-              f"{('YES' if v['legal_mean'] else 'NO'):>8}")
+    print(f"{'config':20}{'split':>6}{'n':>3}{'mean ret':>10}{'mean DD':>9}{'worst DD':>9}{'vs base':>9}")
+    for label, v in sorted(summary.items(), key=lambda x: (x[1].get("split", "val"), -x[1]["mean_return"])):
+        base = v.get("baseline")
+        vs = f"{(v['mean_return'] - base) * 100:+.0f}pt" if base is not None else "?"
+        print(f"{label:20}{v.get('split', 'val'):>6}{v['n']:>3}{v['mean_return']*100:>+9.1f}%"
+              f"{v['mean_maxdd']*100:>8.1f}%{(v['worst_maxdd'] or 0)*100:>8.1f}%{vs:>9}")
     if champion:
-        print(f"\nCHAMPION (best mean return under {args.dd_gate:.0%} DD gate): "
-              f"{champ}  +{champion['mean_return']*100:.1f}% @ {champion['mean_maxdd']*100:.1f}% "
-              f"mean DD (worst seed {(champion['worst_maxdd'] or 0)*100:.1f}%)")
+        print(f"\nCHAMPION (passed frozen-test OOS): {champ}  +{champion['mean_return']*100:.1f}% "
+              f"@ worst-seed {(champion['worst_maxdd'] or 0)*100:.1f}% DD")
+    else:
+        print("\nCHAMPION: none — no config has passed frozen-test OOS "
+              "(beat its test baseline + worst-seed under the gate)")
 
     print(f"\nleaderboard -> {OUT_DIR}/leaderboard.json ({len(leaderboard['configs'])} configs)")
     if args.publish:
