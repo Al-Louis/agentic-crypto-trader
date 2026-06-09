@@ -85,6 +85,7 @@ class PortfolioEnv:
 
         cost = 0.0                                        # rebalance, charging AMM cost on turnover
         trades_usd: dict = {}
+        trade_fees: dict = {}
         for t in self.tokens:
             trade = float(fracs[t]) * eq_start - float(self.pos[t])
             if abs(trade) >= 1.0:
@@ -93,6 +94,7 @@ class PortfolioEnv:
                 self.pos[t] += trade
                 cost += c
                 trades_usd[t] = trade                     # +buy / −sell, for per-token markers
+                trade_fees[t] = c
         self.exposure = float(fracs.sum())
 
         # advance step_bars bars; capture the intra-step equity path for an honest drawdown
@@ -122,7 +124,8 @@ class PortfolioEnv:
         done = (self.step_count >= self.episode_steps or self.i >= self.n_bars - 1 or eq_new <= 0)
         info = {"equity": eq_new, "drawdown": dd, "exposure": self.exposure, "cost": cost,
                 "step_return": step_ret, "time": decision_time,
-                "weights": {t: float(fracs[t]) for t in self.tokens}, "trades_usd": trades_usd}
+                "weights": {t: float(fracs[t]) for t in self.tokens},
+                "trades_usd": trades_usd, "trade_fees": trade_fees}
         return self._obs(), float(reward), bool(done), info
 
     # -- pieces -------------------------------------------------------------

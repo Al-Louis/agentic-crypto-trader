@@ -71,7 +71,7 @@ def evaluate_policy(model, vecnorm, returns_win, btc_close, liq, env_kwargs):
         raw_actions.append(float(np.asarray(action).reshape(-1).sum()))  # total allocation weight
         obs, _, done, info = env.step(np.asarray(action).reshape(-1))
         records.append({"time": info["time"], "weights": info["weights"],
-                        "trades_usd": info["trades_usd"]})
+                        "trades_usd": info["trades_usd"], "trade_fees": info["trade_fees"]})
         fees += info["cost"]
         trades += 1 if info["cost"] > 0 else 0
     return (np.asarray(env.equity_curve, dtype=float), fees, trades, raw_actions, records,
@@ -113,6 +113,7 @@ def build_portfolio_artifacts(records, universe, t0, t1):
                 continue
             marks.append({"time": r["time"], "price": _price_at(win, r["time"]),
                           "side": "buy" if tr > 0 else "sell", "usd": abs(tr),
+                          "fee": r.get("trade_fees", {}).get(t, 0.0),
                           "weight": r["weights"].get(t, 0.0)})
         token_trades[t] = marks
     return weights, token_candles, token_trades
@@ -219,6 +220,24 @@ def main() -> None:
     # ---- portfolio bundle: allocation-over-time + per-token candles & buy/sell markers ----
     weights, token_candles, token_trades = build_portfolio_artifacts(
         records, universe, int(eval_r.index[0]), int(eval_r.index[-1]))
+
+    # accurate trade-level stats from the real per-token markers: the panel was counting rebalance
+    # *days* as "trades" (and win/loss were empty). FIFO round-trips per token, fees included.
+    from trader.sim.metrics import PerformanceMetrics as _PM
+    from trader.sim.metrics import Trade as _Trade
+    pnls, n_trades = [], 0
+    for marks in token_trades.values():
+        trs = [_Trade(side=m["side"], quantity=(m["usd"] / m["price"] if m["price"] else 0.0),
+                      price=(m["price"] or 0.0), fee=m.get("fee", 0.0)) for m in marks]
+        n_trades += len(trs)
+        pnls += _PM._compute_trade_pnls(trs)
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+    metrics["total_trades"] = n_trades
+    metrics["win_rate"] = len(wins) / max(len(pnls), 1)
+    metrics["profit_factor"] = float(sum(wins) / (abs(sum(losses)) + 1e-10))
+    metrics["avg_win_pct"] = float(np.mean(wins)) if wins else 0.0
+    metrics["avg_loss_pct"] = float(np.mean(losses)) if losses else 0.0
     entry = ap.export_portfolio_run(
         out, args.run_id, equity=eq_series, metrics=metrics, weights=weights,
         token_candles=token_candles, token_trades=token_trades, universe=universe,
@@ -235,7 +254,8 @@ def main() -> None:
                    total_return=report.total_return_pct, sharpe=report.sharpe_ratio,
                    max_drawdown=report.max_drawdown_pct, trades=trades)
     print(f"[train_rl] {args.run_id}: return {report.total_return_pct:+.1%}, "
-          f"Sharpe {report.sharpe_ratio:.2f}, maxDD {report.max_drawdown_pct:.1%}, trades {trades}")
+          f"Sharpe {report.sharpe_ratio:.2f}, maxDD {report.max_drawdown_pct:.1%}, "
+          f"trades {n_trades} (over {trades} rebalance days), win {metrics['win_rate']:.0%}")
 
 
 if __name__ == "__main__":
