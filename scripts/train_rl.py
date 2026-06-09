@@ -80,6 +80,9 @@ def main() -> None:
     p.add_argument("--publish-target", default=None, help="default: env APENTIC_PUBLISH_TARGET")
     p.add_argument("--step-bars", type=int, default=24)
     p.add_argument("--episode-steps", type=int, default=30)
+    p.add_argument("--ent-coef", type=float, default=0.2,    # post-mortem: low ent_coef → "always-wait" collapse
+                   help="PPO entropy coefficient (exploration)")
+    p.add_argument("--lr", type=float, default=3e-4, help="PPO learning rate")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     config.load_dotenv()
@@ -121,7 +124,8 @@ def main() -> None:
                                history_key="curve")
             return True
 
-    model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256)
+    model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
+                ent_coef=args.ent_coef, learning_rate=args.lr)
     model.learn(total_timesteps=args.timesteps, callback=ProgressCb())
 
     # ---- evaluate on held-out validation, build + publish the bundle ----
@@ -134,10 +138,11 @@ def main() -> None:
     metrics["total_fees_paid"] = fees
     metrics["fees_as_pct_of_pnl"] = fees / (abs(equity[-1] - equity[0]) + 1e-9)
 
-    idx = val_r.index
-    eq_series = pd.Series(equity, index=idx[:len(equity)] if len(idx) >= len(equity)
-                          else pd.RangeIndex(len(equity)))
-    candles = ap.candles_from_ohlcv(anchor.loc[idx[0]:idx[-1]].reset_index())
+    # equity points sit at step boundaries (warmup + k·step_bars), not consecutive bars
+    sb, wu = args.step_bars, env_kwargs["warmup"]
+    positions = [min(wu + k * sb, len(val_r) - 1) for k in range(len(equity))]
+    eq_series = pd.Series(equity, index=val_r.index[positions])
+    candles = ap.candles_from_ohlcv(anchor.loc[val_r.index[0]:val_r.index[-1]].reset_index())
 
     entry = ap.export_run(
         out, args.run_id, equity=eq_series, metrics=metrics, trades=[], candles=candles,
