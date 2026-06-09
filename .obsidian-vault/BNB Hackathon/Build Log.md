@@ -489,6 +489,39 @@ one for the contest). **Second hypothesis to lose to vol-top8** (after RL-from-s
 selection is the edge. Strategy side has converged; the open work is the **unbuilt Track-1 execution
 loop** (TWAK signing + on-chain registration — the June 16 PoC gate). See [[Trading Strategies]].
 
+## 2026-06-09 — Rung-0 made event-driven, then trade-logic forensics
+
+Pivoted rung-0 from a daily rebalance-to-target to a true **event-driven, intra-day** executor
+(act the hour a signal fires; let winners run untrimmed), then published it to the frontend and
+read the **actual buy/sell markers on the candles** — the only way to see whether the rules are
+too rigid. Built two diagnostics: `trace_gates.py` (per-bar entry/exit gates vs the real candle
+close — also catches strategy-space-vs-candle divergence) and `trace_funding.py` (portfolio-level
+funding/markers). The forensic read surfaced **four patterns**, three of them fixable bugs:
+
+1. **Capital model (the ZEC mystery) — silent accounting bug.** 20%-per-entry x up to 8 holds x
+   never-trim **starved cash after ~5 names**, so a great later ignition couldn't be funded — and
+   the state machine flipped it to `held=True` *anyway*, so it **phantom-held** through the whole
+   runup owning nothing, then logged a markerless paper-exit. ZEC's perfect May-1 ignition (+28%)
+   was lost this way (unfunded at cash=-$5). Fix: moved **all** held/cash/sizing state into
+   `run_rung0`; `held=True` only when **funded**; a fresh ignition with no cash does
+   **loser-funded rotation** — close the **weakest holding** (lowest price/EMA cushion) *only if*
+   it's weaker than the candidate, so winners stronger than the new opportunity are never trimmed.
+   Rotation sells recorded as markers (the [[Build Log]] re-rank-marker lesson). `build_rung0` is
+   now a **stateless per-bar signal**.
+2. **Volume-spike detector lagged ~11h.** The 24-bar trailing-*mean* diluted a sharp spike, firing
+   B's entry at +52% instead of the +22% ignition. Replaced with a sharp `vol_fast`(4)-bar surge —
+   B now enters at the May-11 06:00 ignition.
+3. **Low-quality re-entries whipsawed (SKYAI/Q/TAC/UB 2nd trades).** Brief micro-spikes near a flat
+   EMA stopped out in hours. Added a **trend gate** (price above a *rising* EMA) — SKYAI's
+   02:00->04:00 whipsaw eliminated.
+4. **Dead-zone guard confirmed working** — UB correctly stood aside through its -26% post-runup bleed.
+
+**OOS TEST:** +18.2% -> **+29.0%** (Sharpe 3.74, DD 17.4%) — rung-0 now **beats both vol-top8
+baselines on return AND drawdown** on the test split, the first time it has. **Caveat, not buried:**
+**VAL is -9.4% / 31.5% DD (a DQ)** — same code, a melt-up regime where stand-aside discipline hurts
+(plain-hold made +109%). Regime-dependence, not trained-overfit (these are hand rules), but it
+**must be understood before trusting +29%**. Bundle: `rung0-rotation-v4`. See [[Trading Strategies]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
