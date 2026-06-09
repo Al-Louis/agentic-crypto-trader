@@ -442,6 +442,27 @@ cause:
 gates). Still to add: cash/position conservation, fee totals, weight conservation, and the big one —
 **look-ahead / causality**.
 
+## 2026-06-09 (cont.) — Strategy pivot: committed candidate v1 (→ [[Trading Strategies]])
+
+After the OOS failure (RL-from-scratch doesn't generalize; vol-tilt baseline beats it) + the rerank
+A/B (universe freshness isn't the lever; re-ranking *tripled* turnover), pivoted from "RL learns
+allocation" to a **signal-grounded, rule-first** strategy, sketched with the user.
+
+- **Chassis decided:** (1) ≥1 trade/day is wallet-level total (confirmed in the rules: "7 over the
+  week") → **hold-by-default** with a no-trade band, killing the forced daily churn; (2) a
+  **rarely-fired ~25% drawdown backstop**, with primary DD management *learned* (its trigger rate =
+  a policy health metric).
+- **Edge = the user's discretionary discipline**, encoded as a per-token state machine: enter on a
+  confirmed trend, *let winners run*, exit on the rollover, **no-FOMO re-entry** (cooldown +
+  fresh-high), **dead-zone** (never churn sideways below the runup origin). Grounded in the SIREN
+  case (our RL FOMO-bought the $1.28 peak and churn-traded the corpse below origin 8+ times).
+- **Honest reconciliation with prior work:** momentum *selection* already failed here (negative IC,
+  mean-reverting; "entry alpha is dead, only low turnover survives"). The user's rules are **exit +
+  anti-churn discipline = the documented edge**, not the refuted selection claim — so v1 is the
+  proven **vol-top8** universe + that discipline, *not* a momentum-alpha bet.
+- **The ladder:** rung 0 = hand-set rules (interpretable, the new baseline-to-beat); RL tunes the
+  thresholds at rung 1+ only if it beats rung 0 OOS — so we never commit to one architecture blind.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

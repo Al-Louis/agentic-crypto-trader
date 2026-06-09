@@ -194,6 +194,63 @@ that clips 5% while staying under 15% drawdown beats one that peaks at 40% and g
 
 ---
 
+## Committed candidate v1 (2026-06-09) — disciplined trend-hold on vol-top8
+
+The first thing we actually build (**rung 0** of a rules→learned ladder). **Honest framing, grounded
+in this note's prior findings:** this is *not* a momentum-*selection* alpha play — that was tested
+here and failed (residual-momentum IC negative / mean-reverting; cross-sectional momentum churns
+thin pools to death and loses to costs; *"entry alpha is dead, only low turnover survives"*). It
+targets the **documented edge — exits + low turnover** — by wrapping the validated **vol-top8**
+selection in a discretionary **hold / exit / re-entry discipline** distilled from the user's manual
+trading. It is the vol-top8 baseline made *less churny and better at exits* — the two axes the
+cost-aware backtests say actually decide returns here.
+
+**Why this can beat the vol-top8 baseline (and why our RL lost to it).** Naive vol-top8 holds all 8
+equal-weight and rebalances daily — it churns and rides dead tokens down. SIREN (clean test bundle,
+2026-06): +84% runup to $1.28 on May 9, then bled **below its ~$0.69 origin** and chopped
+$0.45–0.53 for two weeks — and our RL *churn-traded that corpse 8+ times and FOMO-bought the $1.28
+peak*, running **3× the baseline's turnover**. This candidate forbids exactly that: ride the trend,
+exit on the rollover, then **stand aside in cash** — no churn, no FOMO re-entry.
+
+### Per-token state machine (the rules)
+
+| State | Trigger → action | Trader's rule |
+|---|---|---|
+| **Watch** (flat) | fresh confirmed uptrend (close > trend-EMA, new higher high) → **enter**, record **origin** = entry price | enter on a real move |
+| **Hold** | trend intact (price > peak·(1−k), above trend-EMA) → **hold, don't trim** | *let winners run* |
+| **Exit** | rollover: price drops k% off peak **or** close < trend-EMA → **sell to 0** | *if it stalls, sell and walk; never drawdown* |
+| **Cooldown** | after exit, **no re-entry** for M bars **and** until a *new* higher high above the prior peak | *no FOMO re-entry without fresh data* |
+| **Dead-zone** | price < origin **and** no fresh uptrend → **inactive: no position, no trades** | *never churn sideways below the origin* |
+
+### Starting thresholds (rung 0, hand-set — RL tunes these at rung 1)
+
+- **Trend filter / entry:** close > 24h EMA **and** a new N-bar high (N≈24). *Entry is a state gate,
+  not an alpha claim — per the IC finding it won't pick winners; its job is* when *to deploy.*
+- **Exit / trailing stop:** k ≈ 10–12% off the rolling peak, or close back below the 24h EMA.
+- **Cooldown:** M ≈ 24–48h after exit, plus a fresh higher-high above the prior peak to re-arm.
+- **Dead-zone reset:** cleared only by a new higher high above the prior cycle's peak.
+
+### Portfolio / chassis layer
+
+- **Active set ⊆ vol-top8:** hold only the trending members; dead-zone / exited members → **cash**
+  (a stablecoin — eligible, not dust, and the de-risk swap satisfies ≥1-trade/day).
+- **Sizing:** equal- or conviction-weight across the active set, per-token cap ≈ 25%.
+- **≥1 trade/day:** if a day produces no signal trade, a small compliance rebalance.
+- **Drawdown backstop:** hard de-risk to cash at **~25%** portfolio drawdown — a **rarely-fired**
+  safety net; primary drawdown management is the per-token exits + dead-zone (its trigger rate is a
+  *policy health metric*). See [[Security and Encryption]] / `src/trader/risk/`.
+
+### The ladder + validation
+
+- **Rung 0** = the hand-set thresholds above — fully interpretable; becomes the **new
+  baseline-to-beat** (replacing plain vol-top8).
+- **Rung 1+** = RL tunes the thresholds (entry confirmation, exit k, cooldown M, sizing/exposure),
+  kept **only if it beats rung 0 on the frozen test** ([[Experiment Log]] / OOS rig).
+- **Honest success criterion:** lower turnover + cleaner exits → higher OOS return at a survivable
+  worst-seed drawdown vs the vol-top8 baseline. We do **not** claim entry alpha.
+
+---
+
 ## Candidate strategy families
 
 These are not mutually exclusive and share the same execution/custody infrastructure.
