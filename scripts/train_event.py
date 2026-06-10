@@ -220,6 +220,10 @@ def main() -> None:
                    "init so the untrained policy ~= the rule and PPO must learn to deviate")
     p.add_argument("--tp-rungs", default="", help="profit-take prompts at these unrealized-gain levels "
                    "(comma list, e.g. 0.25,0.5,1,2) — lets the agent SELL INTO STRENGTH; '' = off")
+    p.add_argument("--eval-prepad", action="store_true", help="serve each eval window's 168-bar signal "
+                   "warmup from the TAIL OF THE PRIOR SPLIT (contiguous time), so the published window "
+                   "is tradeable from bar 0 — no dead first week on the charts; mirrors live trading, "
+                   "where full history always exists behind the current bar")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
     p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
@@ -258,13 +262,13 @@ def main() -> None:
 
     returns, btc, anchor, liq = load_data()
     train_r, val_r, test_r = time_split(returns)
+    train_pre = train_r                                     # pristine (pre-crash-injection) for eval prepad
     if args.crash_train > 0:                                # augment TRAINING data so the agent sees crashes
         from trader.sim.crash import inject_random_crashes
         train_r, placed = inject_random_crashes(train_r, n_crashes=args.crash_train,
                                                 rng=np.random.default_rng(args.seed),
                                                 total_drop=args.crash_depth, beta=args.crash_beta)
         print(f"[crash] injected {len(placed)} training crashes at bars {placed}")
-    eval_r = test_r if args.eval_split == "test" else val_r
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = dict(k=args.k, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
@@ -325,6 +329,9 @@ def main() -> None:
         from trader.sim.crash import inject_crash
         held["crash"] = inject_crash(test_r, at=len(test_r) // 2, duration=8,
                                      total_drop=args.crash_depth, beta=args.crash_beta, seed=args.seed)
+    if args.eval_prepad:                                   # serve the warmup from the PRIOR split's tail
+        prev = {"val": train_pre, "test": val_r, "crash": val_r}   # (contiguous time; pristine train)
+        held = {nm: pd.concat([prev[nm].tail(WARMUP), r]) for nm, r in held.items()}
     results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, predict_fn, args.seed)
                for nm, r in held.items()}
     pr = results[args.eval_split]                          # primary split -> the published bundle
@@ -340,7 +347,9 @@ def main() -> None:
                                                 pr["raw"], pr["report"])
     metrics = ap.metrics_to_frontend(report)
     metrics["total_fees_paid"] = fees
-    d0, d1 = int(eval_r.index[0]), int(eval_r.index[-1])
+    pub_r = held[args.eval_split]                          # published window starts at the first
+    d0 = int(pub_r.index[WARMUP if args.eval_prepad else 0])   # TRADEABLE bar when prepadded —
+    d1 = int(pub_r.index[-1])                              # no dead warmup week on the charts
     weights, candles, trades = build_portfolio_artifacts(records, universe, d0, d1)
     metrics.update(trade_stats(trades))
     metrics.update({"baseline_return": pr["base"], "buyhold_return": pr["bh"], "random_return": pr["rnd"],
@@ -369,6 +378,7 @@ def main() -> None:
                              "harvest_obs": args.harvest_obs, "rule_default": args.rule_default,
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
+                             "eval_prepad": args.eval_prepad,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
