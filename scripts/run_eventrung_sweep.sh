@@ -19,7 +19,10 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "rd8" ]; then                   # Rung-1b on VOLTOP8 (user: cut the calm tokens —
+if [ "$REWARD_MODE" = "rd8h" ]; then                  # rd8tp + harvest obs (r24/r3d/r7d, the probe-passed
+  PFX="ppo-event-rd8h"                                 # signal lever) + eval-prepad (window tradeable bar 0)
+  EXTRA="--reward-mode relative --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --harvest-obs --eval-prepad --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --crash-train 4 --crash-eval --norm-reward --dd-lambda 0.5 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "rd8" ]; then                 # Rung-1b on VOLTOP8 (user: cut the calm tokens —
   PFX="ppo-event-rd8"                                  # they bleed; concentrate on the monsters)
   EXTRA="--reward-mode relative --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --crash-train 4 --crash-eval --norm-reward --dd-lambda 0.5 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "rd8tp" ]; then               # rd8 + profit-take prompts (sell into strength)
