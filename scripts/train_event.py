@@ -65,23 +65,27 @@ def rung0_baseline_return(eval_r, liq, vol):
     return float(eq.iloc[-1] / eq.iloc[0] - 1.0)
 
 
-def _eval_universe(eval_r, k=8, warmup=WARMUP):
-    """The same causal vol-top-k universe the env trades (EventRungEnv._pick_universe at start=WARMUP):
-    rank by trailing-`warmup` return std measured at WARMUP-1 (no look-ahead)."""
-    std = eval_r.rolling(warmup, min_periods=8).std().to_numpy()
-    order = np.argsort(np.nan_to_num(std[warmup - 1], nan=-1.0))[::-1][:k]
-    return [eval_r.columns[j] for j in order]
+def eval_universe_and_caps(eval_r, btc, liq, vol, env_kwargs):
+    """The EXACT universe + per-token weight caps the agent trades on this window — instantiate the
+    env and read `env.universe` / `env._tok_cap`, so the Buy&Hold benchmark and the regime are over
+    the SAME basket the policy uses (mirrors universe_mode + vol_target; no duplicated pick logic)."""
+    from trader.train.event_env import EventRungEnv
+    kw = {k: v for k, v in env_kwargs.items() if k != "episode_bars"}
+    env = EventRungEnv(eval_r, btc, liq, volume=vol, episode_bars=len(eval_r) - WARMUP - 1, **kw)
+    env.reset(start=WARMUP)
+    return list(env.universe), dict(env._tok_cap)
 
 
-def buy_and_hold_return(eval_r, liq, k=8, warmup=WARMUP, capital=10_000.0):
-    """Equal-weight BUY & HOLD of the eval window's vol-top-k universe — the honest market baseline
-    every model must beat to earn a version ([[AI Training]]). Entry AMM cost charged once via the
-    SAME broker the agent pays (costs applied equally to agent and benchmark)."""
-    uni = _eval_universe(eval_r, k, warmup)
+def buy_and_hold_return(eval_r, liq, universe, caps, warmup=WARMUP, capital=10_000.0):
+    """BUY & HOLD of the AGENT'S OWN universe, weighted by its risk-parity caps (weight proportional
+    to cap = capped inverse-vol), fully invested at warmup, entry AMM cost once via the same broker.
+    The honest 'passive version of the same strategy' bar — NOT a different basket ([[AI Training]])."""
     px = (1.0 + eval_r.fillna(0.0)).cumprod().to_numpy()
     cix = {t: i for i, t in enumerate(eval_r.columns)}
-    alloc, eq_end = capital / len(uni), 0.0
-    for t in uni:
+    wsum = sum(caps[t] for t in universe) or 1.0
+    eq_end = 0.0
+    for t in universe:
+        alloc = (caps[t] / wsum) * capital
         j = cix[t]
         p0 = px[warmup, j]
         if p0 <= 0:
@@ -118,16 +122,45 @@ def honest_gate(pol, rung0, buyhold, random_):
     return passed, binding
 
 
-def eval_regime(eval_r, btc, k=8, warmup=WARMUP):
-    """The eval window's regime so 'beats the rule' can never hide 'lost to the market': BTC return
-    and the universe equal-weight return over warmup->end, with a bull/bear/flat label."""
-    uni = _eval_universe(eval_r, k, warmup)
+def eval_regime(eval_r, btc, universe, warmup=WARMUP):
+    """The eval window's regime over the AGENT'S universe so 'beats the rule' can never hide 'lost to
+    the market': BTC return and the universe equal-weight return over warmup->end, bull/bear/flat."""
     px = (1.0 + eval_r.fillna(0.0)).cumprod()
-    uni_ew = float(np.mean([px[t].iloc[-1] / px[t].iloc[warmup] - 1.0 for t in uni]))
+    uni_ew = float(np.mean([px[t].iloc[-1] / px[t].iloc[warmup] - 1.0 for t in universe]))
     b = btc.reindex(eval_r.index).ffill().bfill().to_numpy()
     btc_ret = float(b[-1] / b[warmup] - 1.0) if b[warmup] else 0.0
     label = "bull" if uni_ew > 0.10 else "bear" if uni_ew < -0.10 else "flat"
     return {"btc_return": btc_ret, "universe_ew_return": uni_ew, "label": label}
+
+
+def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed):
+    """Run the policy on one split and grade it through the full honest gate (universe-matched
+    Buy&Hold, Random-through-env, rung-0, regime). Returns everything needed to publish + report."""
+    eq, records, universe, fees, raw = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
+    report = PerformanceMetrics.compute_all(eq.to_numpy(), steps_per_year=HOURS_PER_YEAR)
+    pol = report.total_return_pct
+    uni, caps = eval_universe_and_caps(eval_r, btc, liq, vol, env_kwargs)
+    base = rung0_baseline_return(eval_r, liq, vol)
+    bh = buy_and_hold_return(eval_r, liq, uni, caps)
+    rnd = random_baseline_return(eval_r, btc, liq, vol, env_kwargs, seed=seed)
+    regime = eval_regime(eval_r, btc, uni)
+    gate_pass, binding = honest_gate(pol, base, bh, rnd)
+    return {"name": name, "eq": eq, "records": records, "universe": universe, "fees": fees, "raw": raw,
+            "report": report, "pol": pol, "base": base, "bh": bh, "rnd": rnd, "regime": regime,
+            "gate_pass": gate_pass, "binding": binding}
+
+
+def print_verdict(r):
+    """Print the per-split [regime]/[baselines]/[verdict]/[gate] block for one split's result."""
+    rg, rep = r["regime"], r["report"]
+    print(f"[{r['name']}] regime: BTC {rg['btc_return']:+.1%}  universe-EW {rg['universe_ew_return']:+.1%}  "
+          f"({rg['label']})  |  Buy&Hold {r['bh']:+.1%}  Random {r['rnd']:+.1%}  rung-0 {r['base']:+.1%}")
+    print(f"[{r['name']}] policy {r['pol']:+.1%} (Sh {rep.sharpe_ratio:.2f}, DD {rep.max_drawdown_pct:.1%}) | "
+          f"vs Buy&Hold {'BEATS' if r['pol'] > r['bh'] else 'LOSES'} ({r['pol'] - r['bh']:+.1%}) | "
+          f"vs rung-0 {'BEATS' if r['pol'] > r['base'] else 'LOSES'} ({r['pol'] - r['base']:+.1%}) | "
+          f"vs Random {'BEATS' if r['pol'] > r['rnd'] else 'LOSES'}")
+    print(f"[{r['name']}] gate: {'PASS' if r['gate_pass'] else 'FAIL'}"
+          + ("" if r["gate_pass"] else f" (binding: {r['binding']})"))
 
 
 def main() -> None:
@@ -233,34 +266,34 @@ def main() -> None:
         a, _ = model.predict(norm, deterministic=True)
         return np.asarray(a).reshape(-1)
 
-    eq, records, universe, fees, raw = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
-    print(f"[eval] events={len(raw)} action mean={np.mean(raw):.3f} min={min(raw):.3f} max={max(raw):.3f}")
+    # Per-regime held-out eval: grade the policy on BOTH val and test (the reversal pocket AND the
+    # BTC-bear/alt-flat window) so a pass can't hide in the friendlier regime. Overall gate = all pass.
+    held = {"val": val_r, "test": test_r}
+    results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, predict_fn, args.seed)
+               for nm, r in held.items()}
+    pr = results[args.eval_split]                          # primary split -> the published bundle
+    print(f"[eval] primary={args.eval_split} events={len(pr['raw'])} action "
+          f"mean={np.mean(pr['raw']):.3f} min={min(pr['raw']):.3f} max={max(pr['raw']):.3f}")
+    for nm in ("val", "test"):
+        print_verdict(results[nm])
+    overall_gate = all(r["gate_pass"] for r in results.values())
+    print(f"[gate] OVERALL: {'PASS - beats every baseline on EVERY held-out regime' if overall_gate else 'FAIL'}"
+          + ("" if overall_gate else " - must clear rung-0 + Buy&Hold + Random on val AND test"))
 
-    report = PerformanceMetrics.compute_all(eq.to_numpy(), steps_per_year=HOURS_PER_YEAR)
+    eq, records, universe, fees, raw, report = (pr["eq"], pr["records"], pr["universe"], pr["fees"],
+                                                pr["raw"], pr["report"])
     metrics = ap.metrics_to_frontend(report)
     metrics["total_fees_paid"] = fees
     d0, d1 = int(eval_r.index[0]), int(eval_r.index[-1])
     weights, candles, trades = build_portfolio_artifacts(records, universe, d0, d1)
     metrics.update(trade_stats(trades))
-    # --- the honest gate: every model is judged against rung-0 AND Buy&Hold AND Random, with the
-    # eval regime printed so "beats the rule" can never hide "lost to the market" ([[AI Training]]).
-    pol = report.total_return_pct
-    base = rung0_baseline_return(eval_r, liq, vol)
-    bh = buy_and_hold_return(eval_r, liq)
-    rnd = random_baseline_return(eval_r, btc, liq, vol, env_kwargs, seed=args.seed)
-    regime = eval_regime(eval_r, btc)
-    gate_pass, binding = honest_gate(pol, base, bh, rnd)
-    metrics.update({"baseline_return": base, "buyhold_return": bh, "random_return": rnd,
-                    "regime": regime, "gate_pass": gate_pass, "gate_binding": binding})
-    print(f"[regime] {args.eval_split}: BTC {regime['btc_return']:+.1%}  "
-          f"universe-EW {regime['universe_ew_return']:+.1%}  ({regime['label']})")
-    print(f"[baselines] Buy&Hold {bh:+.1%}  Random {rnd:+.1%}  rung-0 {base:+.1%}")
-    print(f"[verdict] policy {pol:+.1%} (Sh {report.sharpe_ratio:.2f}, DD {report.max_drawdown_pct:.1%}) | "
-          f"vs Buy&Hold {'BEATS' if pol > bh else 'LOSES'} ({pol - bh:+.1%}) | "
-          f"vs rung-0 {'BEATS' if pol > base else 'LOSES'} ({pol - base:+.1%}) | "
-          f"vs Random {'BEATS' if pol > rnd else 'LOSES'} ({pol - rnd:+.1%})")
-    print(f"[gate] {'PASS - beats all honest baselines' if gate_pass else 'FAIL'}"
-          + ("" if gate_pass else f" - must beat Buy&Hold + Random + rung-0; binding: {binding}"))
+    metrics.update({"baseline_return": pr["base"], "buyhold_return": pr["bh"], "random_return": pr["rnd"],
+                    "regime": pr["regime"], "gate_pass": overall_gate, "gate_binding": pr["binding"],
+                    "regimes": {nm: {"return": r["pol"], "baseline_return": r["base"],
+                                     "buyhold_return": r["bh"], "random_return": r["rnd"],
+                                     "regime": r["regime"], "maxdd": r["report"].max_drawdown_pct,
+                                     "gate_pass": r["gate_pass"], "gate_binding": r["binding"]}
+                                for nm, r in results.items()}})
 
     import subprocess
     try:

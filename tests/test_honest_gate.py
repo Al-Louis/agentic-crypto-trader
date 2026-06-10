@@ -57,26 +57,36 @@ def test_gate_binding_prefers_market_over_rule():
 
 # -- the baselines (computed on the same universe/broker the agent uses) -------
 
-def test_buyhold_uses_voltopk_universe_and_is_deterministic():
+def test_buyhold_over_agent_universe_and_deterministic():
     returns, btc, vol, liq = _panel()
-    bh = te.buy_and_hold_return(returns, liq, k=3, warmup=30)
-    assert bh > 0.0                                  # the runup is in the vol-top-k universe
-    assert bh == te.buy_and_hold_return(returns, liq, k=3, warmup=30)  # no RNG, reproducible
+    uni, caps = te.eval_universe_and_caps(returns, btc, liq, vol, dict(k=3, seed=0))
+    bh = te.buy_and_hold_return(returns, liq, uni, caps)
+    assert bh > 0.0                                  # the runup is in the universe the agent holds
+    assert bh == te.buy_and_hold_return(returns, liq, uni, caps)   # no RNG, reproducible
 
 
-def test_eval_universe_matches_env_pick_universe():
-    """Buy&Hold must rank the SAME tokens the env trades, or the benchmark is on the wrong basket."""
+def test_eval_universe_and_caps_mirror_the_env():
+    """Buy&Hold/regime must be over the SAME basket the env trades, or the benchmark is rigged."""
     from trader.train.event_env import EventRungEnv
     returns, btc, vol, liq = _panel()
-    env = EventRungEnv(returns, btc, liq, volume=vol, k=3, ema_span=10, warmup=30,
-                       episode_bars=300, seed=0)
-    env.reset(start=30)
-    assert set(te._eval_universe(returns, k=3, warmup=30)) == set(env.universe)
+    uni, caps = te.eval_universe_and_caps(returns, btc, liq, vol, dict(k=3, seed=0))
+    env = EventRungEnv(returns, btc, liq, volume=vol, k=3, episode_bars=200, seed=0)
+    env.reset(start=te.WARMUP)
+    assert set(uni) == set(env.universe) and set(caps) == set(env._tok_cap)
+
+
+def test_buyhold_risk_parity_weights_track_caps():
+    """With vol_target>0, Buy&Hold weights are cap-proportional (risk-parity), not equal-weight."""
+    returns, btc, vol, liq = _panel()
+    uni, caps = te.eval_universe_and_caps(returns, btc, liq, vol,
+                                          dict(k=3, vol_target=0.003, cap_floor=0.01))
+    assert len(set(round(c, 6) for c in caps.values())) > 1   # caps differ by token volatility
 
 
 def test_regime_labels_and_fields():
     returns, btc, vol, liq = _panel()
-    r = te.eval_regime(returns, btc, k=3, warmup=30)
+    uni, _ = te.eval_universe_and_caps(returns, btc, liq, vol, dict(k=3, seed=0))
+    r = te.eval_regime(returns, btc, uni)
     assert set(r) == {"btc_return", "universe_ew_return", "label"}
     assert r["label"] in {"bull", "bear", "flat"}
     assert r["label"] == ("bull" if r["universe_ew_return"] > 0.10
