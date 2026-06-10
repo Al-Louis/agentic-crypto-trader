@@ -12,6 +12,7 @@ This is the map of content (MOC) for my entry into the [[BNB Hack - AI Trading A
 - [[Project Overview]] - Neutral scope, four-surface stack, objective, and build path
 - [[Tech Stack]] - Project scaffolding, environment, build, SDK and API reference
 - [[MCP Server]] - Isolated project MCP server: tool catalog, safety tiers, build phasing
+- [[Agent Communication Contract]] - **Normative**: how agents/workflows/MCP stay pointed at the goal (the success-metric gate, North-Star Header, drift alarm)
 - [[Market Conditions]] - Macro/micro trends, market sentiment
 - [[Trading Strategies]] - Technical indicators, wallet monitoring, asset comparison
 - [[Token Universe]] - The 20 tradeable tokens, selection methodology, and the theory behind them

@@ -14,6 +14,11 @@ mistake costs real funds or the self-custody score. Read `CLAUDE.md` and the vau
 ([[Security and Encryption]], [[Real-time Monitoring]], [[Tech Stack]]) and the TWAK docs
 under `.obsidian-vault/References/trust-wallet-agent-kit/` before acting.
 
+**Bound by the [[Agent Communication Contract]]** — restate the live goal and experiment/build state
+before proposing, and sound the drift alarm and stop if a task is disconnected from it. (Your work is
+keyless and execution-side, but the contract's discipline — carry the goal, refuse a disconnected
+frame — applies to every agent.)
+
 ## Scope you own
 
 - **Self-custody signing via TWAK** — local signing through the entire trade loop; custody

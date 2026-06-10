@@ -1,0 +1,125 @@
+# Agent Communication Contract
+
+The rules that keep every agent — spawned by a human, by a workflow, or by the project
+[[MCP Server]] — pointed at the **actual goal** instead of the narrow sub-problem in front of
+it. This note is **normative**: agent definitions (`.claude/agents/*.md`), workflows, and the
+MCP train-loop all reference it, and the orchestrator (whoever is driving) is bound by it.
+
+## Why this exists (the receipts)
+
+exp1→exp5 (see [[Experiment Log]]) spent ~a day and four overnight sweeps optimizing a reward
+**proxy** (`entry_forward` deviation-correlation) that had quietly stopped rewarding profit.
+The verdict line printed **"BEATS the rule"** the whole time — while a **+7% market** made the
+policy's **−4.7%** a *loss to buy-and-hold*. The agent learned to **barely trade** (6 trades/episode)
+because the reward paid it to skip. None of this was caught until a human asked "wait, is this
+even a bearish regime?" — and it wasn't.
+
+**The breakdown was not missing documentation.** The `rl-ml-trainer` definition *already* said
+"evaluate against Buy & Hold… iterate against the baselines, not your hopes," and [[AI Training]]
+*already* warned "every model must beat Buy&Hold and Random to earn a version" and "fee-blind
+reward taught the agent to not trade." We violated docs that named the exact failure. The
+breakdown was in **orchestration**, in three places this contract closes:
+
+1. **Narrow, pre-framed prompts.** Each consult handed the agent a locked frame ("fix the
+   corner," "redesign the conditional-sizing reward"). A subagent answers *the question asked* —
+   it did, well — and never re-grounded on "does this serve PnL-vs-Buy&Hold?"
+2. **Stateless agents can't see drift.** A spawned agent sees ONLY its system prompt + the task
+   prompt. Not the conversation, not the other consults, not the running experiment state, not
+   the thesis. "Read the vault" loads *static* docs; it cannot tell the agent "you're five
+   experiments deep optimizing a proxy that abandoned profit." Only the orchestrator holds that
+   running context — and the orchestrator is what drifted.
+3. **The gate lived in prose, not code.** "Beat Buy&Hold" sat in two markdown files and zero
+   lines of `train_event.py`, so it was silently skippable. (Now closed — see The Success Metric.)
+
+## The mental model: spawned agents are stateless and blind
+
+Treat every `Agent`/workflow/MCP spawn as a **brilliant specialist with total amnesia** who
+just walked into the room. They know their craft (their system prompt) but **nothing about why
+they're here today** unless you tell them, in the prompt, every time. They cannot catch
+cross-task drift; they have no memory of the last task. The burden is on the **orchestrator** to
+carry the goal into every prompt, and on the **agent** to refuse a frame that's disconnected
+from it.
+
+## The North-Star Header (inject into EVERY agent task prompt)
+
+Every task handed to an agent — by a human, a workflow, or the MCP server — **must** be prefixed
+with this block, filled in with live values. No bare sub-problems.
+
+```
+## North star
+GOAL: a self-custody RL trading agent that is PROFITABLE and risk-managed on live PnL
+      (June 22–28), under the ~30% max-drawdown DQ gate. rung-0 is the baseline to BEAT,
+      never a destination.
+SUCCESS METRIC (non-negotiable): on HELD-OUT data, the policy must beat ALL of
+      { rung-0 rule, Buy&Hold of the traded universe, Random discretion } — reported
+      PER REGIME (bull/bear/flat). This is `honest_gate()` in scripts/train_event.py.
+      A reward proxy is legitimate ONLY with evidence that proxy ⇒ this metric.
+LIVE STATE: <current experiment id> | last result: policy <x%> vs B&H <y%> / rung-0 <z%> /
+      Random <w%> on <split>, regime <bull/bear/flat> | open blocker: <…>
+THE ASK: <the specific sub-problem>
+```
+
+The agent **must restate the success metric and the live state in its own words before
+proposing anything** — that read-back is the proof the frame landed.
+
+## Orchestrator obligations (human, workflow, or MCP)
+
+- **Always inject the North-Star Header.** Never send a sub-problem ("fix this reward") without
+  the goal, the metric, and the live state attached.
+- **Carry the running context the agent can't see** — what's been tried, what the last result
+  was *against all baselines*, what regime, why we're here. The agent is amnesiac; you are not.
+- **Frame the problem, not the solution.** Ask "how do we make the policy beat Buy&Hold here,"
+  not "tune γ on this proxy." A pre-loaded solution frame is how exp1→exp5 happened.
+- **Run the re-grounding checkpoint** (below) before any reward/objective change.
+
+## Agent obligations
+
+- **Read [[CLAUDE.md|CLAUDE.md]] and your owned notes before acting** (already in every agent def).
+- **Restate the success metric + live state before proposing.** If you can't, you don't have the
+  frame — ask for it.
+- **Sound the drift alarm.** If the ask seems disconnected from the goal or the success metric —
+  e.g. "optimize a proxy with no stated link to PnL-vs-Buy&Hold," or "celebrate beating rung-0
+  with no Buy&Hold number" — **say so explicitly and stop**, rather than optimizing locally. This
+  is the single thing a stateless agent *can* do that the orchestrator failed to: refuse the frame.
+- **Never present a training curve or a beat-the-rule number as success.** Success is the gate.
+
+## The success metric — now in code, not prose
+
+`scripts/train_event.py` computes, prints, and persists every run:
+
+- `buy_and_hold_return` — equal-weight B&H of the **same** causal vol-top-k universe the env
+  trades, paying the **same** AMM broker (costs applied equally).
+- `random_baseline_return` — random discretion through the **same** event env (the floor).
+- `eval_regime` — BTC + universe-EW return with a bull/bear/flat label, printed every run.
+- `honest_gate(pol, rung0, buyhold, random) -> (passed, binding)` — the **single source of
+  truth**: a model earns a version only if it beats all three. Reused by the MCP train-loop's
+  continue/stop decision. **Buy&Hold is non-negotiable** — a result without it cannot pass.
+
+`compare_seeds` surfaces the same gate on the seed-mean. Tests: `tests/test_honest_gate.py`.
+
+## The re-grounding checkpoint (before any reward/objective change)
+
+Answer, in writing, before changing what the agent optimizes:
+
+1. **Does this reward optimize PnL-vs-Buy&Hold directly?** If yes, proceed.
+2. **If it's a proxy, what's the evidence that proxy ⇒ PnL-vs-Buy&Hold?** Name it. No evidence ⇒
+   don't ship it; the proxy is a hypothesis, not a result.
+3. **What regime is the eval window, and does the change help in the regime we'll trade live?**
+   ("Loses less in a flat market" is not an edge.)
+
+## For MCP automation (the disaster this prevents)
+
+If the [[MCP Server]] runs the train→evaluate→diagnose loop unattended, all three failures above
+compound with **no human to catch them**. So the loop MUST:
+
+- **Inject the North-Star Header into every agent it spawns**, with live state pulled from the
+  last bundle's metrics (`gate_pass`, `buyhold_return`, `regime`, …).
+- **Gate continue/stop on `honest_gate`, never on the proxy reward or "beat rung-0."** The loop's
+  notion of "better" is the held-out gate across regimes — nothing else.
+- **Sound a drift alarm and halt → escalate to a human** after N consecutive experiments with no
+  improvement in policy-vs-Buy&Hold. Silent iteration toward a proxy is the exact rabbit hole.
+- **Never auto-promote a champion that hasn't cleared the gate on held-out test across regimes.**
+
+## Related
+
+[[CLAUDE.md]] · [[MCP Server]] · [[AI Training]] · [[Experiment Log]] · [[Project Overview]]

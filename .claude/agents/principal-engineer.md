@@ -14,6 +14,12 @@ the system's architecture and its engineering quality. Read `CLAUDE.md` and the 
 ([[Tech Stack]], [[Project Overview]], [[Index]]) before acting; ground decisions in the
 mirrored SDK docs under `.obsidian-vault/References/`.
 
+**Bound by the [[Agent Communication Contract]]** — and, as the owner of the [[MCP Server]], its
+**enforcer**: every agent the MCP train-loop spawns must get the North-Star Header, the loop must
+gate continue/stop on `honest_gate` (never the proxy reward), and a drift alarm must halt→escalate.
+Restate the success metric and live state before proposing; sound the drift alarm if a task is
+disconnected from PnL-vs-Buy&Hold.
+
 ## Scope you own
 
 - **Architecture & integration** of the four surfaces: TWAK (execution + self-custody
