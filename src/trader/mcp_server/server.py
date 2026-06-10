@@ -121,13 +121,20 @@ def rl_compare(prefix: str, seeds: str = "0 1 2 3") -> dict:
 
 
 def rl_diagnose_data(prefix: str, seeds: list[str], *, dd_gate: float = 0.30) -> dict:
-    """Assemble the verdict packet the agent reads (pure over the two diagnostic cores)."""
+    """Assemble the verdict packet the agent/loop reads — judged on the HONEST gate, not beat-rung-0.
+
+    Success = `honest_gate` (vault "Agent Communication Contract"): the seed-mean must beat ALL of
+    { rung-0, Buy&Hold, Random } reported per regime, AND clear the drawdown DQ. Reporting
+    "beats rung-0" alone is the exact drift that lost exp1→exp5 a day, so the gate here is
+    `compare_seeds.gate_pass_mean` (the in-code `honest_gate`) AND the DD guard — never beat-rung-0.
+    """
     from trader.experiment.diagnostics import compare_seeds, deviation_alpha
     cmp = compare_seeds(prefix, seeds, host=DATA_CDN)
     dev = deviation_alpha(prefix, seeds, host=DATA_CDN)
     worst_dd = cmp.get("worst_maxdd")
-    gate_pass = (cmp.get("n", 0) > 0 and bool(cmp.get("beats_baseline"))
-                 and worst_dd is not None and worst_dd < dd_gate)
+    dd_ok = worst_dd is not None and worst_dd < dd_gate
+    honest = bool(cmp.get("gate_pass_mean"))       # beats rung-0 AND Buy&Hold AND Random (per regime)
+    gate_pass = cmp.get("n", 0) > 0 and honest and dd_ok
     return {
         "prefix": prefix,
         "reward_capacity": {k: dev.get(k) for k in
@@ -135,15 +142,25 @@ def rl_diagnose_data(prefix: str, seeds: list[str], *, dd_gate: float = 0.30) ->
                              "entry_size_min", "entry_size_max", "verdict")},
         "performance": {k: cmp.get(k) for k in
                         ("n", "mean_return", "spread", "worst_return", "best_return",
-                         "mean_maxdd", "worst_maxdd", "baseline", "beats_baseline")},
-        "gate": {"dd_gate": dd_gate, "worst_maxdd": worst_dd,
-                 "beats_baseline": bool(cmp.get("beats_baseline")), "gate_pass": gate_pass},
+                         "mean_maxdd", "worst_maxdd", "baseline", "buyhold", "random")},
+        "regime": cmp.get("regime"),
+        "honest_gate": {
+            "gate_pass": gate_pass,                  # the SINGLE source of truth: honest gate AND DD
+            "honest_gate_mean": honest,              # honest_gate on the seed-mean (beats all 3)
+            "binding": cmp.get("gate_binding"),      # which baseline it fails: rung-0 / Buy&Hold / Random
+            "beats_rung0": cmp.get("beats_baseline"),
+            "beats_buyhold": cmp.get("beats_buyhold"),
+            "all_seeds_pass": cmp.get("gate_pass_all_seeds"),
+            "dd_ok": dd_ok, "worst_maxdd": worst_dd, "dd_gate": dd_gate,
+        },
+        "note": ("success = honest_gate: beat rung-0 AND Buy&Hold AND Random, per regime, on "
+                 "held-out data — NOT beat-rung-0 alone (vault 'Agent Communication Contract')."),
     }
 
 
 @mcp.tool()
 def rl_diagnose(prefix: str, seeds: str = "0 1 2 3") -> dict:
-    """The verdict packet: deviation-alpha (reward- vs capacity-bound) + return/DD + the honest gate."""
+    """Verdict packet: deviation-alpha (reward- vs capacity-bound) + return/DD + the HONEST gate."""
     return rl_diagnose_data(prefix, _seeds(seeds))
 
 
@@ -179,6 +196,21 @@ def experiment_champion() -> dict:
     """The current best config + its exact reproduce command (reads committed experiments/champion.json)."""
     from trader.experiment.champion import read_champion
     return read_champion(EXPERIMENTS)
+
+
+@mcp.tool()
+def rl_north_star(ask: str, prefix: str | None = None, seeds: str = "0 1 2 3") -> dict:
+    """Build the North-Star Header to prefix onto an agent/loop consult (Agent Communication Contract).
+
+    Stateless agents are blind, so EVERY consult must carry the goal + the honest-gate success metric
+    + live experiment state, or it drifts (exp1→exp5). Pass the sub-problem as `ask`; if `prefix` is
+    given, live state is pulled from that sweep's latest bundle (split inferred from a `-test` suffix).
+    Returns the ready-to-prepend `header` string — the loop injects this into every agent it spawns.
+    """
+    from trader.experiment.contract import north_star_header
+    diag = rl_diagnose_data(prefix, _seeds(seeds)) if prefix else None
+    split = "test" if (prefix and prefix.endswith("-test")) else "val" if prefix else "?"
+    return {"header": north_star_header(ask, diag, split=split), "live_diag": diag}
 
 
 # ---- RL experiment loop — LAUNCH tier (🟡 SIMULATE) ----------------------------------------

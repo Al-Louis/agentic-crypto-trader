@@ -174,21 +174,61 @@ def test_write_then_read_champion(tmp_path):
 
 # ---- server: the verdict packet assembly ------------------------------------------------
 
-def test_rl_diagnose_data_packet(monkeypatch):
+def test_rl_diagnose_data_uses_honest_gate(monkeypatch):
     from trader.mcp_server import server
+    # Honest gate clears (beats all 3) + DD ok ⇒ gate_pass. Note beats_baseline alone is NOT enough.
     monkeypatch.setattr("trader.experiment.diagnostics.compare_seeds",
                         lambda *a, **k: {"n": 4, "mean_return": 0.15, "spread": 0.02,
                                          "worst_return": 0.13, "best_return": 0.18,
-                                         "mean_maxdd": 0.21, "worst_maxdd": 0.28,
-                                         "baseline": 0.10, "beats_baseline": True})
+                                         "mean_maxdd": 0.21, "worst_maxdd": 0.28, "baseline": 0.10,
+                                         "buyhold": 0.12, "random": 0.05, "regime": {"label": "bull"},
+                                         "beats_baseline": True, "beats_buyhold": True,
+                                         "gate_pass_mean": True, "gate_binding": None,
+                                         "gate_pass_all_seeds": True})
     monkeypatch.setattr("trader.experiment.diagnostics.deviation_alpha",
-                        lambda *a, **k: {"n_entries": 40, "corr": 0.01, "over_mean": -0.01,
-                                         "under_mean": -0.02, "entry_size_min": 0.13,
-                                         "entry_size_max": 0.35, "verdict": "reward-bound"})
+                        lambda *a, **k: {"n_entries": 40, "corr": 0.01, "verdict": "reward-bound"})
     pkt = server.rl_diagnose_data("pfx", ["0", "1", "2", "3"])
-    assert pkt["gate"]["gate_pass"] is True           # beats base + worst DD 0.28 < 0.30
-    assert pkt["reward_capacity"]["verdict"] == "reward-bound"
-    assert pkt["performance"]["mean_return"] == 0.15
+    assert pkt["honest_gate"]["gate_pass"] is True
+    assert pkt["regime"] == {"label": "bull"}
+    assert pkt["performance"]["buyhold"] == 0.12 and pkt["performance"]["random"] == 0.05
+
+
+def test_rl_diagnose_fails_gate_when_loses_to_buyhold(monkeypatch):
+    from trader.mcp_server import server
+    # Beats rung-0 but LOSES to Buy&Hold ⇒ honest gate FAILS even though beats_baseline is True.
+    monkeypatch.setattr("trader.experiment.diagnostics.compare_seeds",
+                        lambda *a, **k: {"n": 4, "mean_return": -0.047, "worst_maxdd": 0.13,
+                                         "baseline": -0.094, "buyhold": 0.07, "random": -0.10,
+                                         "regime": {"label": "bull"}, "beats_baseline": True,
+                                         "beats_buyhold": False, "gate_pass_mean": False,
+                                         "gate_binding": "Buy&Hold", "gate_pass_all_seeds": False})
+    monkeypatch.setattr("trader.experiment.diagnostics.deviation_alpha",
+                        lambda *a, **k: {"n_entries": 6, "verdict": "reward-bound"})
+    pkt = server.rl_diagnose_data("pfx", ["0", "1", "2", "3"])
+    assert pkt["honest_gate"]["gate_pass"] is False            # the exp1→exp5 drift, now caught
+    assert pkt["honest_gate"]["binding"] == "Buy&Hold"
+    assert pkt["honest_gate"]["beats_rung0"] is True
+
+
+# ---- North-Star Header (Agent Communication Contract) ---------------------------------------
+
+def test_north_star_header_carries_goal_metric_and_state():
+    from trader.experiment.contract import north_star_header
+    diag = {"prefix": "ppo-event-sel", "performance": {"n": 4, "mean_return": -0.047,
+            "buyhold": 0.07, "baseline": -0.094, "random": -0.10, "worst_maxdd": 0.13},
+            "regime": {"label": "bull"},
+            "honest_gate": {"gate_pass": False, "binding": "Buy&Hold", "dd_ok": True}}
+    h = north_star_header("redesign the sizing reward", diag, split="val")
+    assert "SUCCESS METRIC" in h and "Buy&Hold" in h and "honest_gate" in h
+    assert "policy -4.7% vs B&H +7.0%" in h          # live state, all baselines
+    assert "loses to Buy&Hold" in h                  # the binding blocker
+    assert "DRIFT ALARM" in h and "RESTATE" in h     # the agent's obligations
+
+
+def test_north_star_header_handles_no_run():
+    from trader.experiment.contract import north_star_header
+    h = north_star_header("propose the first experiment", None)
+    assert "no completed run yet" in h and "GOAL:" in h
 
 
 # ---- launch tier: reward-config translation, smoke gate, verify, kill -----------------------
