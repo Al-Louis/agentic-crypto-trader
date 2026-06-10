@@ -117,6 +117,11 @@ training desktop is **`root@100.97.195.65`** (WSL2 `act-trainer`, FQDN
    runs-rl/<sweep>.log 2>&1 < /dev/null &`. Aggregate via `compare_seeds.py` / `compare_sweep.py`
    (pull `metrics.json` from `data.alexlouis.dev`). Pattern script: `scripts/run_reward_sweep.sh`.
 
+**Stopping a run:** kill the **specific PIDs** (driver `bash` + `train_rl` python main) — **never**
+`kill -- -<PGID>`. A `nohup`'d job shares the tailscaled SSH session's process group, so a
+group-kill takes **tailscaled** down too and drops the box off the tailnet (happened 2026-06-09;
+needed a host-side `tailscale up --ssh` to recover).
+
 ## Conventions
 
 - **Neutral, factual docs.** Topic notes describe options and decisions on their merits;

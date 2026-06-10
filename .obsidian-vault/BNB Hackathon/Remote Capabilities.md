@@ -285,6 +285,15 @@ self-publishes to `data.alexlouis.dev` (`APENTIC_PUBLISH_TARGET=s3://alexlouis-a
   a naive `pgrep -f`/`pkill -f` matches your own probe (and the lingering tailscaled ssh wrappers).
   Use the bracket trick (`'[r]un_…'`) so a count/kill can't match itself, and prefer killing by
   **specific PID** over a broad `pkill -9` (correctly blocked as too blunt on a shared host).
+- **NEVER `kill -- -<PGID>` (process-group kill) a job launched over Tailscale-SSH.** A `nohup`'d job
+  inherits the **process group of the tailscaled SSH session that launched it**, so the group-kill
+  takes **tailscaled itself** down with the job — the box instantly drops off the tailnet
+  (`tailscale status` → `offline`) and needs a manual restart on the host. (This killed `act-trainer`
+  on 2026-06-09.) To stop a sweep, kill the **specific PIDs** — the driver `bash` and the `train_rl`
+  python main, by PID (the SubprocVecEnv workers die on the broken pipe). Read the PIDs first
+  (`pgrep -f 'bash.*[r]un.*sweep'`, `pgrep -f 'train_[r]l.py --action-mode'`), then `kill <pid> <pid>`.
+  Recovery when the box drops: on the Windows host, `wsl -d act-trainer -u root -e tailscale up --ssh`
+  (or restart the distro / the `act-trainer-keepalive` task).
 
 ## CI/CD and validation gates
 
