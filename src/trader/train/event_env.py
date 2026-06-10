@@ -42,7 +42,8 @@ class EventRungEnv:
                  vol_mult: float = 2.5, vol_spk: int = 24, vol_base: int = 168, vol_fast: int = 4,
                  stop_k: float = 0.25, cooldown: int = 48, max_entry_frac: float = 0.34,
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
-                 reward_mode: str = "absolute", record_trace: bool = False, seed: int | None = None):
+                 reward_mode: str = "absolute", r4_beta: float = 0.0,
+                 record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
@@ -52,7 +53,8 @@ class EventRungEnv:
         self.lp_fee_bps, self.gas_usd = lp_fee_bps, gas_usd
         self.stop_k, self.cooldown, self.max_entry_frac = stop_k, cooldown, max_entry_frac
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
-        self.reward_mode = reward_mode                      # "absolute" | "relative" (vs the rung-0 rule)
+        self.reward_mode = reward_mode                      # "absolute" | "relative" | "residual"
+        self.r4_beta = r4_beta                              # residual: foregone-opportunity penalty weight
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
@@ -335,7 +337,13 @@ class EventRungEnv:
         """Per-decision (residual) signal: the agent's weight DEVIATIONS from the rule, dotted with
         token returns over the interval since the last decision. Shared positions (agent_w==rule_w)
         cancel, so only the agent's *active bets vs the rule* earn/lose - the gradient the
-        whole-portfolio relative reward smeared into base-divergence noise."""
+        whole-portfolio relative reward smeared into base-divergence noise.
+
+        R4 (foregone-opportunity, if `r4_beta>0`): when the agent sized BELOW the rule on a token that
+        then went UP, charge `beta` x the surrendered upside. E[max(0,ret)]>0 always, so this is a
+        strictly-negative expected penalty on under-sizing - it closes the "hug small = ~0 reward"
+        basin (which the symmetric residual + the one-sided dd brake otherwise reward). One-sided: no
+        charge for under-sizing a loser (a good skip), no new over-sizing incentive."""
         pb, cb = self._prev_bar, self.bar
         if cb <= pb:
             return 0.0
@@ -346,7 +354,10 @@ class EventRungEnv:
             p0 = self._px[pb, j]
             if p0 > 0:
                 tok_ret = self._px[cb, j] / p0 - 1.0
-                s += (self._agent_w_snap.get(t, 0.0) - self._rule_w[ro, i]) * tok_ret
+                dev = self._agent_w_snap.get(t, 0.0) - self._rule_w[ro, i]
+                s += dev * tok_ret
+                if self.r4_beta > 0.0 and dev < 0.0 and tok_ret > 0.0:   # under-sized a winner
+                    s += self.r4_beta * dev * tok_ret                    # dev<0, ret>0 -> penalty
         return float(s)
 
     def _obs(self) -> np.ndarray:

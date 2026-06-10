@@ -212,6 +212,29 @@ Fix the credit assignment so the gradient points at *beating the rule per decisi
 LSTM + regime obs stay **deferred** — earned only if a clean reward still can't beat the rule.
 Gate: seed-mean test **> +18%**, worst-DD **< 25%**. Mechanics → [[AI Training]].
 
+### Experiment 2 smoke → the minimal-deviation basin → exp2b (residual + R4)
+The exp2 residual 100k smoke was **alive** (action mean 0.727, 163 trades) but **under-sized the
+rule** — every entry 0.03–0.12, *below* 0.20 (exp1 was always *above*). 3rd `rl-ml-trainer` consult:
+this is the **minimal-deviation basin**. The dd brake (`−λ·ddpen`, still in the residual reward) is
+**one-sided** — over-sizing raises variance → raises dd-penalty → negative EV, while under-sizing
+lowers it. So for a skill-less agent the expected-reward *maximum* is to size *below* the rule. The
+residual punishes *wrong* big bets but doesn't *require* right ones → necessary, not sufficient.
+
+**Discrimination-headroom probe** (`scripts/probe_obs_alpha.py`, no training): do the obs features at
+each ignition predict the token's forward-24h return OOS within train? **Yes — OOS IC = +0.246**,
+top-vs-bottom-predicted spread **+3.26pt**; the driver is **`cush = −0.423`** (stretched ignitions
+revert — size by *inverse* cushion). So the alpha **is in the obs**; the agent just isn't taught to
+use it. **Reward-bound confirmed; LSTM stays deferred.**
+
+**exp2b = residual + R4 (foregone-opportunity).** `R4 = −β·Σ max(0, rule_w − agent_w)·max(0, ret)`:
+when the agent sizes *below* the rule on a token that *rose*, charge β× the surrendered upside.
+One-sided (no charge for under-sizing a loser; no new over-size incentive); E[max(0,ret)]>0 always, so
+it's a **strictly-negative expected penalty on under-sizing** → closes the basin. Now both deviation
+directions cost a skill-less agent, so hugging the rule nets ~0 and the *only* path to positive is
+**deviating correctly** (which the +0.246 IC says is achievable). **Verified:** R4 (β=0.4) drives a
+min-size agent −0.155 → −0.544 while the rule-mimic stays ≈0. Sweep `... test residual` (now β=0.4) →
+`ppo-event-res-test`. **Gate: seed-mean > +18%, worst-DD < 25%, AND deviation-alpha corr > 0.**
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is

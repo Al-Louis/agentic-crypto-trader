@@ -600,6 +600,23 @@ max-size agent +0.538 - the missing gradient is now present. 11 env tests pass, 
 torch-free. Sweep `... test residual` -> `ppo-event-res-test-s<seed>`; gate seed-mean > +18%, DD < 25%.
 Full reasoning → [[Experiment Log]] / [[AI Training]].
 
+## 2026-06-10 (cont.) - exp2 smoke -> discrimination probe -> exp2b (residual + R4)
+
+The exp2 residual 100k smoke was alive but **under-sized the rule** (entries 0.03-0.12, below 0.20).
+3rd [[rl-ml-trainer]] consult: the **minimal-deviation basin** - the still-present one-sided dd brake
+makes under-sizing the expected-reward optimum for a skill-less agent. Before committing the sweep,
+ran a **discrimination-headroom probe** (`scripts/probe_obs_alpha.py`, no training): do the obs
+features at each ignition predict forward-24h return OOS? **Yes - OOS IC +0.246**, driven by
+**`cush = -0.423`** (stretched ignitions revert). So the alpha **is in the obs** -> **reward-bound
+confirmed**, LSTM stays deferred.
+
+Built **exp2b = residual + R4** (`--r4-beta`): a one-sided foregone-opportunity penalty
+`-beta·Σ max(0, rule_w - agent_w)·max(0, ret)` - charge the surrendered upside when the agent
+under-sizes a token that rose. Strictly-negative expected penalty on under-sizing, so it closes the
+basin without a new over-size incentive. **Verified:** R4 (β=0.4) drives a min-size agent -0.155 ->
+-0.544 while the rule-mimic stays ≈0; 12 env tests pass. Sweep `... test residual` now carries
+β=0.4. Full reasoning → [[Experiment Log]] / [[AI Training]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

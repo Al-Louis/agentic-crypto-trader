@@ -187,6 +187,28 @@ def test_residual_reward_runs_and_credits_only_deviations():
     assert np.isfinite(rsum)
 
 
+def test_r4_penalizes_undersizing_a_winner():
+    """R4 (foregone-opportunity) must make UNDER-sizing the rule on a token that rises cost more —
+    closing the 'hug small = ~0 reward' basin. Min-size agent on the RUN winner: r4_beta>0 must net
+    strictly less than r4_beta=0."""
+    def cumrew(r4):
+        env = _env(reward_mode="residual", r4_beta=r4, episode_bars=200)
+        env.reset(start=40)
+        s, done = 0.0, False
+        for _ in range(800):
+            et = env._pending[0]
+            if et == "none":
+                break
+            a = 1.0 if et == "exit" else -0.41    # hold positions; under-size entries (~0.10 < rule's 0.20)
+            _, r, done, _ = env.step([a])
+            s += r
+            if done:
+                break
+        return s
+    base, with_r4 = cumrew(0.0), cumrew(0.5)
+    assert with_r4 < base - 1e-9, f"R4 must penalize under-sizing the winner: r4={with_r4:.4f} vs {base:.4f}"
+
+
 def test_gym_adapter_conforms_and_steps():
     from trader.train.gym_env import GymEventRungEnv
     returns, btc, vol, liq = _panel()

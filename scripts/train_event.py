@@ -80,6 +80,8 @@ def main() -> None:
                         "the agent's weight DEVIATIONS from the rule dotted with token returns")
     p.add_argument("--norm-reward", action="store_true", help="VecNormalize norm_reward (for the small "
                    "zero-centered relative/residual rewards)")
+    p.add_argument("--r4-beta", type=float, default=0.0, help="residual R4 foregone-opportunity penalty: "
+                   "charge beta x surrendered upside when the agent under-sizes a token that rose")
     p.add_argument("--dd-lambda", type=float, default=2.0)
     p.add_argument("--dd-soft", type=float, default=0.15, help="drawdown penalty soft knee")
     p.add_argument("--ent-coef", type=float, default=0.1)
@@ -106,7 +108,7 @@ def main() -> None:
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = dict(k=8, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
-                      reward_mode=args.reward_mode, seed=args.seed)
+                      reward_mode=args.reward_mode, r4_beta=args.r4_beta, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -170,7 +172,7 @@ def main() -> None:
                              "seed": args.seed, "n_envs": args.n_envs, "episode_bars": args.episode_bars,
                              "max_entry_frac": args.max_entry_frac, "stop_k": args.stop_k,
                              "cooldown": args.cooldown, "reward_mode": args.reward_mode,
-                             "norm_reward": args.norm_reward,
+                             "norm_reward": args.norm_reward, "r4_beta": args.r4_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
                              "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
                              "eval_split": args.eval_split}
