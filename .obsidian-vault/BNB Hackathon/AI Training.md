@@ -250,6 +250,16 @@ decouple from BTC) → add a **universe-breadth** feature; (2) **no alt-crash in
 has the alts rising/flat) → **synthetic alt-crash injection**, so de-risking can pay. Active build:
 the crash scenario + the breadth feature, then gate a **regime-adaptive** policy.
 
+**GATE-2 outcome (2026-06-10):** both built (breadth obs OBS_DIM 12→13; `sim/crash.py` inject_crash +
+the `gate2` config: broad k=12 + risk-parity + 4 training crashes + a held-out crash regime). Result
+(full table in [[Experiment Log]]): **the crash-survival mechanism WORKS** — 3/4 seeds de-risk on the
+breadth collapse (s0/s1 hold 3–5% DD in an 82% crash; **s1 +5.8%, positive**), the first RL behavior
+static strategies can't match. **But the policy learned defensive-*everywhere*, not regime-*adaptive*** —
+uniformly cautious (4–13% DD in every regime), so it *loses the bull* (val −6.9% while the basket rose
++27%) and isn't robust (s3 DQ'd at 34.7%). Next levers: (1) rebalance the reward toward bull-harvest
+(lower `dd_lambda`); (2) **RecurrentPPO** — breadth is a time series, now correctly sequenced with a
+feedforward champion to A/B against.
+
 **Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
 is a valid result the `beats_baseline` gate is built to surface.
 

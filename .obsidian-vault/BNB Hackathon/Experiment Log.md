@@ -482,6 +482,38 @@ posture is the wrong target."
 Next: build the crash scenario + the regime-breadth obs feature, then gate a regime-adaptive policy —
 the config where "embrace the volatility, survive the drawdown" becomes measurable. → [[AI Training]].
 
+### GATE 2 — regime-adaptive (breadth obs + crash): the mechanism works, the adaptation doesn't (yet)
+The two structural gaps GATE-1 exposed, built and gated (full build in [[AI Training]]): a
+**regime-breadth** obs feature (fraction of the traded basket above its EMA — the alts' own regime,
+decoupled from BTC) and **synthetic alt-crash injection** (`sim/crash.py`: a SIREN-scale liquidation,
+correlations spike to 1). GATE-2 config: discrete + broad k=12 + risk-parity + breadth obs + **4
+training crashes** + a held-out **crash regime** (a crash spliced into test, where Buy&Hold loses −82%).
+4×1M seeds, graded on **three regimes** (val bull / test pump / crash):
+
+| regime | s0 | s1 | s2 | s3 | mean | vs Buy&Hold |
+|--------|----|----|----|----|------|-------------|
+| **val** (bull) | −5.9% | −5.4% | −7.5% | −8.8% | **−6.9%** | B&H ≈ +27% → loses badly |
+| **test** (pump) | −1.8% | +2.5% | −5.6% | −1.1% | −1.5% | ~flat |
+| **crash** | −1.6% (DD 5.5%) | **+5.8%** (Sh 3.97, DD 3.3%) | −13.0% (DD 13.6%) | −28.3% (**DD 34.7% DQ**) | survives 3/4 | B&H −82% → **+70..88pp** |
+
+**The win — crash-survival is real, and it's the first RL behavior no static strategy can match.**
+3 of 4 seeds read the breadth collapse and **de-risked**: s0/s1 held drawdown to **3–5% in an 82%
+crash** that nearly DQ'd even rung-0 (28% DD), and **s1 made +5.8% — positive in the crash**. The
+breadth feature + crash training produce learnable regime-aware de-risking. Thesis validated in
+principle.
+
+**The gap — the policy learned defensive-EVERYWHERE, not regime-ADAPTIVE.** DDs are 4–13% in *every*
+regime: it's uniformly cautious. That caution saves the crash but **kills the bull** — val −6.9% while
+the basket rose +27% (it *lost money in a rising market* by holding cash). It uses breadth to stay
+safe, not to *ramp up* when breadth is high. And it's not robust (s3 DQ'd at 34.7%; high seed variance).
+
+**Both the over-defensiveness and the inconsistency say the same thing: the policy must *condition*
+risk on breadth more sharply.** Two levers: (1) **rebalance the reward toward bull-harvest** — the
+heavy `dd_lambda=1.0` + 4 crashes taught blanket caution; lower the drawdown fear so it sizes up in
+high-breadth bulls (one cheap sweep); (2) **recurrence (RecurrentPPO)** — breadth is a *time series*
+(sustained-high = harvest, deteriorating = de-risk early), which a feedforward snapshot can't track
+but an LSTM can; now correctly sequenced (a feedforward champion exists to A/B against). → [[AI Training]].
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
