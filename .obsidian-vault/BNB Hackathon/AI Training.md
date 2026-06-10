@@ -185,10 +185,31 @@ Apentic bundle → self-publish, `progress.json` throughout for fire-and-poll
 extractor (the converged TradeSim config) until the simple MlpPolicy is shown to beat — or
 clearly can't beat — the baseline.
 
-**Curriculum status:** the env samples random windows from the training split; **synthetic
-crash injection** (`trader.sim.crash`) to carry the bear/crash regime the ~6-month bull sample
-lacks is the next step — a *real* sampler, not cosmetic (the post-mortem's #1 lesson). The
-frozen-test split is reserved; tuning happens on validation to avoid the loop meta-overfitting.
+**Regime reality (corrected 2026-06-10 — the "~6-month bull sample" claim was wrong).** Two
+regime signals, and they **diverge**:
+
+| split | BTC (macro) | vol-top-k 8 (the **traded** universe) | Buy&Hold net |
+|-------|-------------|----------------------------------------|--------------|
+| train | **−31.1% (bear)** | **+26.1% (bull)** | +25.6% |
+| val   | +9.2% (reversal) | +7.2% (flat) | +6.8% |
+| test  | **−22.5% (bear)** | +5.5% (flat) | +5.1% |
+
+BTC is **macro-bear** across the data (matching the real timeline: bear since Oct 2025, an
+Apr–May reversal = val, renewed downtrend since). But the high-vol **alts the agent trades
+decouple from BTC** — they pump on their own volume dynamics (train: BTC −31% while the basket
+*+26%*). Consequences that correct the earlier plan: **(a)** we already have real BTC-bear data,
+so synthetic crash injection (`trader.sim.crash`) is for **alt-specific** crash stress — the alts
+never crash in this sample — **not** the primary bear source the old note assumed; **(b)**
+Buy&Hold is **positive in every split**, so the agent cannot win by hiding in cash even in
+BTC-bear windows — the edge must be *harvesting* the alt volatility ([[embrace-volatility-dont-dismiss]]),
+not avoiding it; **(c)** the obs needs a **universe-breadth** regime feature, not just `btc_trend`,
+since the two diverge; **(d)** tuning on val (the bull-reversal pocket) is the *least*
+representative window for a likely-bearish live week — weight the per-regime gate toward the
+BTC-bear train/test-like windows.
+
+**Curriculum status:** the env samples random windows from the training split — a *real* sampler,
+not cosmetic (the post-mortem's #1 lesson). The frozen-test split is reserved; tuning happens on
+validation to avoid the loop meta-overfitting (but see (d) — val is the unrepresentative pocket).
 
 **Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
 is a valid result the `beats_baseline` gate is built to surface.
