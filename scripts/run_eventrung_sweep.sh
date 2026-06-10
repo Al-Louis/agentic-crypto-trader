@@ -19,7 +19,10 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "entry_forward" ]; then         # Experiment 4: entry-forward residual (reward == metric)
+if [ "$REWARD_MODE" = "selector" ]; then              # Experiment 5: ungated cross-sectional selector
+  PFX="ppo-event-sel"                                  # (in-env landscape gate PASSED at gamma=0.1)
+  EXTRA="--reward-mode entry_forward --ungate --fwd-horizon 24 --res-gamma 0.1 --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "entry_forward" ]; then       # Experiment 4: entry-forward residual (reward == metric)
   PFX="ppo-event-efwd"
   EXTRA="--reward-mode entry_forward --fwd-horizon 24 --res-gamma 0.05 --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "residual_ranked" ]; then     # Experiment 3: demeaned-ranked residual + budget

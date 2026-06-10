@@ -44,7 +44,8 @@ class EventRungEnv:
                  stop_k: float = 0.25, cooldown: int = 48, max_entry_frac: float = 0.34,
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
                  reward_mode: str = "absolute", r4_beta: float = 0.0, res_gamma: float = 0.0,
-                 fwd_horizon: int = 24, record_trace: bool = False, seed: int | None = None):
+                 fwd_horizon: int = 24, ungate: bool = False,
+                 record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
@@ -58,6 +59,8 @@ class EventRungEnv:
         self.r4_beta = r4_beta                              # residual: foregone-opportunity penalty weight
         self.res_gamma = res_gamma                          # residual_ranked: quadratic deviation-budget weight
         self.fwd_horizon = int(fwd_horizon)                 # entry_forward: forward-return window (bars)
+        self.ungate = bool(ungate)                          # exp5 selector: fire on every in-universe ignition
+                                                            # (drop rung-0's cooled&reclaimed gate -> ~960 vs 39)
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
@@ -214,7 +217,7 @@ class EventRungEnv:
             cooled = (bar - self.cool[t]) >= self.cooldown
             po = self.prior_origin[t]
             reclaimed = po is None or self._px[bar, j] > po
-            if cooled and reclaimed:
+            if self.ungate or (cooled and reclaimed):          # exp5: let the agent gate, not the rule
                 ev.append(("entry", t))
         return ev
 

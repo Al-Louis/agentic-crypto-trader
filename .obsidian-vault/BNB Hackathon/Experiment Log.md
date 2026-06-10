@@ -378,6 +378,40 @@ corners ≤ rule-mimic. The free-pool preflight is abandoned (it false-PASSed ex
 seed-mean test **> ~+18%**, worst-seed maxDD **< 25%**, selection-IC corr **> +0.10**, gated in-env.
 Probe: `scripts/probe_subset_ic.py`. Full design in [[AI Training]].
 
+### exp5 in-env landscape gate — **PASS** (the first gate the arc has cleared)
+Built `scripts/preflight_selector.py`: the structural fix in code. It OLS-fits a forward-return
+predictor on the **early** in-universe ignitions (causal, 60% temporal holdout), then runs four
+scripted agents — rule-mimic / all-big / all-small / **correct-selector** (sizes by the OOS
+prediction's rank) — **through the real `entry_forward` env** with `ungate=True`, summing the *exact*
+reward PPO maximizes. No proxy: the env scores realized, funding-constrained entries.
+
+In-universe ignitions: **960** (vs rung-0's 39). OOS coef `[1,cush,surge,btcT] = [−0.008, −0.336,
++0.008, +0.977]` — cush stays robustly negative; the predictor has real OOS signal. Total in-env
+reward across γ (deviation-budget weight):
+
+| γ | rule-mimic | all-big | all-small | correct-selector | gate |
+|---|-----------|---------|-----------|------------------|------|
+| 0.05 | 0.0000 | **+0.0039** | −0.7599 | +0.1390 | FAIL (all-big > rule by 0.004) |
+| **0.10** | 0.0000 | **−0.1231** | −1.1599 | **+0.1066** | **PASS** |
+| 0.20 | 0.0000 | −0.3772 | −1.9599 | +0.0417 | PASS (selector edge shrinking) |
+| 0.40 | 0.0000 | −0.8853 | −3.5599 | −0.0881 | FAIL (budget over-taxes the selector) |
+
+**This is the first time in the entire arc the in-env gate has passed.** At **γ=0.10**, correct-selector
+is the **unique in-env argmax** (+0.107) and **both corners are strictly penalized** (all-big −0.12,
+all-small −1.16). Contrast exp3/exp4, where all-big *dominated* (+0.13..+0.40) and the skilled agent
+was ~0 — the magnitude-corner that broke every prior reward. **The fix was structural, not a reward
+tweak:** un-gating moves the decision from rung-0's 39 cash-decoupled entries (where L0's +0.246 cush-IC
+had collapsed to noise — exp4's sample-starvation finding) onto the **960-event in-universe pool where
+the +0.103 IC survives**, and the γ=0.10 quadratic budget taxes the residual all-big selection-beta below
+rule-parity. The reward landscape now has a single optimum, and it's the skilled cross-sectional selector.
+
+γ=0.40 over-taxes (selector goes negative) → the budget is genuinely sizing the deviation, not just
+killing corners. **exp5 sweep config:** `--reward-mode entry_forward --ungate --fwd-horizon 24
+--res-gamma 0.1` (`REWARD_MODE=selector` in `run_eventrung_sweep.sh`, run-id `ppo-event-sel`). The gate
+is the green light the arc earned the hard way; **PPO now has a landscape where the env itself rewards
+discrimination.** Sweep next (val first, then frozen test). Gate for the verdict unchanged: seed-mean
+test **> ~+18%**, worst-seed maxDD **< 25%**, selection-IC **> +0.10**.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
