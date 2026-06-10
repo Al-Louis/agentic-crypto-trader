@@ -7,26 +7,28 @@
 # discretion beat the hand-coded version?). One bundle published per seed; intra-day markers.
 #
 # Mirrors scripts/run_reward_sweep.sh (the documented deploy pattern). Usage (detached, survives logout):
-#   nohup bash scripts/run_eventrung_sweep.sh [TIMESTEPS] ["SEEDS"] > runs-rl/eventrung.log 2>&1 < /dev/null &
-#   # default:  TIMESTEPS=1000000  SEEDS="0 1 2 3"
-# Aggregate:  python scripts/compare_seeds.py --prefix ppo-event --seeds "0 1 2 3"
+#   nohup bash scripts/run_eventrung_sweep.sh [TIMESTEPS] ["SEEDS"] [EVAL_SPLIT] > runs-rl/eventrung.log 2>&1 < /dev/null &
+#   # default:  TIMESTEPS=1000000  SEEDS="0 1 2 3"  EVAL_SPLIT=val   (use "test" for the frozen verdict)
+# Aggregate:  python scripts/compare_seeds.py --prefix ppo-event[-test] --seeds "0 1 2 3"
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 TIMESTEPS="${1:-1000000}"
 SEEDS="${2:-0 1 2 3}"
+EVAL_SPLIT="${3:-val}"
+SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"     # ppo-event-s<seed> (val) | ppo-event-test-s<seed>
 PY=.venv/bin/python
 LOGDIR=runs-rl/eventrung-logs
 mkdir -p "$LOGDIR"
 
-echo "[eventrung] START $(date -u +%FT%TZ)  timesteps=$TIMESTEPS  seeds='$SEEDS'  (event-driven, weekly episodes)"
+echo "[eventrung] START $(date -u +%FT%TZ)  timesteps=$TIMESTEPS  seeds='$SEEDS'  split=$EVAL_SPLIT (event-driven, weekly episodes)"
 n=0
 for seed in $SEEDS; do
-  rid="ppo-event-s${seed}"
+  rid="ppo-event${SFX}-s${seed}"
   n=$((n+1))
   echo "[eventrung] === ($n) $rid  $(date -u +%FT%TZ) ==="
   $PY scripts/train_event.py --timesteps "$TIMESTEPS" --n-envs 8 --episode-bars 168 \
-      --eval-split val --seed "$seed" --run-id "$rid" > "$LOGDIR/${rid}.log" 2>&1
+      --eval-split "$EVAL_SPLIT" --seed "$seed" --run-id "$rid" > "$LOGDIR/${rid}.log" 2>&1
   if [ $? -eq 0 ]; then tail -1 "$LOGDIR/${rid}.log"; else echo "[eventrung] $rid FAILED — see $LOGDIR/${rid}.log"; fi
 done
 echo "[eventrung] DONE $(date -u +%FT%TZ)  ($n runs)"
