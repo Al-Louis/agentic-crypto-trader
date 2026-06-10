@@ -27,7 +27,7 @@ import pandas as pd
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
 from trader.train.event_reward import entry_forward_reward
 
-OBS_DIM = 12   # ... + the rung-0 rule's current exposure (0 in absolute mode)
+OBS_DIM = 13   # ... rung-0 exposure (0 in absolute mode) + universe breadth (alts' own regime)
 SURGE_CLIP, CUSHION_CLIP, RET_CLIP = 10.0, 1.0, 5.0
 SKIP_EPS, HOLD_EPS = 0.05, 0.95   # action < SKIP_EPS on entry = skip; >= HOLD_EPS on exit = full hold
 
@@ -110,6 +110,7 @@ class EventRungEnv:
         self.end = self.start + self.episode_bars
         self.bar = self.start
         self.universe = self._pick_universe(self.start)          # causal vol-ranked, fixed for episode
+        self._uni_ix = np.array([self.col_ix[t] for t in self.universe])  # for the breadth regime feature
         self._tok_cap = self._token_caps(self.start)             # per-token weight cap (risk-parity if vol_target>0)
         self.cash = self.capital
         self.peak_eq = self.capital
@@ -483,8 +484,12 @@ class EventRungEnv:
         rule_expo = 0.0                                        # the rung-0 rule's current invested fraction
         if self._rule_w is not None:
             rule_expo = float(self._rule_w[min(self.bar - self.start, len(self._rule_w) - 1)].sum())
+        # universe breadth: fraction of the TRADED basket above its EMA right now — the alts' OWN regime
+        # signal (a pump lifts most names; a crash breaks most). Decoupled from btc_trend, which misleads
+        # because the alts trade idiosyncratically from BTC. Low breadth = de-risk; high = harvest.
+        breadth = float(np.mean(self._cush[self.bar, self._uni_ix] > 0.0)) if len(self._uni_ix) else 0.0
         obs = [is_exit, cush, surge, unreal, held_frac, giveback,
-               self.cash / eq, exposure, len(self.pos) / self.k, dd, btc_trend, rule_expo]
+               self.cash / eq, exposure, len(self.pos) / self.k, dd, btc_trend, rule_expo, breadth]
         return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
 
     def _info(self) -> dict:

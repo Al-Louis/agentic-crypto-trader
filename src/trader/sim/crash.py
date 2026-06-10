@@ -39,3 +39,43 @@ def simulate_crash_panel(tokens, btc_returns, beta: float, resid_std: dict,
     btc = np.asarray(btc_returns, dtype=float)
     return pd.DataFrame({s: beta * btc + rng.normal(0, resid_std.get(s, 0.01), len(btc))
                          for s in tokens})
+
+
+def inject_crash(returns: pd.DataFrame, *, at: int, duration: int = 8, total_drop: float = -0.6,
+                 beta: float = 1.4, resid_std: float = 0.03, shape: str = "sharp",
+                 tokens=None, seed: int = 0) -> pd.DataFrame:
+    """Splice a synthetic ALT-crash into `returns` (a COPY): over `duration` bars starting at bar
+    index `at`, the traded alts sell off TOGETHER — in a real liquidation cascade idiosyncratic
+    structure collapses and correlations spike toward 1 — as `beta`·(systemic drop path) + per-token
+    noise. The bull/flat historical sample has no alt-crash (only BTC fell; the alts pumped), so this
+    is the scenario where a regime-adaptive policy's de-risking can finally be MEASURED. The realized
+    alt drop ≈ `beta`·`total_drop` (e.g. 1.4·−0.6 ≈ −84%, SIREN-scale). [[AI Training]]"""
+    out = returns.copy()
+    cols = list(returns.columns) if tokens is None else [t for t in tokens if t in returns.columns]
+    n = len(out)
+    end = min(at + duration, n)
+    idx = out.index[at:end]
+    d = len(idx)
+    sys_path = crash_path(d, total_drop, shape)               # the shared systemic drop
+    rng = np.random.default_rng(seed)
+    for t in cols:
+        out.loc[idx, t] = beta * sys_path + rng.normal(0, resid_std, d)
+    return out
+
+
+def inject_random_crashes(returns: pd.DataFrame, *, n_crashes: int, rng, min_gap: int = 200,
+                          **crash_kw) -> tuple:
+    """Inject `n_crashes` non-overlapping crashes at random bars — TRAINING augmentation so the agent
+    SEES crashes and can learn to de-risk into low breadth. Returns (augmented_returns, [bar indices])."""
+    out = returns.copy()
+    n = len(out)
+    margin = crash_kw.get("duration", 8) * 3
+    placed: list[int] = []
+    for _ in range(n_crashes * 50):
+        if len(placed) >= n_crashes:
+            break
+        at = int(rng.integers(margin, max(margin + 1, n - margin)))
+        if all(abs(at - p) > min_gap for p in placed):
+            out = inject_crash(out, at=at, seed=int(rng.integers(0, 1_000_000)), **crash_kw)
+            placed.append(at)
+    return out, sorted(placed)
