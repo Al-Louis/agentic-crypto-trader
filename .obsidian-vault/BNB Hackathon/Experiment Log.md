@@ -266,12 +266,28 @@ there (**IC +0.246**). Tuning β just slides between corners; it can't manufactu
 behavior. The alpha is sitting untouched because **no reward yet pays for *rank-correct* sizing**
 (size up the low-cush winners, down the high-cush losers) — only for sizing direction in aggregate.
 
-### Decided next — a conditional / rank-correct sizing reward
-The magnitude penalties can't reach this; the next design must credit **sizing that tracks the
-predicted outcome** (an IC- / rank-based term tying each bet's size to whether the deviation was
-*right*), forcing the agent to *use* the cush signal rather than pick one global size. Redesign with
-[[rl-ml-trainer]] (4th consult). LSTM still deferred — the alpha is in the obs; the reward must make
-the agent use it conditionally. → [[AI Training]].
+### exp3 — demeaned-ranked residual (the corner is a functional-form problem)
+4th [[rl-ml-trainer]] consult, sharpened: a reward **linear in `dev`** has a per-decision gradient
+that's a *constant direction* → SGD rails every entry to a bound; β only slides between bounds. The
+cure isn't another β — it's making the reward depend on the **interaction of `dev` with the obs**:
+
+`R = Σ dev·(ret − ret_bar) − res_gamma·Σ dev²`  (`reward_mode="residual_ranked"`)
+
+- **Demean** by the interval's cross-sectional mean → for a skill-less agent `E[ret−ret_bar]=0`, so the
+  constant-drift gradient *vanishes*; the only thing left to earn is the **obs-predictable** part
+  (`cush`, IC +0.246) → conditional sizing is the *only* way to score.
+- **Quadratic budget** → interior optimum `dev* ∝ (ret−ret_bar)/2γ` (rank-correct), so neither corner
+  is optimal. (Retires R4 — centering removes the drift-corner R4 was patching.) dd brake softened
+  (`dd_lambda` 2.0→1.0); the budget caps per-name tilt → caps drawdown (the targeted fix for β=0.8's DQ).
+
+**Preflight (`scripts/preflight_residual.py`, the check we never ran before any prior reward):** score
+scripted agents on the reward landscape over real train ignitions; require the **correct-discriminator
+(`dev ∝ −cush`) to be the unique argmax** with both corners ≤ 0 and an IC-hacker losing. **PASSES** —
+the demean *alone* (γ=0) collapses all-big to exactly 0; the budget makes corners strictly negative;
+correct-disc wins (+2.69 at **γ=0.1**, corr(dev,ret) +0.239). The corner is provably gone in the
+reward *form*, before any compute. Sweep `... test residual_ranked` → `ppo-event-rank-test`. **Gate:
+mean > +18%, worst-DD < 25%, and corr > +0.10** (corr is now a *success gate*, not a diagnostic).
+LSTM still deferred — the alpha is in the obs; this reward makes the agent use it. → [[AI Training]].
 
 ## Thesis (the lens for reading all of the above)
 

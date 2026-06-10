@@ -632,6 +632,23 @@ alpha is untouched because **no reward pays for *rank-correct* sizing**. Next: a
 IC-based reward (4th [[rl-ml-trainer]] consult); LSTM still deferred (the alpha is in the obs).
 Full data → [[Experiment Log]].
 
+## 2026-06-10 (cont.) - exp3: demeaned-ranked residual (corner is a functional-form problem)
+
+4th [[rl-ml-trainer]] consult reframed the corner: a reward **linear in `dev`** can only learn a
+*global* size (constant-direction gradient); β just slides between corners. Fix: **demeaned-ranked
+residual** `R = Σ dev·(ret − ret_bar) − res_gamma·Σ dev²` (`reward_mode="residual_ranked"`).
+Demeaning kills the drift-corner (skill-less E[ret−ret_bar]=0 → only the obs-predictable part, cush,
+is left to earn); the quadratic budget gives an interior optimum (rank-correct sizing). Retires R4;
+softens the dd brake (the budget caps per-name tilt → caps DD).
+
+**The process upgrade — a reward-landscape preflight** (`scripts/preflight_residual.py`) run BEFORE
+training (we never did this for the 4 prior corners): score scripted agents on the reward over real
+ignitions, require the **correct-discriminator (`dev ∝ −cush`) to be the unique argmax**, corners ≤ 0,
+IC-hacker loses. **PASSES** — demean alone collapses all-big to 0, the budget makes corners strictly
+negative, correct-disc wins (+2.69 at γ=0.1, corr +0.239). The corner is provably gone in the reward
+*form* before any compute. 13 env tests pass. Sweep → `ppo-event-rank-test`; **corr now a success
+gate** (> +0.10). Full design → [[Experiment Log]] / [[AI Training]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

@@ -42,7 +42,7 @@ class EventRungEnv:
                  vol_mult: float = 2.5, vol_spk: int = 24, vol_base: int = 168, vol_fast: int = 4,
                  stop_k: float = 0.25, cooldown: int = 48, max_entry_frac: float = 0.34,
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
-                 reward_mode: str = "absolute", r4_beta: float = 0.0,
+                 reward_mode: str = "absolute", r4_beta: float = 0.0, res_gamma: float = 0.0,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -53,8 +53,9 @@ class EventRungEnv:
         self.lp_fee_bps, self.gas_usd = lp_fee_bps, gas_usd
         self.stop_k, self.cooldown, self.max_entry_frac = stop_k, cooldown, max_entry_frac
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
-        self.reward_mode = reward_mode                      # "absolute" | "relative" | "residual"
+        self.reward_mode = reward_mode                      # absolute|relative|residual|residual_ranked
         self.r4_beta = r4_beta                              # residual: foregone-opportunity penalty weight
+        self.res_gamma = res_gamma                          # residual_ranked: quadratic deviation-budget weight
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
@@ -107,7 +108,7 @@ class EventRungEnv:
         # relative/residual reward: precompute the rung-0 RULE's per-bar equity AND per-token weights
         # over the episode - the benchmark the agent must BEAT. "relative" = beat the rule's portfolio
         # return; "residual" = beat it per-decision (only the agent's weight DEVIATIONS earn/lose).
-        if self.reward_mode in ("relative", "residual"):
+        if self.reward_mode in ("relative", "residual", "residual_ranked"):
             self._rule_eq, self._rule_w = self._rule_equity_curve(self.start, self.end)
         else:
             self._rule_eq = self._rule_w = None
@@ -132,7 +133,7 @@ class EventRungEnv:
             ri = min(self.bar - self.start, len(self._rule_eq) - 1)
             rule_ret = self._rule_eq[ri] / self._rule_eq_mark - 1.0 if self._rule_eq_mark > 0 else 0.0
             ret = ret - rule_ret
-        elif self.reward_mode == "residual":                   # per-decision: only DEVIATIONS earn/lose
+        elif self.reward_mode in ("residual", "residual_ranked"):  # per-decision: only DEVIATIONS earn/lose
             ret = self._residual_return()
         dd = (self.peak_eq - eq_pre) / self.peak_eq if self.peak_eq > 0 else 0.0
         reward = float(np.clip(ret, -RET_CLIP, RET_CLIP)) - self.dd_lambda * self._dd_penalty(dd)
@@ -150,7 +151,7 @@ class EventRungEnv:
         self._eq_mark = eq_post
         if self.reward_mode == "relative":
             self._rule_eq_mark = float(self._rule_eq[min(self.bar - self.start, len(self._rule_eq) - 1)])
-        elif self.reward_mode == "residual":                   # snapshot agent weights for the next interval
+        elif self.reward_mode in ("residual", "residual_ranked"):  # snapshot weights for the next interval
             self._agent_w_snap = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
             self._prev_bar = self.bar
         self._advance_to_event()
@@ -339,25 +340,35 @@ class EventRungEnv:
         cancel, so only the agent's *active bets vs the rule* earn/lose - the gradient the
         whole-portfolio relative reward smeared into base-divergence noise.
 
-        R4 (foregone-opportunity, if `r4_beta>0`): when the agent sized BELOW the rule on a token that
-        then went UP, charge `beta` x the surrendered upside. E[max(0,ret)]>0 always, so this is a
-        strictly-negative expected penalty on under-sizing - it closes the "hug small = ~0 reward"
-        basin (which the symmetric residual + the one-sided dd brake otherwise reward). One-sided: no
-        charge for under-sizing a loser (a good skip), no new over-sizing incentive."""
+        Two shapes:
+        - `residual` (+ optional R4 `r4_beta>0`): `Σ dev·ret`; R4 charges `beta`x surrendered upside
+          when under-sizing a winner. A reward LINEAR in dev → the per-decision gradient is a constant
+          direction → the policy corners (all-big or all-small by the lambdas). The corner is a
+          functional-form limit, not a tuning one.
+        - `residual_ranked` (the fix): **demean** the return by the interval's cross-sectional mean and
+          add a **quadratic deviation budget**: `Σ dev·(ret − ret_bar) − res_gamma·Σ dev²`. Centering
+          removes the constant drift gradient (E[ret−ret_bar]=0 for a skill-less agent), so the only way
+          to score is to make `dev` track the obs-PREDICTABLE part of the return (cush) → conditional
+          sizing. The quadratic budget makes the optimum interior (`dev* ∝ (ret−ret_bar)/2γ` =
+          rank-correct), so neither corner is optimal. Maximized by conditional sizing and only by it."""
         pb, cb = self._prev_bar, self.bar
         if cb <= pb:
             return 0.0
         ro = pb - self.start
-        s = 0.0
+        rets, devs = [], []
         for i, t in enumerate(self.universe):
             j = self.col_ix[t]
             p0 = self._px[pb, j]
-            if p0 > 0:
-                tok_ret = self._px[cb, j] / p0 - 1.0
-                dev = self._agent_w_snap.get(t, 0.0) - self._rule_w[ro, i]
-                s += dev * tok_ret
-                if self.r4_beta > 0.0 and dev < 0.0 and tok_ret > 0.0:   # under-sized a winner
-                    s += self.r4_beta * dev * tok_ret                    # dev<0, ret>0 -> penalty
+            rets.append(self._px[cb, j] / p0 - 1.0 if p0 > 0 else 0.0)
+            devs.append(self._agent_w_snap.get(t, 0.0) - self._rule_w[ro, i])
+        if self.reward_mode == "residual_ranked":
+            rbar = sum(rets) / len(rets) if rets else 0.0      # interval cross-sectional mean (causal)
+            return float(sum(d * (r - rbar) - self.res_gamma * d * d for d, r in zip(devs, rets)))
+        s = 0.0                                                # plain residual (+ optional R4)
+        for d, r in zip(devs, rets):
+            s += d * r
+            if self.r4_beta > 0.0 and d < 0.0 and r > 0.0:
+                s += self.r4_beta * d * r
         return float(s)
 
     def _obs(self) -> np.ndarray:

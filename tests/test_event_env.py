@@ -209,6 +209,30 @@ def test_r4_penalizes_undersizing_a_winner():
     assert with_r4 < base - 1e-9, f"R4 must penalize under-sizing the winner: r4={with_r4:.4f} vs {base:.4f}"
 
 
+def test_residual_ranked_runs_and_budget_taxes_deviation():
+    """residual_ranked: rule-mimic (dev≈0) nets ~0, and the quadratic budget makes a constant
+    over-sizing agent score strictly less with res_gamma>0 than without — the interior pull that kills
+    the magnitude corner. (Corner-CLOSING over real data is proven by scripts/preflight_residual.py.)"""
+    def cum(policy, gamma):
+        env = _env(reward_mode="residual_ranked", res_gamma=gamma, episode_bars=200)
+        env.reset(start=40)
+        s, done = 0.0, False
+        for _ in range(800):
+            et = env._pending[0]
+            if et == "none":
+                break
+            _, r, done, _ = env.step([policy(et)])
+            s += r
+            if done:
+                break
+        return s
+    big = lambda et: -1.0 if et == "exit" else 1.0        # oversize entries, cut exits
+    mimic_a = 0.20 / 0.34 * 2 - 1.0                        # m=0.588 -> size 0.20 (the rule)
+    mimic = lambda et: -1.0 if et == "exit" else mimic_a
+    assert abs(cum(mimic, 0.1)) < 0.10, "rule-mimic (dev≈0) nets ~0 in residual_ranked"
+    assert cum(big, 0.5) < cum(big, 0.0) - 1e-9, "the quadratic budget must tax constant over-sizing"
+
+
 def test_gym_adapter_conforms_and_steps():
     from trader.train.gym_env import GymEventRungEnv
     returns, btc, vol, liq = _panel()

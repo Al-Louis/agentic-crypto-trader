@@ -1,0 +1,43 @@
+{
+  "model_name": "Rung-0 rotation + sharp surge + trend gate (VAL)",
+  "kind": "portfolio",
+  "action_mode": "rule",
+  "universe": [
+    {
+      "symbol": "BANANAS31",
+      "slug": "BANANAS31"
+    },
+    {
+      "symbol": "FF",
+      "slug": "FF"
+    },
+    {
+      "symbol": "HUMA",
+      "slug": "HUMA"
+    },
+    {
+      "symbol": "Q",
+      "slug": "Q"
+    },
+    {
+      "symbol": "SIREN",
+      "slug": "SIREN"
+    },
+    {
+      "symbol": "SKYAI",
+      "slug": "SKYAI"
+    },
+    {
+      "symbol": "TAG",
+      "slug": "TAG"
+    },
+    {
+      "symbol": "UB",
+      "slug": "UB"
+    }
+  ],
+  "regime": "test",
+  "n_episodes": 1,
+  "indicators_used": [],
+  "available_indicators": []
+}

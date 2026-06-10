@@ -1,0 +1,46 @@
+[
+  {
+    "id": "trend50-val",
+    "model_name": "vol-top8 trend50 (VAL)",
+    "timestamp": "2026-06-09T23:18:06.159964+00:00",
+    "n_episodes": 1,
+    "regime": "test",
+    "symbol": "PORTFOLIO",
+    "simulation": false,
+    "kind": "portfolio",
+    "universe": [
+      {
+        "symbol": "BANANAS31",
+        "slug": "BANANAS31"
+      },
+      {
+        "symbol": "FF",
+        "slug": "FF"
+      },
+      {
+        "symbol": "HUMA",
+        "slug": "HUMA"
+      },
+      {
+        "symbol": "Q",
+        "slug": "Q"
+      },
+      {
+        "symbol": "SIREN",
+        "slug": "SIREN"
+      },
+      {
+        "symbol": "SKYAI",
+        "slug": "SKYAI"
+      },
+      {
+        "symbol": "TAG",
+        "slug": "TAG"
+      },
+      {
+        "symbol": "UB",
+        "slug": "UB"
+      }
+    ]
+  }
+]

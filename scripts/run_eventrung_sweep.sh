@@ -19,7 +19,10 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "residual" ]; then              # Experiment 2b: per-decision (residual) reward + R4
+if [ "$REWARD_MODE" = "residual_ranked" ]; then       # Experiment 3: demeaned-ranked residual + budget
+  PFX="ppo-event-rank"
+  EXTRA="--reward-mode residual_ranked --res-gamma 0.1 --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "residual" ]; then            # Experiment 2b: per-decision (residual) reward + R4
   PFX="ppo-event-res"
   EXTRA="--reward-mode residual --r4-beta 0.8 --norm-reward --dd-lambda 0.5 --dd-soft 0.20 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "relative" ]; then            # Experiment 1: relative-to-rule reward + dense exploration

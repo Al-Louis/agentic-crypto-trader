@@ -35,12 +35,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "BNB Hackathon/Trading Strategies.md",
+                "file": "BNB Hackathon/Build Log.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Trading Strategies"
+              "title": "Build Log"
             }
           }
         ]
@@ -204,27 +204,28 @@
   },
   "active": "c665139adb3544af",
   "lastOpenFiles": [
+    "BNB Hackathon/Experiment Log.md.tmp.18940.5963fb02f459",
+    "BNB Hackathon/Experiment Log.md",
+    "BNB Hackathon/Trading Strategies.md",
+    "BNB Hackathon/Experiment Log.md.tmp.18940.6b45645ae1a0",
+    "BNB Hackathon/MCP Server.md.tmp.18940.8c0e057732a9",
+    "BNB Hackathon/MCP Server.md.tmp.18940.458e9739371b",
+    "BNB Hackathon/Build Log.md.tmp.18940.b93b1eda75e4",
+    "BNB Hackathon/Build Log.md.tmp.18940.c3f159971b00",
+    "BNB Hackathon/AI Training.md.tmp.18940.77261b62bef1",
+    "BNB Hackathon/Experiment Log.md.tmp.18940.8e7d2a21ff92",
+    "BNB Hackathon/AI Training.md.tmp.18940.74025436d0b0",
+    "BNB Hackathon/Experiment Log.md.tmp.18940.77c6b7d727ad",
+    "BNB Hackathon/Build Log.md.tmp.18940.dbdb3ac5c07e",
     "BNB Hackathon/AI Training.md",
     "BNB Hackathon/Index.md",
     "BNB Hackathon/Project Overview.md",
     "BNB Hackathon/Remote Capabilities.md",
     "BNB Hackathon/Market Conditions.md",
-    "BNB Hackathon/Trading Strategies.md",
     "BNB Hackathon/Simulated Market.md",
     "BNB Hackathon/MCP Server.md",
     "BNB Hackathon/Strategy Logic.md",
-    "BNB Hackathon/Build Log.md.tmp.18940.8a29ecf6bc59",
-    "BNB Hackathon/Build Log.md.tmp.18940.617d37c81bd2",
-    "BNB Hackathon/Trading Strategies.md.tmp.18940.7e2b70da1d81",
-    "BNB Hackathon/Build Log.md.tmp.18940.129c589478ef",
-    "BNB Hackathon/Build Log.md.tmp.18940.18271e587da8",
-    "BNB Hackathon/Experiment Log.md.tmp.18940.515abeddacc9",
-    "BNB Hackathon/Experiment Log.md.tmp.18940.25f3807f6c4e",
-    "BNB Hackathon/Build Log.md.tmp.18940.25da60acb22a",
     "BNB Hackathon/Apentic Data Contract.md",
-    "BNB Hackathon/Experiment Log.md",
-    "BNB Hackathon/Apentic Data Contract.md.tmp.18940.72e198a6bceb",
-    "BNB Hackathon/Build Log.md.tmp.18940.8082347589f5",
     "BNB Hackathon/Tech Stack.md",
     "wallet-core/building.md",
     "References/trust-wallet-agent-kit/_get-started.md",
