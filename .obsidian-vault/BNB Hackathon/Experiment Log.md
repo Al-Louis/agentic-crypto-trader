@@ -702,6 +702,22 @@ worst-seed maxDD < 30% everywhere.
   where "take this ignition bigger" is expressible; (b) more capacity/steps (only after obs);
   (c) seed variance (s1 vs s2) remains the deployment risk either way — champion is the seed-mean.
 
+### rd8 / rd8tp launched (2026-06-10, @ `a4132cc`) — the user's forensic feedback, built and gated
+User review of rd-s3 drove two changes: **(1) voltop8** — the calm half of the broad-12 universe
+(XRP/LINK/LTC/BabyDoge/SFP…) bleeds in chop and shouldn't be traded → `universe_mode=voltopk k=8`;
+**(2) take-profit prompts** (`tp_rungs 0.25/0.5/1/2`) — the env structurally could NOT sell into
+strength (exit prompts fire on weakness only); now a position crossing an unrealized-gain rung
+prompts once, default idx0 = let-it-run (rung-0 preserved), selling is the learned deviation.
+**Gates B+C PASS for both configs; the tp prompts RAISE the oracle ceiling and HALVE its DD:**
+val +74.8% (DD 12.1%) → **+95.5% (DD 7.1%)**, test +65.3% → **+79.5% (DD 6.1%)** — the user's
+"take profit on the way up" read confirmed at the ceiling. Sequenced A/B chain on the desktop:
+`ppo-event-rd8-a4132cc-s{0..3}` then `ppo-event-rd8tp-a4132cc-s{0..3}`, vs `ppo-event-rd` (broad
+k12) as control. Known eval artifact (NOT a live limitation): the first 168 bars of every eval
+window are signal warmup — entries there (B Mar 16, early BANANAS31) are unreachable in eval but
+live trading always has full history; an `--eval-prepad` (seed signals from the prior split's
+tail) is queued if we want the eval window fully tradeable. Sub-hourly execution: real but
+deferred (hourly pipeline end-to-end; minute data exists locally; revisit post-PoC).
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
