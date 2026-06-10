@@ -42,6 +42,40 @@ table sorted by `mean_return`, the `champion` highlighted, a `baseline.return_pc
 a **gate-safe badge** from `gate_safe_worst` (not `legal_mean` — worst-seed is the honest bar), and
 an expandable per-config seed breakdown from `seeds_detail`.
 
+## market_metrics.json — volatility / correlation dashboard (top-level)
+
+Published by `scripts/publish_market_metrics.py [--publish]` (sibling of `leaderboard.json`,
+no-cache, invalidated each publish). A self-contained market-structure snapshot for the
+**volatility / correlation screen** — it validates the risk picture the agent design hinges on:
+the alts span ~8× the median vol, they **decouple from BTC** (alts pump while BTC bleeds), and
+the token×token correlation is near-zero (so risk-parity sizing collapses portfolio drawdown).
+Producer: `trader.report.market_metrics.compute_market_metrics` (pure, tested).
+
+```
+{ generated, kind?: in window,
+  window:      { start, end, bars, hours_per_year, vol_window, excursion_window, kind },  // secs
+  btc:         { ret_window, ann_vol },                       // fractions; ann_vol annualized
+  tokens: [ {                                                 // sorted by ann_vol DESC (display order)
+     symbol, slug,
+     ann_vol,                       // annualized realized vol (full window)
+     ret_window,                    // cumulative return over the window (fraction)
+     vol_by_window: { "24h", "7d", "30d" },   // annualized vol over each trailing window
+     max_runup, max_drawdown,       // largest rolling excursion over `excursion_window` (14d)
+     corr_btc, beta_btc,            // correlation + beta to BTC  (the decoupling story)
+     avg_corr_peers,                // mean corr to the other tokens (low ⇒ diversifiable)
+     vol_series: [ { time, ann_vol } ]   // rolling-vol sparkline (downsampled, ~150 pts)
+  } ],
+  correlation: { symbols: [ …tokens…, "BTC" ], matrix: [[…]] },  // (n+1)² symmetric, unit diagonal
+  summary:     { n_tokens, avg_pairwise_corr, median_pairwise_corr, max_pairwise_corr,
+                 universe_ew_return, regime_label: "bull"|"bear"|"flat" } }
+```
+
+All `*_return` / `ret_window` / `*_runup` / `*_drawdown` are **fractions** (×100 for display).
+Suggested render: a **vol-ranked token table** (ann_vol + vol_by_window + the `vol_series`
+sparkline), a **correlation heatmap** from `correlation.matrix`/`symbols` (BTC as the last
+row/col makes the decoupling visible), and a `corr_btc`/`beta_btc` scatter. `--window`
+(full|train|val|test|last) selects the slice; the `last` window on a schedule gives a rolling view.
+
 ## Single-asset run (`kind` absent) — the demo / TradeSim-style
 Per `<run_id>/`: `trades.json` (`RoundTrip[]`), `metrics.json` (`MetricsReport`),
 `candles.json` (`CandleData[]` of the one symbol), `equity_curve.json` (`EquityPoint[]`),
