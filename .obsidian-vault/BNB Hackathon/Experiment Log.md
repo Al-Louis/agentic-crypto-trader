@@ -668,6 +668,40 @@ ruledefault > runs-rl/ruledefault.log 2>&1 < /dev/null &` → run-ids `ppo-event
 Verdict gate unchanged: seed-mean beats B&H + Random + surviving rung-0 on val AND test AND crash,
 worst-seed maxDD < 30% everywhere.
 
+## Standings — Rung-1b rule-default sweep (`ppo-event-rd-df943bf`, 4×1M, 2026-06-10)
+
+| seed | val (bull) | test (pump) | crash | trades |
+|------|-----------|-------------|-------|--------|
+| s0 | −7.5% (DD 9.9%) | −1.7% (DD 2.0%) | −3.0% (DD 8.6%) | 30 |
+| s1 | −6.4% (DD 17.3%) | **+28.4% (DD 18.0%) — PASSES the full test gate** | **+28.8% (DD 17.7%) — PASSES** | 41 |
+| s2 | −9.9% (DD 21.6%) | +1.4% (DD 7.0%) | −5.3% (DD 12.8%) | 61 |
+| s3 | −6.6% (DD 6.7%) | +4.7% (DD 11.1%) | +8.8% (DD 10.2%) — PASSES | 48 |
+| **mean** | **−7.6%** | **+8.2%** | **+7.3%, 4/4 survive (worst DD 17.7%)** | |
+| bars | rule −4.6% / B&H +27.5% | rule +18.0% / B&H +1.5% | rule ~−6% / B&H −82% | |
+
+### Verdict — the veto pathology is FIXED; the val bull-wall is now isolated and precise
+
+- **The behavior the substrate was built for, delivered.** s1 bought SIREN **Mar 22 05:00** (the
+  exact bar the user called, the rule's entry), rode it to the **Mar 22 19:00** rollover (+59% in
+  14h, the rule's exact exit), took the Mar 25 17:00 re-ignition, cut its loser cleanly. 2 buys /
+  2 sells — no skip-everything, no dust tail, no weakest-prompt-only buys. Forensics on the record.
+- **Crash robustness is structural now: 4/4 survive, worst DD 17.7%** (g2b-fixed: s2 DQ'd at
+  63.7%). The no-ratchet + exit-commit fixes eliminated the blowup mechanism, and s1 made +28.8%
+  IN the crash regime. Test mean −0.3% → **+8.2%**; **s1 is the first seed in the project to PASS
+  a full per-regime gate — and it passed two (test AND crash).**
+- **val is UNCHANGED (−7.6%, third consecutive config at −7±1%) — and that is now informative,
+  not mysterious.** With the veto gone the policy trades ≈ the rule, and the rule nets −4.6% on
+  val: its wins (SIREN +59%) are bled away by its other entries while B&H just holds the +27.5%
+  basket. The oracle (+74.6% val) closes that gap only by *per-decision discrimination* — skip the
+  rule's losing ignitions, hold winners longer. Gate C proved the reward now pays for exactly
+  that; PPO didn't find it from the current 13-obs at 1M steps. **The bottleneck has moved from
+  the substrate (fixed) to the per-prompt signal.** Overall honest gate: FAIL (val B&H binds).
+- Next-lever fork (pending decision): (a) **harvest/breakout obs on the rd substrate** — the
+  lever-2 A/B was invalid (broken env) AND bolted onto a veto-happy policy; its probe gate
+  (`probe_harvest_ic`, +0.063 incremental OOS IC) already PASSED, and rd is the first substrate
+  where "take this ignition bigger" is expressible; (b) more capacity/steps (only after obs);
+  (c) seed variance (s1 vs s2) remains the deployment risk either way — champion is the seed-mean.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
