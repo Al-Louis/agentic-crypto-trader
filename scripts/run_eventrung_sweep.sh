@@ -19,7 +19,10 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "lever2" ]; then                # Lever 2: g2b + harvest momentum obs (13->16).
+if [ "$REWARD_MODE" = "ruledefault" ]; then           # Rung-1b: g2b frozen + rule-default discretion —
+  PFX="ppo-event-rd"                                   # action idx0 EXECUTES rung-0; exit-commit, dust
+  EXTRA="--reward-mode relative --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --action-mode discrete --n-action-levels 4 --universe-mode broad --k 12 --vol-target 0.005 --cap-floor 0.02 --crash-train 4 --crash-eval --norm-reward --dd-lambda 0.5 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "lever2" ]; then              # Lever 2: g2b + harvest momentum obs (13->16).
   PFX="ppo-event-l2"                                   # A/B vs the on-disk g2b control (one variable: the obs)
   EXTRA="--reward-mode relative --harvest-obs --action-mode discrete --n-action-levels 4 --universe-mode broad --k 12 --vol-target 0.005 --cap-floor 0.02 --crash-train 4 --crash-eval --norm-reward --dd-lambda 0.5 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "gate2b" ]; then              # Reward-rebalance decider: GATE-2 FROZEN, only

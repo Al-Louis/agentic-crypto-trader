@@ -210,6 +210,14 @@ def main() -> None:
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
     p.add_argument("--harvest-obs", action="store_true", help="lever-2: append the event token's r24/r3d/r7d "
                    "momentum slots (OBS_DIM 13->16) so the policy can size UP on bull-harvest setups")
+    p.add_argument("--rule-default", action="store_true", help="rung-1b: discrete action idx 0 EXECUTES "
+                   "rung-0's decision (entry at rule sizing / exit full cut); deviations are earned")
+    p.add_argument("--exit-commit", type=int, default=0, help="rung-1b: bars a non-cut exit decision "
+                   "commits for (no re-prompt drip); 0 = legacy per-bar re-prompting")
+    p.add_argument("--dust-usd", type=float, default=0.0, help="rung-1b: partial keeps below this USD "
+                   "force a full close (kills the sub-$1 gas-bleeding trim tail); 0 = legacy")
+    p.add_argument("--rule-prior", type=float, default=0.0, help="rung-1b: +logit bias on action idx 0 at "
+                   "init so the untrained policy ~= the rule and PPO must learn to deviate")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
     p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
@@ -262,7 +270,9 @@ def main() -> None:
                       fwd_horizon=args.fwd_horizon, ungate=args.ungate,
                       action_mode=args.action_mode, n_action_levels=args.n_action_levels,
                       universe_mode=args.universe_mode, vol_target=args.vol_target,
-                      cap_floor=args.cap_floor, harvest_obs=args.harvest_obs, seed=args.seed)
+                      cap_floor=args.cap_floor, harvest_obs=args.harvest_obs,
+                      rule_default=args.rule_default, exit_commit=args.exit_commit,
+                      dust_usd=args.dust_usd, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -292,6 +302,10 @@ def main() -> None:
         lr = lambda pr: lr1 + (lr0 - lr1) * pr  # noqa: E731
     model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
                 ent_coef=args.ent_coef, learning_rate=lr)
+    if args.rule_default and args.rule_prior > 0:      # default-executes-the-rule prior: bias the
+        import torch                                   # categorical head toward idx 0 at init, so the
+        with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
+            model.policy.action_net.bias[0] += args.rule_prior
     model.learn(total_timesteps=args.timesteps, callback=ProgressCb())
 
     write_progress(out, state="running", phase="evaluate")
@@ -349,7 +363,9 @@ def main() -> None:
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
-                             "harvest_obs": args.harvest_obs,
+                             "harvest_obs": args.harvest_obs, "rule_default": args.rule_default,
+                             "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
+                             "rule_prior": args.rule_prior,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
@@ -358,6 +374,7 @@ def main() -> None:
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows
     flags = (f"{args.reward_mode} k{args.k}/{args.universe_mode} dd{args.dd_lambda}"
+             + (" +rd" if args.rule_default else "")
              + (" +harvest" if args.harvest_obs else "") + (" +crash" if args.crash_eval else ""))
     model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"
     entry = ap.export_portfolio_run(out, args.run_id, equity=eq_pub, metrics=metrics, weights=weights,

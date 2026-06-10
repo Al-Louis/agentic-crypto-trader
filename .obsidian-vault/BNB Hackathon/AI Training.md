@@ -432,6 +432,62 @@ is added to the obs (O1, OBS_DIM 11→12); `norm_reward=True` for the small zero
 `ppo-event-res-test-s<seed>`. **Gate: seed-mean test > +18%, worst-DD < 25%.** LSTM + regime obs stay
 **deferred** — earned only if a clean reward still can't beat the rule.
 
+## Rung-1b — rule-default discretion (SPEC, 2026-06-10)
+
+Motivated by the g2b trade forensics (`scripts/diag_token_events.py`, [[Experiment Log]]): the
+trained discretion **vetoes the rule for free** — it skipped every strong SIREN/BANANAS31 ignition
+(~80 prompts), bought only the weakest ones (surge ≈2.6×), and answered every exit prompt with a
+partial keep, producing a geometric dust-tail of losing sells (plus an invisible sub-$1 gas grind).
+The env's neutral action is "do nothing"; rung-0's behavior must be actively learned. Rung-1b
+inverts that: **the default action EXECUTES rung-0's decision; deviations must be earned.**
+
+### Sequencing — probe before build (the exp4 lesson)
+
+**Gate A (FIRST, zero new env code): the skeleton oracle ceiling.** A hindsight-greedy scripted
+agent through the *current* env (g2b config: broad k=12, risk-parity caps, real costs): at each
+entry prompt take max size iff the token's fwd-24h return is positive, else skip; at each exit
+prompt hold iff fwd is up, else cut. Decompose entry-only / exit-only / both. This bounds what ANY
+learned discretion can extract from rung-0's event set. **Kill criterion: if the oracle's val
+return < Buy&Hold (+27.5%), no reward/policy inside this skeleton can pass the honest gate →
+pivot the substrate (long-default basket overlay) instead of building rung-1b.**
+Script: `scripts/preflight_skeleton_ceiling.py`.
+
+### Mechanics (built only if Gate A clears)
+
+1. **`rule_default=True` entry semantics** — discrete levels become multipliers of the RULE's
+   sizing (`ef=0.20·eq`): **idx 0 = 1× (THE RULE, the biasable default)**, idx 1 = ½×, idx 2 =
+   skip, idx 3 = 2× — still clipped by the risk-parity cap and cash; rotation unchanged. (Index 0
+   is the default for BOTH event types — exit idx 0 = the rule's cut — so one logit bias makes the
+   untrained policy ≈ rung-0.)
+2. **Exit semantics + the two defect fixes** — levels stay keep ∈ {**0 (DEFAULT — the rule's
+   cut)**, ⅓, ⅔, 1} but: (a) **no peak re-anchor** on trim/override (removes the stop-ratchet that
+   rode s2 into the 63.7% crash DD); (b) **`exit_commit=12`**: after any non-cut decision the
+   position is not re-prompted for 12 bars (a trim/hold is one committed decision, not a per-bar
+   liquidation drip); (c) **`dust_usd=10`**: a partial keep whose remainder is below $10 forces a
+   full close (no sub-$1 gas-bleeding tail).
+3. **Rule-prior init** — +2.0 logit bias on the default level at policy init (entry idx 2, exit
+   idx 0), so the untrained policy ≈ rung-0 and PPO must learn *against the prior* to deviate.
+4. **Reward unchanged from g2b** (relative, `dd_lambda` 0.5) — the substrate semantics are the one
+   variable under test.
+
+All new flags default OFF (prior behavior byte-identical; regression suite must stay green).
+
+### Gates after build (in order, all laptop-side before any desktop compute)
+
+- **B — parity:** the all-default scripted policy through the env ≈ the rule mirror (report the
+  capped-vs-uncapped-`ef` gap separately — the risk-parity caps mean "1× rule" on a monster is
+  capped; that gap is the guardrail working, not an error).
+- **C — in-env landscape (exp5-style):** rule-mimic ≥ both corners (skip-all, all-max); a fwd-fit
+  selector is the unique argmax, all through the real env on total reward.
+- **D — the honest training gate (unchanged):** 4×1M seeds, seed-mean beats Buy&Hold + Random +
+  surviving rung-0 on val AND test AND crash; worst-seed maxDD < 30% everywhere. Run-ids
+  sha-stamped (`ppo-event-rd-<sha>-s<seed>`).
+
+**STATUS (2026-06-10): built, 258 tests green, gates A/B/C ALL PASSED** — ceiling val +74.6%
+(exits carry it: entries-only +7.3%), parity ≈0 uncapped (±3.6pt = the caps), landscape oracle
+unique argmax (+0.744/+0.405 margins), oracle-through-rd-env +77.3%/+44.4% at ~12% DD. Results +
+the launch command: [[Experiment Log]] §"Decided next — rung-1b". Awaiting desktop go.
+
 ## Is RL worth it here? (candid)
 
 A single 7-day live ranking is a hostile setting for a learned policy. Both sides honestly:

@@ -630,6 +630,44 @@ Baselines are now causal (the lookahead universe-selection fix): rule val **−4
    beating B&H in the bull**, because the action space cannot express "just stay long." This single
    constraint explains the whole GATE-1→lever-2 plateau ("survives crashes, can't beat B&H in the bull").
 
+### SIREN trade forensics (g2b-s3, `scripts/diag_token_events.py`) — the discretion VETOES the rule
+The user inspected s3's SIREN chart and called the behavior non-rung-0. Confirmed, bar by bar:
+the ignition fired **19 consecutive hours on Mar 22** (surge to 41×; the rule entered 05:00, exited
+19:00 — almost exactly the user's discretionary read), again Mar 25 17:00, Apr 4 15:00–Apr 5 02:00,
+and Apr 16 15:00–Apr 17 07:00 (surge to 17.6×). **The agent was prompted ~55 times and skipped every
+strong ignition; its single buy was the WEAKEST prompt on the board** (Apr 15 14:00, surge 2.6× —
+barely over the 2.5 threshold). It then **overrode the exit prompts through the Apr 17 crash** (each
+override re-anchors the trailing stop lower) and bled out via geometric 1/3-trims from Apr 20,
+selling below entry after riding a >+100% gain round-trip. So both discretion levers RL owns —
+skip-entry and override-exit — are used to do the *opposite* of what made rung-0 work: it skips the
+rule's winners and un-cuts the rule's losers. "86/86 buys on ignition bars" (the gating proof) and
+"the policy doesn't trade like rung-0" are both true: the skeleton bounds what it CAN do; the learned
+discretion vetoes what it SHOULD do. This is GATE-2's "defensive-everywhere" at single-trade
+resolution, and it makes the next design constraint concrete: **the neutral/default action must
+EXECUTE the rule's decision** (skip/deviate must be earned per-decision), not veto it for free.
+
+### Decided next — rung-1b rule-default discretion (gates A/B/C PASSED, ready for the desktop)
+The forensics' design conclusion, built and gated 2026-06-10 (spec: [[AI Training]] §Rung-1b).
+**Gate A — skeleton oracle ceiling (`preflight_skeleton_ceiling.py`, run FIRST, zero env code):**
+hindsight-greedy discretion through the g2b env scores **val +74.6% / test +45.7%** (vs B&H +27.5%
+/ +1.5%, rule −4.6% / +18%) — the skeleton's ceiling clears the honest gate ~3×, so the plateau is
+the *discretion*, not the event set. Decomposition: entries-only +7.3% val — **the exits carry the
+ceiling** (TradeSim's lesson, measured). Skip-all = exactly 0% (the g2b policy's de-facto floor).
+**The build:** `rule_default` (discrete idx 0 EXECUTES rung-0 — entry at rule sizing, exit full
+cut; deviations ½×/skip/2× and trim/hold are explicit), **no peak re-anchor** on override/trim
+(kills the s2 stop-ratchet), `exit_commit=12` (an exit decision commits — no per-bar liquidation
+drip), `dust_usd=10` (no sub-$1 gas-bleed tail), `--rule-prior 2.0` (+logit bias on idx 0 at init
+so the untrained policy ≈ the rule). Reward/config otherwise g2b-frozen (one variable). 258 tests.
+**Gate B — parity:** all-default through the env tracks the uncapped mirror within −0.5/+0.8pt;
+the capped gap (−3.7pt val / **+3.6pt test**) is the risk-parity caps working. **Gate C — in-env
+reward landscape:** PASS both splits — oracle-24h is the unique argmax by +0.744 (val) / +0.405
+(test); both corners far below; all-max is hammered (−40 reward, test). Oracle through the rd env:
+**+77.3% val / +44.4% test at ~12% maxDD** — the mechanics don't cost the ceiling.
+**Sweep (pending go):** `nohup bash scripts/run_eventrung_sweep.sh 1000000 "0 1 2 3" val
+ruledefault > runs-rl/ruledefault.log 2>&1 < /dev/null &` → run-ids `ppo-event-rd-<sha>-s{0..3}`.
+Verdict gate unchanged: seed-mean beats B&H + Random + surviving rung-0 on val AND test AND crash,
+worst-seed maxDD < 30% everywhere.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is

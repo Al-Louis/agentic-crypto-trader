@@ -31,6 +31,14 @@ OBS_DIM = 13   # ... rung-0 exposure (0 in absolute mode) + universe breadth (al
 SURGE_CLIP, CUSHION_CLIP, RET_CLIP = 10.0, 1.0, 5.0
 SKIP_EPS, HOLD_EPS = 0.05, 0.95   # action < SKIP_EPS on entry = skip; >= HOLD_EPS on exit = full hold
 
+# rung-1b `rule_default` action tables (discrete, 4 levels): index 0 EXECUTES rung-0's decision —
+# entry at the rule's sizing, exit cut in full — so deviating from the rule is a learned act, never
+# the path of least resistance (the g2b forensics: the policy skipped every strong ignition and
+# partially vetoed every exit for free). Entries are multiples of `rule_entry_frac`, still clipped
+# by the risk-parity cap; exits are keep-fractions (1.0 = hold-through/override).
+RULE_DEFAULT_ENTRY_MULT = (1.0, 0.5, 0.0, 2.0)   # idx -> multiple of the RULE's sizing (0 = skip)
+RULE_DEFAULT_EXIT_KEEP = (0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0)   # idx -> fraction kept (0 = the rule's cut)
+
 
 class EventRungEnv:
     """Event-driven rung-0 env. `reset()`/`step(action)` are plain numpy in/out (one scalar action
@@ -48,6 +56,7 @@ class EventRungEnv:
                  action_mode: str = "continuous", n_action_levels: int = 4,
                  universe_mode: str = "voltopk", vol_target: float = 0.0, cap_floor: float = 0.02,
                  harvest_obs: bool = False,
+                 rule_default: bool = False, exit_commit: int = 0, dust_usd: float = 0.0,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -70,6 +79,11 @@ class EventRungEnv:
         self.vol_target = float(vol_target)                 # >0: per-token weight cap proportional to vol_target/vol
         self.cap_floor = float(cap_floor)                   # risk-parity: min per-token weight cap (keep upside)
         self.harvest_obs = bool(harvest_obs)                # lever-2: append r24/r3d/r7d momentum slots (13->16)
+        self.rule_default = bool(rule_default)              # rung-1b: action idx 0 EXECUTES rung-0's decision
+        self.exit_commit = int(exit_commit)                 # bars an exit decision (non-cut) commits for
+        self.dust_usd = float(dust_usd)                     # partial keeps below this force a full close
+        if self.rule_default and (action_mode != "discrete" or self.n_action_levels != 4):
+            raise ValueError("rule_default needs action_mode='discrete' with n_action_levels=4")
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim = OBS_DIM + (3 if self.harvest_obs else 0)   # +r24/r3d/r7d when harvest_obs
@@ -119,6 +133,7 @@ class EventRungEnv:
         self.peak_eq = self.capital
         self.pos = {}                                            # tok -> dict(usd, entry_bar, peak_px, origin)
         self.cool = {t: -10 ** 9 for t in self.universe}        # last exit bar (cooldown)
+        self._exit_decided = {}                                 # tok -> bar of last committed non-cut exit
         self.prior_origin = {t: None for t in self.universe}    # dead-zone: runup origin of last cycle
         self.ignite_armed = {t: True for t in self.universe}    # entry edge: only prompt on a fresh ignite
         self._queue = []                                        # pending (event_type, tok) on the current bar
@@ -146,7 +161,12 @@ class EventRungEnv:
         if self.action_mode == "discrete":                 # Discrete level idx -> m in {0, .., 1}
             idx = int(round(float(np.asarray(action).reshape(-1)[0])))
             idx = int(np.clip(idx, 0, self.n_action_levels - 1))
-            m = idx / max(self.n_action_levels - 1, 1)     # 4 levels -> {0, 1/3, 2/3, 1}
+            if self.rule_default:                          # idx 0 = EXECUTE the rule; deviations earned
+                etype0 = self._pending[0]
+                m = (RULE_DEFAULT_ENTRY_MULT[idx] if etype0 == "entry"
+                     else RULE_DEFAULT_EXIT_KEEP[idx])
+            else:
+                m = idx / max(self.n_action_levels - 1, 1)  # 4 levels -> {0, 1/3, 2/3, 1}
         else:
             a = float(np.clip(np.asarray(action).reshape(-1)[0], -1.0, 1.0))
             m = (a + 1.0) / 2.0                            # -> [0,1] sizing / keep-fraction
@@ -220,7 +240,9 @@ class EventRungEnv:
         ev = []
         for t, p in self.pos.items():                            # update peaks, test exit triggers
             j = self.col_ix[t]
-            p["peak_px"] = max(p["peak_px"], self._px[bar, j])
+            p["peak_px"] = max(p["peak_px"], self._px[bar, j])   # peak tracks highs even while committed
+            if self.exit_commit > 0 and (bar - self._exit_decided.get(t, -10 ** 9)) < self.exit_commit:
+                continue                                         # committed exit decision: not re-prompted
             stop_hit = self._px[bar, j] < p["peak_px"] * (1.0 - self.stop_k)   # TRAILING stop off the
             #                              peak (matches canonical rung0.py:121 + _rule_equity_curve:400)
             ema_hit = self._cush[bar, j] < 0.0
@@ -245,7 +267,12 @@ class EventRungEnv:
         eq = self._equity()
         size = 0.0
         if a >= SKIP_EPS:
-            want = a * self._tok_cap.get(tok, self.max_entry_frac) * eq
+            if self.rule_default:                            # a = multiple of the RULE's sizing,
+                frac = min(a * self.rule_entry_frac,         # still clipped by the risk-parity cap
+                           self._tok_cap.get(tok, self.max_entry_frac))
+                want = frac * eq
+            else:
+                want = a * self._tok_cap.get(tok, self.max_entry_frac) * eq
             if want > self.cash:                                 # rung-0 loser-funded rotation
                 self._rotate_for(tok, want)
             size = min(want, self.cash)
@@ -266,11 +293,16 @@ class EventRungEnv:
         p = self.pos.get(tok)
         if p is None:
             return
-        if a >= HOLD_EPS:                                        # override: hold through, re-anchor the
-            p["peak_px"] = self._px[self.bar, self.col_ix[tok]]  # trailing stop to current (give it room)
-            return
+        if a >= HOLD_EPS:                                        # override: hold through
+            if self.rule_default:                                # rung-1b: COMMIT the hold (no re-prompt
+                self._exit_decided[tok] = self.bar               # for exit_commit bars) and do NOT
+            else:                                                # re-anchor — the old re-anchor let
+                p["peak_px"] = self._px[self.bar, self.col_ix[tok]]  # repeated overrides ratchet the
+            return                                               # stop down a crash (g2b-s2, 63.7% DD)
         keep = max(a, 0.0)
         val = self._pos_value(tok)
+        if self.dust_usd > 0.0 and keep * val < self.dust_usd:  # dust floor: a remainder below $dust
+            keep = 0.0                                          # is a full close, not a gas-bleeding tail
         sell_val = (1.0 - keep) * val
         j = self.col_ix[tok]
         c = amm_cost_usd(-sell_val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
@@ -283,7 +315,10 @@ class EventRungEnv:
             del self.pos[tok]
         else:                                                    # partial trim, keep the rest running
             p["usd"] *= keep
-            p["peak_px"] = self._px[self.bar, j]                 # re-anchor the trailing stop on the trim
+            if self.rule_default:                                # rung-1b: a trim is ONE committed decision
+                self._exit_decided[tok] = self.bar               # (no per-bar liquidation drip), stop NOT
+            else:                                                # re-anchored (no ratchet)
+                p["peak_px"] = self._px[self.bar, j]             # legacy: re-anchor on the trim
 
     def _rotate_for(self, tok: str, want: float):
         """Free cash for `tok` by closing the WEAKEST holding (lowest cushion) — but only if it's
