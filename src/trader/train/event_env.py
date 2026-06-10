@@ -42,7 +42,7 @@ class EventRungEnv:
                  vol_mult: float = 2.5, vol_spk: int = 24, vol_base: int = 168, vol_fast: int = 4,
                  stop_k: float = 0.25, cooldown: int = 48, max_entry_frac: float = 0.34,
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
-                 seed: int | None = None):
+                 record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
@@ -52,6 +52,7 @@ class EventRungEnv:
         self.lp_fee_bps, self.gas_usd = lp_fee_bps, gas_usd
         self.stop_k, self.cooldown, self.max_entry_frac = stop_k, cooldown, max_entry_frac
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
+        self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
         self.n_bars = len(self.returns)
         self.cols = list(self.returns.columns)
@@ -76,7 +77,7 @@ class EventRungEnv:
 
         self._min_start = warmup
         self._max_start = self.n_bars - episode_bars - 1
-        if self._max_start <= self._min_start:
+        if self._max_start < self._min_start:           # == is fine (a single full-window episode, eval)
             raise ValueError("series too short for episode_bars/warmup")
         self.rng = np.random.default_rng(seed)
 
@@ -85,7 +86,7 @@ class EventRungEnv:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
         self.start = int(start) if start is not None else int(
-            self.rng.integers(self._min_start, self._max_start))
+            self.rng.integers(self._min_start, max(self._max_start, self._min_start + 1)))
         self.end = self.start + self.episode_bars
         self.bar = self.start
         self.universe = self._pick_universe(self.start)          # causal vol-top-k, fixed for episode
@@ -97,6 +98,8 @@ class EventRungEnv:
         self.ignite_armed = {t: True for t in self.universe}    # entry edge: only prompt on a fresh ignite
         self._queue = []                                        # pending (event_type, tok) on the current bar
         self._eq_mark = self.capital
+        self._trades = []                                       # trades made in the current step (markers)
+        self._eq_trace = [(int(self.returns.index[self.start]), self.capital)]  # per-bar equity (eval)
         self._advance_to_event(first=True)                      # roll to the first decision point
         return self._obs()
 
@@ -110,14 +113,21 @@ class EventRungEnv:
         dd = (self.peak_eq - eq_pre) / self.peak_eq if self.peak_eq > 0 else 0.0
         reward = float(np.clip(ret, -RET_CLIP, RET_CLIP)) - self.dd_lambda * self._dd_penalty(dd)
 
+        decision_time = int(self.returns.index[self.bar])
+        self._trades = []
         etype, tok = self._pending
         if etype == "entry":
             self._do_entry(tok, a)
         else:
             self._do_exit(tok, a)
-        self._eq_mark = self._equity()
+        eq_post = self._equity()
+        traded = list(self._trades)
+        weights = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
+        self._eq_mark = eq_post
         self._advance_to_event()
-        return self._obs(), float(reward), bool(self._done), self._info()
+        info = self._info()
+        info.update({"trades": traded, "trade_time": decision_time, "weights": weights})
+        return self._obs(), float(reward), bool(self._done), info
 
     # -- event engine -------------------------------------------------------
     def _advance_to_event(self, first: bool = False):
@@ -130,10 +140,13 @@ class EventRungEnv:
                 return
             self.bar += 0 if first else 1
             first = False
-            if self.bar >= self.end or self._equity() <= 1.0:
+            eqb = self._equity()
+            if self.bar >= self.end or eqb <= 1.0:
                 self._done, self._pending = True, ("none", None)
                 return
-            self.peak_eq = max(self.peak_eq, self._equity())
+            self.peak_eq = max(self.peak_eq, eqb)
+            if self.record_trace:
+                self._eq_trace.append((int(self.returns.index[self.bar]), eqb))
             self._queue = self._scan_bar(self.bar)
             # re-arm entry edges where ignite has dropped (so a future ignite prompts again)
             for t in self.universe:
@@ -180,6 +193,7 @@ class EventRungEnv:
         self.cash -= size + c
         self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
                          "ref_px": self._px[self.bar, j], "origin": self._px[self.bar, j]}
+        self._trades.append((tok, size, c))                      # +buy marker
 
     def _do_exit(self, tok: str, a: float):
         """a = fraction of the position to KEEP. a>=HOLD_EPS overrides the exit (re-arm the stop)."""
@@ -195,6 +209,8 @@ class EventRungEnv:
         j = self.col_ix[tok]
         c = amm_cost_usd(-sell_val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += sell_val - c
+        if sell_val >= 1.0:
+            self._trades.append((tok, -sell_val, c))             # -sell marker (incl. rotation sells)
         if keep <= 1e-6:                                         # full exit -> cooldown + dead-zone
             self.cool[tok] = self.bar
             self.prior_origin[tok] = p["origin"]
