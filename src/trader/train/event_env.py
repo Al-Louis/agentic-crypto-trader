@@ -117,7 +117,7 @@ class EventRungEnv:
         self._tok_cap = self._token_caps(self.start)             # per-token weight cap (risk-parity if vol_target>0)
         self.cash = self.capital
         self.peak_eq = self.capital
-        self.pos = {}                                            # tok -> dict(usd, entry_bar, peak_px, ref_px)
+        self.pos = {}                                            # tok -> dict(usd, entry_bar, peak_px, origin)
         self.cool = {t: -10 ** 9 for t in self.universe}        # last exit bar (cooldown)
         self.prior_origin = {t: None for t in self.universe}    # dead-zone: runup origin of last cycle
         self.ignite_armed = {t: True for t in self.universe}    # entry edge: only prompt on a fresh ignite
@@ -221,7 +221,8 @@ class EventRungEnv:
         for t, p in self.pos.items():                            # update peaks, test exit triggers
             j = self.col_ix[t]
             p["peak_px"] = max(p["peak_px"], self._px[bar, j])
-            stop_hit = self._px[bar, j] < p["ref_px"] * (1.0 - self.stop_k)
+            stop_hit = self._px[bar, j] < p["peak_px"] * (1.0 - self.stop_k)   # TRAILING stop off the
+            #                              peak (matches canonical rung0.py:121 + _rule_equity_curve:400)
             ema_hit = self._cush[bar, j] < 0.0
             if stop_hit or ema_hit:
                 ev.append(("exit", t))
@@ -253,7 +254,7 @@ class EventRungEnv:
                 c = amm_cost_usd(size, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
                 self.cash -= size + c
                 self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
-                                 "ref_px": self._px[self.bar, j], "origin": self._px[self.bar, j]}
+                                 "origin": self._px[self.bar, j]}
                 self._trades.append((tok, size, c))              # +buy marker
             else:
                 size = 0.0                                       # couldn't fund -> a skip (dev = -0.20)
@@ -265,8 +266,8 @@ class EventRungEnv:
         p = self.pos.get(tok)
         if p is None:
             return
-        if a >= HOLD_EPS:                                        # override: hold through, re-reference the stop
-            p["ref_px"] = self._px[self.bar, self.col_ix[tok]]
+        if a >= HOLD_EPS:                                        # override: hold through, re-anchor the
+            p["peak_px"] = self._px[self.bar, self.col_ix[tok]]  # trailing stop to current (give it room)
             return
         keep = max(a, 0.0)
         val = self._pos_value(tok)
@@ -282,7 +283,7 @@ class EventRungEnv:
             del self.pos[tok]
         else:                                                    # partial trim, keep the rest running
             p["usd"] *= keep
-            p["ref_px"] = self._px[self.bar, j]
+            p["peak_px"] = self._px[self.bar, j]                 # re-anchor the trailing stop on the trim
 
     def _rotate_for(self, tok: str, want: float):
         """Free cash for `tok` by closing the WEAKEST holding (lowest cushion) — but only if it's

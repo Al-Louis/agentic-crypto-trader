@@ -54,6 +54,25 @@ def _run(env, entry_a=1.0, exit_a=0.0, start=40):
     return log
 
 
+def test_trailing_stop_fires_off_peak_not_entry():
+    """Regression: the exit stop must TRAIL the peak (canonical rung0.py:121), not anchor to the
+    ENTRY price. The old bug stopped off `ref_px` (entry) so a winner gave back its whole run before
+    exiting — 'sell the bottom'. A position 30% below its peak but 40% ABOVE entry must exit."""
+    env = _env(stop_k=0.25)
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()   # precomputed arrays are read-only
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0}
+    env._cush[bar, j] = 0.1                               # price above EMA -> isolate from the ema-break exit
+    env._px[bar, j] = 1.4                                 # 30% below peak (2.0), 40% above entry (1.0)
+    assert ("exit", t) in env._scan_bar(bar)             # trailing stop peak*0.75=1.5 > 1.4 -> fires
+    env.pos[t]["peak_px"] = 2.0
+    env._px[bar, j] = 1.6                                 # only 20% below peak -> stop (1.5) NOT hit
+    assert ("exit", t) not in env._scan_bar(bar)         # (an entry-anchored stop would never fire here)
+
+
 def test_obs_shape_and_finite():
     env = _env()
     obs = env.reset(start=40)

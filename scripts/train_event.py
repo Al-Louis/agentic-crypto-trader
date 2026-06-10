@@ -60,9 +60,13 @@ def rung0_baseline(eval_r, liq, vol):
     """The rung-0 RULE (hand-coded discretion, canonical vol-top-8) on the same window — the bar the RL
     must clear. Returns (return, maxDD>=0). A rung-0 that is ITSELF DQ'd (maxDD >= the 30% gate) is not
     a valid live strategy, so the honest gate stops forcing the agent to match its (unsurvivable) return."""
-    from trader.strategy.candidate import select_vol_tokens
     from trader.strategy.rung0 import build_rung0, run_rung0
-    uni = select_vol_tokens(eval_r, 8)
+    # CAUSAL universe (trailing-warmup std at WARMUP-1, matching EventRungEnv._pick_universe). NOT
+    # candidate.select_vol_tokens, which ranks by FULL-window std — lookahead that peeks at the late
+    # pumpers and inflated the rung-0 bar (e.g. test +29% lookahead vs +18% causal).
+    std = eval_r.rolling(WARMUP, min_periods=8).std().to_numpy()
+    order = np.argsort(np.nan_to_num(std[WARMUP - 1], nan=-1.0))[::-1][:8]
+    uni = [eval_r.columns[j] for j in order]
     eq, _, _ = run_rung0(eval_r, build_rung0(eval_r, tokens=uni, volume=vol), liq, warmup=WARMUP)
     ret = float(eq.iloc[-1] / eq.iloc[0] - 1.0)
     maxdd = abs(float((eq / eq.cummax() - 1.0).min()))
