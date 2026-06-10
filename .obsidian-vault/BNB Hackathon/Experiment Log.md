@@ -412,6 +412,38 @@ is the green light the arc earned the hard way; **PPO now has a landscape where 
 discrimination.** Sweep next (val first, then frozen test). Gate for the verdict unchanged: seed-mean
 test **> ~+18%**, worst-seed maxDD **< 25%**, selection-IC **> +0.10**.
 
+### exp5 val sweep — **first sweep to beat the rule, off-corner, on every seed**
+4 × 1M timesteps, sequenced, val split, `REWARD_MODE=selector` (run-ids `ppo-event-sel-s{0..3}`,
+each confirmed 1.00M steps complete). HEAD `36ceb00`.
+
+| seed | policy | Sharpe | maxDD | vs rung-0 rule −9.4% | eval action (mean / range) |
+|------|--------|--------|-------|----------------------|----------------------------|
+| s0 | −6.1% | −2.62 | 10.2% | BEATS | −0.103 / [−1, +1] |
+| s1 | −3.8% | −1.06 | 13.1% | BEATS | −0.008 / [−1, +1] |
+| s2 | −5.0% | −2.17 | 9.3% | BEATS | −0.125 / [−1, +1] |
+| s3 | −3.8% | −1.06 | 13.1% | BEATS | −0.008 / [−1, +1] |
+| **mean** | **−4.7%** | | **all < 25%** | **+4.7pp over rule** | full-range, ~neutral mean |
+
+**Three firsts for the arc, simultaneously:** (1) the in-env landscape gate passed (γ=0.10);
+(2) the trained policy stayed **off the corner** — full [−1,+1] action range with a near-neutral
+mean on every seed, i.e. it *discriminates* (sizes some entries big, some small) instead of railing
+to all-big/all-small as exp1–4 did; (3) it **beat the rung-0 baseline on all 4 seeds**, drawdowns
+roughly half the 25% gate. The ungate + entry_forward + γ=0.10 landscape produced a policy that
+learns selection rather than a scalar.
+
+**Honest caveat — val is a down regime** (rule −9.4%, all returns negative). The selector wins
+**defensively**: it down-sizes/skips the worst ignitions and loses ~half as much, not by profiting.
+Robust relative edge (4/4), but "loses less," not "makes money." Absolute verdict awaits frozen test.
+
+**The smoke's events=3172 vs the sweep's ~115 is resolved:** the smoke (40k, undertrained) sat in the
+exit-reprompt degeneracy (un-closed positions re-prompted every bar — the artifact the L0→L2 analysis
+flagged); the 1M-trained policies exit cleanly, so events collapse to the real val ignition count
+(~100 entries + clean exits). The trained policy escaping that loop is itself a positive signal.
+
+Next: (a) deviation-alpha diagnostic on a trained seed to confirm the sizing genuinely correlates with
+forward returns (mechanism, not just regime luck — `diag_deviation_alpha` / `rl_diagnose`); (b) the
+frozen **test** sweep — the one-shot final verdict (meta-overfit guard: test reserved until now).
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
