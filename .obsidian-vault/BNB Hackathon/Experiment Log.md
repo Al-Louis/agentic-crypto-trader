@@ -539,6 +539,22 @@ val moves from −6.9% toward the basket's +27% *without* crash DD > ~10% on any
 never the mean — concentration is what DQ'd GATE-1 rung-0 (31%) and GATE-2 s3 (34.7%). Full plan +
 lever sequence: [[AI Training]] §"Post-GATE-2 plan". Then features (gated) → RecurrentPPO (last).
 
+**RESULT (2026-06-10, `ppo-event-g2b`, 4×1M):** it's an **INFORMATION problem** — cutting `dd_lambda`
+did **not** ramp the bull.
+
+| regime | GATE-2 (λ=1.0) | g2b (λ=0.5) | read |
+|--------|---------------|-------------|------|
+| val (bull) | −6.9% | **−6.7%** | **unchanged — stays defensive even with the brake halved** |
+| test (pump) | −1.5% | +3.1% | improved |
+| crash | 3/4 survive (s3 DQ 34.7%) | **4/4 survive** (worst DD 14.8%, s1 +7.0% / s3 +12.5%) | held + more robust |
+
+The bull-loss is **not** a reward/brake problem (`rl-ml-trainer`'s hypothesis) — halving the drawdown
+penalty left val flat at −6.7% while crash survival actually *improved* (no DQ). The policy lacks the
+**harvest signal** to size up in bulls (`market-indicator-expert`'s hypothesis confirmed). **Lever 2
+next: the harvest obs (13→17: r24/r3d/r7d + breakout-distance), but GATED — no sweep until
+`scripts/probe_subset_ic.py` shows incremental-over-`cush` OOS IC on the ungated ~960-event pool.**
+Signal spec: [[Trading Strategies]] §"Intraday breakout-reversal".
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
