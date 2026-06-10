@@ -241,8 +241,14 @@ each defaulting OFF so the prior behavior is unchanged (225 tests green):
    (train how we trade). Reframes the agent's job: rung-0 + caps define a survivable risk envelope; the
    agent allocates *within* it to harvest the idiosyncratic vol. Tests: `tests/test_discrete_riskparity.py`.
 
-Next: GATE-1 on a broadened/calm universe (does discrete + simplest honest PnL reward beat
-rung-0 + Buy&Hold + Random?), reward normalization on, per-regime across all splits.
+**GATE-1 outcome (2026-06-10):** both variants (voltopk concentrated, broad k=12 risk-parity) FAIL
+the per-regime DQ gate — but structurally, not as a policy bug (full table in [[Experiment Log]]).
+The finding: **no static risk posture wins both regimes** — risk-parity caps *helped* on val (the RL
+beat a DQ'd rung-0 that blew 31% DD) and *hurt* on test (missed the monster-pump rung-0 caught at +29%).
+The block is two structural gaps: (1) **no regime signal in the obs** (`btc_trend` misleads — alts
+decouple from BTC) → add a **universe-breadth** feature; (2) **no alt-crash in the data** (every split
+has the alts rising/flat) → **synthetic alt-crash injection**, so de-risking can pay. Active build:
+the crash scenario + the breadth feature, then gate a **regime-adaptive** policy.
 
 **Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
 is a valid result the `beats_baseline` gate is built to surface.

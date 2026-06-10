@@ -444,6 +444,44 @@ Next: (a) deviation-alpha diagnostic on a trained seed to confirm the sizing gen
 forward returns (mechanism, not just regime luck — `diag_deviation_alpha` / `rl_diagnose`); (b) the
 frozen **test** sweep — the one-shot final verdict (meta-overfit guard: test reserved until now).
 
+### GATE 1 — discrete + risk-parity + honest DQ gate: the static-risk-posture wall
+After the exp1→exp5 reward-proxy drift, the substrate was rebuilt (discrete actions, universe knob,
+risk-parity per-token caps; the honest gate made structural in code — judge vs rung-0 **and** Buy&Hold
+**and** Random, **per regime**, under a hard 30% DQ). GATE 1's question: can a discrete policy + the
+simplest honest PnL reward (`relative`) beat the baselines on **both** held-out regimes (val + test)?
+
+Two variants, 4×1M seeds each, seed-mean (single-seed RL is unstable — the mean is the read):
+
+| | val | test | note |
+|---|-----|------|------|
+| **voltopk RL** (concentrated top-8) | +2.6% | **+9.9%** | s0 +18.8% was a lucky outlier; 3/4 seeds negative on val |
+| **broad RL** (k=12 risk-parity, stables+monsters) | −2.8% | −0.2% | diversified *away* from the pump → return-drag |
+| rung-0 (canonical voltopk-8) | −9.4% **(DQ'd, 31% DD)** | **+29%** (17% DD) | blew the gate on val; won on test |
+| Buy&Hold (risk-parity, agent's universe) | +8.7% | +15.2% | the bar both RLs fail |
+
+**Both variants FAIL the gate** — but the failure is structural, not a policy bug, and it carries the
+real finding: **no static risk posture wins both regimes.**
+- **On val**, concentrated rung-0 **blew a 31% drawdown (DQ'd) and lost −9.4%**; the risk-managed RL
+  *beat* it (positive, single-digit DD). **Risk management HELPED — survived where the rule got DQ'd.**
+- **On test**, the monsters pumped, surviving rung-0 made **+29%**, and the risk-parity caps that protect
+  val *missed the upside* → RL underperformed. **Risk management HURT.**
+
+Concentration blows the DQ gate when wrong; diversification misses the upside when concentration is
+right. The data measures this tradeoff cleanly. **This is exactly what regime-awareness is for** —
+modulate risk by regime (concentrate to harvest pumps when crash-risk is low, de-risk when high). A
+*static* policy can't; a *regime-adaptive* one can. GATE 1 is not "RL can't work" — it's "a fixed risk
+posture is the wrong target."
+
+**Two structural gaps block measuring the RL's value, both now the active build:**
+1. **No regime signal in the obs** — the policy can't see whether it's a pump or a crash setup. `btc_trend`
+   misleads (the alts decouple from BTC). → add a **universe-breadth** feature.
+2. **No alt-crash in the data** — every split has the alts rising/flat (only BTC fell); the gate
+   structurally rewards concentration because nothing crashes. We're grading a survival strategy with
+   nothing to survive. → **synthetic alt-crash injection**, so de-risking can finally *pay*.
+
+Next: build the crash scenario + the regime-breadth obs feature, then gate a regime-adaptive policy —
+the config where "embrace the volatility, survive the drawdown" becomes measurable. → [[AI Training]].
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
