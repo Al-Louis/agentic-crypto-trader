@@ -718,6 +718,34 @@ live trading always has full history; an `--eval-prepad` (seed signals from the 
 tail) is queued if we want the eval window fully tradeable. Sub-hourly execution: real but
 deferred (hourly pipeline end-to-end; minute data exists locally; revisit post-PoC).
 
+## Standings — rd8h (`ppo-event-rd8h-53409b4`, voltop8 + tp + harvest obs + eval-prepad, 4×1M)
+
+**⚠ New windows:** `--eval-prepad` makes every eval window tradeable from bar 0 AND moves the causal
+universe pick to the last pre-window bar — so the bars are NOT comparable to any prior round. On the
+prepad windows the rung-0 rule is very strong: **val −0.6% / test +89.3% / crash +62–64% (surviving)**;
+B&H val +17.1% / test +58.6% / crash ~−74%.
+
+| seed | val | test | crash | trades |
+|------|-----|------|-------|--------|
+| s0 | −6.5% (DD 13.2%) | +30.0% (DD 4.4%) | +12.1% (DD 9.4%) | 42 |
+| s1 | −4.3% (DD 13.8%) | +25.4% (DD 6.4%) | +13.0% (DD 11.6%) | 33 |
+| s2 | −4.1% (DD 8.8%) | +19.8% (DD 12.2%) | +10.7% (DD 16.2%) | 51 |
+| s3 | −9.5% (DD 20.7%) | +21.8% (DD 6.8%) | +25.8% (DD 4.1%) | 38 |
+| **mean** | **−6.1%** | **+24.3%** | **+15.4%, 4/4 survive** | |
+
+### Verdict — FAIL (every seed, every regime), and the failure mode is now named: the DIET-RULE equilibrium
+All seeds positive on test/crash with low DDs (4–16%) — but capturing only ~a quarter of the rule's
+return everywhere. The policy is a *scaled-down* rule: right direction, fractional magnitude. The
+mechanism is visible in the reward arithmetic: with a **relative** reward, matching the rule = 0, and
+the **`dd_lambda=0.5` penalty still charges the agent for the rule-sized drawdown path** — so
+under-sizing trades a small relative-return loss for a larger dd-penalty saving. Under-sizing is the
+reward-optimal policy for a non-discriminating agent: **the dd penalty double-counts risk that the
+substrate already bounds** (rule-default + risk-parity caps + trailing stops held worst-seed DD to
+20.7% this round, far under the 30% DQ). The harvest obs did not produce discrimination (3rd
+no-result for obs levers). **Next single-variable lever: `dd_lambda 0` on this exact config** — let
+the relative reward alone drive (parity=0, beat-the-rule positive), keep the DQ enforcement in the
+gate where it belongs, and watch worst-seed DD for the regression signal.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
