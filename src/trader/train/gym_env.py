@@ -52,8 +52,11 @@ class GymEventRungEnv(gym.Env):
     def __init__(self, returns, btc_close, liquidity, **env_kwargs):
         super().__init__()
         self.core = EventRungEnv(returns, btc_close, liquidity, **env_kwargs)
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.core.action_dim,),
-                                       dtype=np.float32)
+        if self.core.action_mode == "discrete":            # categorical size/keep levels (no boundary collapse)
+            self.action_space = spaces.Discrete(self.core.n_action_levels)
+        else:
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.core.action_dim,),
+                                           dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.core.obs_dim,),
                                             dtype=np.float32)
 

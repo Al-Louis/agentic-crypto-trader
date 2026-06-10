@@ -211,6 +211,39 @@ BTC-bear train/test-like windows.
 not cosmetic (the post-mortem's #1 lesson). The frozen-test split is reserved; tuning happens on
 validation to avoid the loop meta-overfitting (but see (d) — val is the unrepresentative pocket).
 
+### Substrate redesign (2026-06-10) — discrete actions, universe knob, risk-parity caps
+
+After exp1→exp5 (continuous-action proxy-reward drift), three structural changes to `EventRungEnv`,
+each defaulting OFF so the prior behavior is unchanged (225 tests green):
+
+1. **Discrete action space** (`action_mode="discrete"`, `n_action_levels=4` → size/keep ∈ {0,⅓,⅔,1}).
+   The TradeSim "Discrete(3) beat continuous decisively" lesson, scoped correctly: the failure is a
+   **Gaussian head over a `Box` dead-gradienting to the boundary** — observed *twice* here (exp1b
+   collapsed to 0 trades; the residual corner-solution). A categorical head structurally cannot
+   corner. Keeps the semi-MDP event timing (a fixed-clock rebuild was a documented dead-end);
+   only *what* the agent does at each event is discretized. Gym adapter exposes `spaces.Discrete`.
+
+2. **Universe-volatility knob** (`universe_mode`: `voltopk` | `broad` | `lowvol`) — the curriculum's
+   VOLATILITY axis. `voltopk` (default) = the k most volatile (max chaos, current); `lowvol` = the
+   calmest k (S0: learn basics on tractable dynamics); `broad` = vol-stratified spread. Motivated by
+   the universe being **bimodal**: a few monsters (HUMA ~1310% ann vol, 8.2× median; SIREN/SKYAI
+   +3000-3950% total peaks) vs a calm tail (XRP/ADA/LINK/gold) the agent *never sees* because
+   `vol-top-k` selects only the monsters. One-shot 40× events have no learnable structure — closer
+   to noise than signal — so basics must be learned on calmer data first.
+
+3. **Risk-parity per-token caps** (`vol_target>0` → per-token weight cap ∝ `vol_target/trailing_vol`,
+   clipped `[cap_floor, max_entry_frac]`). **The decisive finding:** the current top-8-vol universe
+   is **DQ'd by construction** — equal-weight buy&hold of it has maxDD **−31.1%**, over the 30% gate,
+   before the agent acts. The alts are **near-uncorrelated** (avg pairwise +0.13; the monsters +0.035
+   — idiosyncratic pumps), so inverse-vol weighting across a broadened universe cuts ann vol 1.96→0.32
+   and maxDD to **−24.2%** (under the gate). High-vol tokens stay present (floor) for convex upside but
+   can't blow the gate; calm tokens anchor at the ceiling. A hard guardrail *and* a training constraint
+   (train how we trade). Reframes the agent's job: rung-0 + caps define a survivable risk envelope; the
+   agent allocates *within* it to harvest the idiosyncratic vol. Tests: `tests/test_discrete_riskparity.py`.
+
+Next: GATE-1 on a broadened/calm universe (does discrete + simplest honest PnL reward beat
+rung-0 + Buy&Hold + Random?), reward normalization on, per-regime across all splits.
+
 **Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
 is a valid result the `beats_baseline` gate is built to surface.
 

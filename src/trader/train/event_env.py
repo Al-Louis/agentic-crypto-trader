@@ -45,6 +45,8 @@ class EventRungEnv:
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
                  reward_mode: str = "absolute", r4_beta: float = 0.0, res_gamma: float = 0.0,
                  fwd_horizon: int = 24, ungate: bool = False,
+                 action_mode: str = "continuous", n_action_levels: int = 4,
+                 universe_mode: str = "voltopk", vol_target: float = 0.0, cap_floor: float = 0.02,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -61,6 +63,11 @@ class EventRungEnv:
         self.fwd_horizon = int(fwd_horizon)                 # entry_forward: forward-return window (bars)
         self.ungate = bool(ungate)                          # exp5 selector: fire on every in-universe ignition
                                                             # (drop rung-0's cooled&reclaimed gate -> ~960 vs 39)
+        self.action_mode = action_mode                      # "continuous" (Box[-1,1]) | "discrete" (Discrete)
+        self.n_action_levels = int(n_action_levels)         # discrete: # of size/keep levels spanning [0,1]
+        self.universe_mode = universe_mode                  # voltopk | broad (vol-stratified) | lowvol (calm)
+        self.vol_target = float(vol_target)                 # >0: per-token weight cap proportional to vol_target/vol
+        self.cap_floor = float(cap_floor)                   # risk-parity: min per-token weight cap (keep upside)
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
@@ -102,7 +109,8 @@ class EventRungEnv:
             self.rng.integers(self._min_start, max(self._max_start, self._min_start + 1)))
         self.end = self.start + self.episode_bars
         self.bar = self.start
-        self.universe = self._pick_universe(self.start)          # causal vol-top-k, fixed for episode
+        self.universe = self._pick_universe(self.start)          # causal vol-ranked, fixed for episode
+        self._tok_cap = self._token_caps(self.start)             # per-token weight cap (risk-parity if vol_target>0)
         self.cash = self.capital
         self.peak_eq = self.capital
         self.pos = {}                                            # tok -> dict(usd, entry_bar, peak_px, ref_px)
@@ -131,8 +139,13 @@ class EventRungEnv:
     def step(self, action) -> tuple:
         # action in [-1,1]: neutral a=0 -> m=0.5 lands in the INTERIOR (the policy trades from init),
         # so a Gaussian head can't dead-gradient collapse to "never trade" at a [0,1] skip boundary
-        a = float(np.clip(np.asarray(action).reshape(-1)[0], -1.0, 1.0))
-        m = (a + 1.0) / 2.0                                # -> [0,1] sizing / keep-fraction
+        if self.action_mode == "discrete":                 # Discrete level idx -> m in {0, .., 1}
+            idx = int(round(float(np.asarray(action).reshape(-1)[0])))
+            idx = int(np.clip(idx, 0, self.n_action_levels - 1))
+            m = idx / max(self.n_action_levels - 1, 1)     # 4 levels -> {0, 1/3, 2/3, 1}
+        else:
+            a = float(np.clip(np.asarray(action).reshape(-1)[0], -1.0, 1.0))
+            m = (a + 1.0) / 2.0                            # -> [0,1] sizing / keep-fraction
         if self._done:
             return self._obs(), 0.0, True, self._info()
         eq_pre = self._equity()
@@ -227,7 +240,7 @@ class EventRungEnv:
         eq = self._equity()
         size = 0.0
         if a >= SKIP_EPS:
-            want = a * self.max_entry_frac * eq
+            want = a * self._tok_cap.get(tok, self.max_entry_frac) * eq
             if want > self.cash:                                 # rung-0 loser-funded rotation
                 self._rotate_for(tok, want)
             size = min(want, self.cash)
@@ -291,9 +304,39 @@ class EventRungEnv:
         return ramp * ramp
 
     def _pick_universe(self, at: int) -> list:
-        row = self._std[at - 1]
-        order = np.argsort(np.nan_to_num(row, nan=-1.0))[::-1][:self.k]
-        return [self.cols[j] for j in order]
+        """Causal vol-ranked universe. `universe_mode` is the curriculum's VOLATILITY axis:
+        `voltopk` = the k most volatile (current — maximum chaos); `lowvol` = the k calmest
+        (S0: learn basics on tractable dynamics); `broad` = a vol-stratified spread across the
+        distribution (calm + volatile together, for risk-parity allocation)."""
+        row = np.nan_to_num(self._std[at - 1], nan=-1.0)
+        order = np.argsort(row)[::-1]                        # all tokens, high -> low vol
+        if self.universe_mode == "lowvol":                   # calmest k (curriculum S0: learn basics)
+            valid = [j for j in order if row[j] > 0] or list(order)
+            pick = valid[::-1][:self.k]
+        elif self.universe_mode == "broad":                  # vol-stratified spread (calm + volatile)
+            valid = [j for j in order if row[j] > 0] or list(order)
+            if len(valid) > self.k:
+                idx = np.linspace(0, len(valid) - 1, self.k).round().astype(int)
+                pick = [valid[i] for i in idx]
+            else:
+                pick = valid[:self.k]
+        else:                                                # voltopk (default): EXACT prior behavior
+            pick = list(order[:self.k])
+        return [self.cols[j] for j in pick]
+
+    def _token_caps(self, at: int) -> dict:
+        """Per-token max weight cap. With `vol_target>0`: RISK-PARITY — cap proportional to
+        `vol_target/trailing_vol`, clipped to `[cap_floor, max_entry_frac]`, so high-vol tokens get
+        small caps (bounded drawdown contribution) while staying present for convex upside; calm
+        tokens anchor at the ceiling. With `vol_target<=0`: flat `max_entry_frac` for every token."""
+        if self.vol_target <= 0.0:
+            return {t: self.max_entry_frac for t in self.universe}
+        caps = {}
+        for t in self.universe:
+            v = self._std[at - 1, self.col_ix[t]]
+            v = float(v) if v and v > 0 else self.max_entry_frac
+            caps[t] = float(np.clip(self.vol_target / v, self.cap_floor, self.max_entry_frac))
+        return caps
 
     def _ignition_base_rate(self) -> float:
         """Mean forward-`fwd_horizon` return over every ignition in the panel — the typical-ignition
