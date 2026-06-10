@@ -11,7 +11,7 @@ import types
 
 import pytest
 
-from trader.experiment import champion, diagnostics, remote
+from trader.experiment import champion, diagnostics, launch, remote
 
 
 # ---- remote: status parsing + the MTU / self-match discipline ------------------------------
@@ -189,3 +189,106 @@ def test_rl_diagnose_data_packet(monkeypatch):
     assert pkt["gate"]["gate_pass"] is True           # beats base + worst DD 0.28 < 0.30
     assert pkt["reward_capacity"]["verdict"] == "reward-bound"
     assert pkt["performance"]["mean_return"] == 0.15
+
+
+# ---- launch tier: reward-config translation, smoke gate, verify, kill -----------------------
+
+def test_build_reward_args_storetrue_and_unknown():
+    args = launch.build_reward_args({"reward_mode": "residual", "r4_beta": 0.8,
+                                     "norm_reward": True, "dd_soft": 0.2})
+    assert "--reward-mode" in args and "residual" in args
+    assert "--norm-reward" in args                    # store_true present ⇒ emitted
+    assert launch.build_reward_args({"norm_reward": False}) == []   # falsy bool ⇒ omitted
+    with pytest.raises(ValueError, match="unknown reward_config key"):
+        launch.build_reward_args({"r4_betaa": 0.8})
+
+
+def test_sweep_command_sequences_seeds_detached():
+    cmd = launch.build_sweep_command(python="py", workdir="/w", reward_config={"reward_mode": "absolute"},
+                                     seeds=[0, 1, 2, 3], split="val", prefix="pfx")
+    assert "nohup bash -c" in cmd and "for s in 0 1 2 3" in cmd   # sequenced, never parallel
+    assert "--seed $s" in cmd and "pfx-s$s" in cmd               # $s preserved for inner bash
+    assert cmd.rstrip().endswith("echo $!")                      # returns the driver PID
+
+
+def test_smoke_command_suppresses_publish():
+    cmd = launch.build_smoke_command(python="py", workdir="/w", reward_config={"reward_mode": "absolute"},
+                                     split="val", prefix="pfx")
+    assert "APENTIC_PUBLISH_TARGET=" in cmd          # empty env ⇒ train_event skips publishing
+    assert "pfx-smoke" in cmd and "tail -6" in cmd
+
+
+SMOKE_OK = ("[eval] events=1683 action mean=0.385 min=-1.000 max=1.000\n"
+            "[verdict] policy +2.1% (Sh 0.72, DD 9.9%) vs rung-0 rule +29.0% on test -> loses\n"
+            "[train_event] ppo-x-smoke: return +2.1%, Sharpe 0.72, maxDD 9.9%, events 1683, trades 184")
+
+
+def test_parse_smoke_alive_and_straddle():
+    s = launch.parse_smoke(SMOKE_OK)
+    assert s["alive"] and s["straddle"] and s["passed"]
+    assert s["trades"] == 184 and s["events"] == 1683
+    assert s["return_pct"] == pytest.approx(0.021)
+
+
+def test_parse_smoke_dead_zero_trades():
+    dead = SMOKE_OK.replace("trades 184", "trades 0")
+    s = launch.parse_smoke(dead)
+    assert s["alive"] is False and s["passed"] is False
+
+
+def test_parse_smoke_pinned_no_straddle():
+    pinned = ("[eval] events=10 action mean=0.999 min=0.998 max=1.000\n"
+              "[train_event] x: return +0.1%, Sharpe 0.1, maxDD 1.0%, events 10, trades 5")
+    s = launch.parse_smoke(pinned)
+    assert s["alive"] is True and s["straddle"] is False and s["passed"] is False
+
+
+def test_parse_smoke_unparseable():
+    s = launch.parse_smoke("torch exploded\nTraceback ...")
+    assert s["passed"] is False and "error" in s
+
+
+def test_verify_launch_clean_vs_stacked():
+    assert launch.verify_launch({"running": True, "load": 7.8, "trainers": 2}, 8)["clean"] is True
+    stacked = launch.verify_launch({"running": True, "load": 15.5, "trainers": 4}, 8)
+    assert stacked["stacked"] is True and stacked["clean"] is False
+    assert launch.verify_launch({"running": False, "load": 0.0, "trainers": 0}, 8)["clean"] is False
+
+
+def test_parse_preflight_and_kill():
+    pf = launch.parse_preflight("HEAD=abc1234 data=20")
+    assert pf == {"head": "abc1234", "data_files": 20}
+    k = launch.parse_kill("killed=2317 2319 ")
+    assert k["killed_pids"] == ["2317", "2319"] and k["n_killed"] == 2
+
+
+def test_kill_command_never_group_kills_and_self_excludes():
+    cmd = launch.build_kill_command()
+    assert "kill -- -" not in cmd and "pkill" not in cmd       # specific PIDs, never the group
+    assert "[t]rain_event.py" in cmd                           # bracket trick: can't match itself
+
+
+# ---- rl_train guard flow (injected ssh) -------------------------------------------------
+
+def test_rl_train_refuses_when_a_sweep_is_running(monkeypatch):
+    from trader.mcp_server import server
+    monkeypatch.setattr(remote, "sweep_status", lambda **k: {"running": True, "load": 7.0})
+    out = server.rl_train({"reward_mode": "absolute"}, dry_run=False)
+    assert out["launched"] is False and "already running" in out["refused"]
+
+
+def test_rl_train_smoke_gate_blocks_dud(monkeypatch):
+    from trader.mcp_server import server
+    monkeypatch.setattr(remote, "sweep_status", lambda **k: {"running": False, "load": 0.0})
+
+    def fake_ssh(cmd, **k):
+        if "printf 'HEAD=" in cmd:
+            return "HEAD=abc data=20"
+        if "train_event.py --timesteps 100000" in cmd:      # the smoke
+            return SMOKE_OK.replace("trades 184", "trades 0")   # dead ⇒ gate fails
+        return "999"
+
+    monkeypatch.setattr(remote, "run_ssh", fake_ssh)
+    out = server.rl_train({"reward_mode": "absolute"})
+    assert out["launched"] is False and out["reason"] == "smoke gate failed"
+    assert out["smoke"]["alive"] is False

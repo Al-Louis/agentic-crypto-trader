@@ -179,3 +179,112 @@ def experiment_champion() -> dict:
     """The current best config + its exact reproduce command (reads committed experiments/champion.json)."""
     from trader.experiment.champion import read_champion
     return read_champion(EXPERIMENTS)
+
+
+# ---- RL experiment loop — LAUNCH tier (🟡 SIMULATE) ----------------------------------------
+# Owner: rl-ml-trainer · vault "MCP Server" §"Training / RL experiment loop". rl_train is THE
+# guard tool: it makes the runbook scars structural (launch-once-and-verify ⇒ Vmmem-stacking
+# impossible; test-split needs final_verdict ⇒ no meta-overfit; smoke-gate ⇒ no dud sweep).
+# rl_kill stops by specific PID, never the process group. Both build their commands from the
+# pure builders in trader.experiment.launch, so the logic is unit-tested offline.
+
+import re as _re
+
+_PREFIX_OK = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+@mcp.tool()
+def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
+             timesteps: int = 1_000_000, n_envs: int = 8, prefix: str | None = None,
+             smoke: bool = True, final_verdict: bool = False, sha: str | None = None,
+             dry_run: bool = False, verify_wait_s: int = 90) -> dict:
+    """Launch a seed sweep on the desktop, SAFELY — the guard tool.
+
+    `reward_config` is the freeform shaping knob dict (e.g. {"reward_mode":"residual","r4_beta":0.8,
+    "norm_reward":true,...}); unknown keys are refused. Flow: validate → (dry_run returns the exact
+    commands without touching the box) → refuse if a sweep is already running → preflight sync/data
+    check → 100k smoke + gate → launch detached, sequenced seeds → wait `verify_wait_s` and confirm
+    exactly one clean run (aborts on a stacked run). `split="test"` is refused unless
+    `final_verdict=True` (the frozen-test meta-overfit guard — tuning runs go to val).
+    """
+    from trader.experiment import launch as L
+    from trader.experiment.remote import REMOTE_PYTHON, REMOTE_WORKDIR, run_ssh, sweep_status
+
+    seed_list = seeds.split() if isinstance(seeds, str) else [str(s) for s in seeds]
+    if split == "test" and not final_verdict:
+        return {"refused": "split='test' requires final_verdict=True (frozen-test meta-overfit "
+                "guard) — tune on val, spend test only on the final verdict.", "launched": False}
+    try:
+        L.build_reward_args(reward_config)               # validate early (raises on unknown key)
+    except ValueError as e:
+        return {"refused": str(e), "launched": False}
+    prefix = prefix or L.auto_prefix(reward_config, split)
+    if not _PREFIX_OK.match(prefix):
+        return {"refused": f"unsafe prefix {prefix!r}", "launched": False}
+
+    common = dict(python=REMOTE_PYTHON, workdir=REMOTE_WORKDIR, reward_config=reward_config,
+                  split=split, n_envs=n_envs, prefix=prefix)
+    smoke_cmd = L.build_smoke_command(**common)
+    sweep_cmd = L.build_sweep_command(**common, seeds=seed_list, timesteps=timesteps)
+    preflight_cmd = L.build_preflight_command(workdir=REMOTE_WORKDIR, sha=sha)
+    run_ids = [f"{prefix}-s{s}" for s in seed_list]
+    plan = {"prefix": prefix, "run_ids": run_ids, "split": split, "timesteps": timesteps,
+            "n_envs": n_envs, "reward_config": reward_config}
+
+    if dry_run:
+        return {"dry_run": True, "plan": plan, "launched": False,
+                "commands": {"preflight": preflight_cmd, "smoke": smoke_cmd, "sweep": sweep_cmd,
+                             "kill": L.build_kill_command()}}
+
+    # 1) launch-once guard: never stack a second sweep onto a running one (the Vmmem incident).
+    try:
+        status = sweep_status()
+    except Exception as e:  # noqa: BLE001
+        return {"refused": f"could not reach desktop: {str(e)[:160]}", "launched": False}
+    if status.get("running"):
+        return {"refused": "a sweep is already running on the desktop — launch-once discipline",
+                "status": status, "launched": False}
+
+    # 2) preflight: sync to sha (if given) + confirm HEAD and that market data is present.
+    pf = L.parse_preflight(run_ssh(preflight_cmd, timeout=120.0))
+    if sha and pf.get("head") != sha:
+        return {"refused": f"desktop HEAD {pf.get('head')} != requested {sha}", "preflight": pf,
+                "launched": False}
+    if not pf.get("data_files"):
+        return {"refused": "no market data on desktop (data/ohlcv/hour_1 empty)", "preflight": pf,
+                "launched": False}
+
+    # 3) smoke-gate: a dead/pinned policy never gets a 4-seed sweep.
+    smoke_result = None
+    if smoke:
+        smoke_result = L.parse_smoke(run_ssh(smoke_cmd, timeout=900.0))
+        if not smoke_result.get("passed"):
+            return {"launched": False, "reason": "smoke gate failed", "smoke": smoke_result,
+                    "preflight": pf, "plan": plan}
+
+    # 4) launch detached, then 5) wait + verify exactly one clean run.
+    driver_pid = run_ssh(sweep_cmd, timeout=120.0).splitlines()[-1].strip()
+    import time
+    time.sleep(max(0, int(verify_wait_s)))
+    verify = L.verify_launch(sweep_status(), n_envs)
+    return {"launched": True, "driver_pid": driver_pid, "verify": verify,
+            "smoke": smoke_result, "preflight": pf, "plan": plan,
+            "warning": ("STACKED OR DEAD — inspect and rl_kill if needed" if not verify["clean"]
+                        else None)}
+
+
+@mcp.tool()
+def rl_kill() -> dict:
+    """Stop a running sweep by SPECIFIC PID (driver bash + train main) — never the process group.
+
+    The group-kill once took tailscaled down with the job. Returns the killed PIDs and the
+    post-kill liveness so the caller can confirm the box is clear.
+    """
+    from trader.experiment import launch as L
+    from trader.experiment.remote import run_ssh, sweep_status
+    killed = L.parse_kill(run_ssh(L.build_kill_command(), timeout=30.0))
+    try:
+        killed["status_after"] = sweep_status()
+    except Exception as e:  # noqa: BLE001
+        killed["status_after"] = {"error": str(e)[:160]}
+    return killed
