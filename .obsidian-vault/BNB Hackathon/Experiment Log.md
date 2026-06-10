@@ -514,6 +514,31 @@ high-breadth bulls (one cheap sweep); (2) **recurrence (RecurrentPPO)** — brea
 (sustained-high = harvest, deteriorating = de-risk early), which a feedforward snapshot can't track
 but an LSTM can; now correctly sequenced (a feedforward champion exists to A/B against). → [[AI Training]].
 
+### ▶ NEXT EXPERIMENT (decided 2026-06-10) — reward-rebalance: the reward-vs-features decider
+*Relayed from the signal-research branch (the intraday breakout-reversal handoff — [[Trading Strategies]]).
+Two owners split on GATE-2's bull-loss: `rl-ml-trainer` says it's a **reward** problem (the `dd_lambda=1.0`
+taught blanket caution), `market-indicator-expert` says it's an **information** problem (no harvest signal
+to size up on). One cheap run adjudicates — run it before any feature code.*
+
+**The run:** GATE-2 config **frozen** (discrete, broad k=12, risk-parity caps, breadth obs OBS_DIM-13, 4
+training crashes, held-out crash regime) — change **only `dd_lambda 1.0 → 0.5`**. 4×1M seeds, graded
+val(bull) / test(pump) / crash. **Zero new code.** (`REWARD_MODE` stays the GATE-2 reward; just the lambda.)
+
+**PASS** = seed-mean beats Buy&Hold + Random + surviving rung-0 on **all three** regimes; worst-seed maxDD
+**< 30% everywhere**; **crash survival retained** (crash DD not regressing from GATE-2's 3–5%). Concretely:
+val moves from −6.9% toward the basket's +27% *without* crash DD > ~10% on any non-DQ'd seed.
+
+**It reads the cause:**
+- ramps the bull cleanly → **reward** problem (rl-ml right; harvest features may be unnecessary).
+- ramps the bull but **blows the crash** → the brake was load-bearing → switch to a *budgeted* reward
+  (`residual_ranked` γ≈0.1), do **not** cut `dd_lambda` blindly.
+- stays defensive → **information** problem (market-indicator right) → add harvest obs (13→17: r24/r3d/r7d +
+  breakout-distance), but only after `scripts/probe_subset_ic.py` shows incremental-over-`cush` OOS IC.
+
+**Safety (both agents, non-negotiable):** keep **risk-parity caps ON**; judge on **worst-seed crash DD**,
+never the mean — concentration is what DQ'd GATE-1 rung-0 (31%) and GATE-2 s3 (34.7%). Full plan +
+lever sequence: [[AI Training]] §"Post-GATE-2 plan". Then features (gated) → RecurrentPPO (last).
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
