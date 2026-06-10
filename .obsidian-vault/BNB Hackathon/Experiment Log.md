@@ -602,6 +602,34 @@ Buy&Hold in the bull.** Decision pending (loop both agents with this result).
 > See [[env-exit-stop-bug-fixed]]. The ENTRY side (agent rides rung-0's momentum, can't buy dips) is the
 > next frontier — the user wants the agent to own entry/exit TIMING (buy low, sell high), not just sizing.
 
+## Standings — g2b re-run on the FIXED env (2026-06-10, `ppo-event-g2b` @ `e466f0e`)
+
+The first valid result post-`8ccad69`. Config identical to g2b (discrete, broad k=12, risk-parity,
+breadth obs OBS_DIM-13, 4 training crashes, `dd_lambda` 0.5), 4×1M, published over the old run-ids
+(desktop HEAD `e466f0e` predates the `ec1e487` naming fix — provenance commit distinguishes them).
+Baselines are now causal (the lookahead universe-selection fix): rule val **−4.6%**, test **+18.0%**.
+
+| regime | s0 | s1 | s2 | s3 | mean | rule | B&H |
+|--------|----|----|----|----|------|------|-----|
+| val (bull) | −8.0% | −7.1% | −9.8% | −5.3% | **−7.6%** | −4.6% | **+27.5%** |
+| test (pump) | −3.3% | −3.2% | −0.9% | +6.2% | **−0.3%** | **+18.0%** | +1.5% |
+| crash | −1.9% (DD 5.4%) | −3.5% (DD 5.6%) | **−59.5% (DD 63.7% DQ)** | −14.0% (DD 25.8%) | survives **2.5/4** | ~−6% | −82% |
+
+### Verdict — the env bug was NOT the plateau's cause, and crash survival was partly an artifact
+
+1. **The bull-loss persists on the fixed env** (−6.7% invalid → −7.6% fixed; statistically unchanged).
+   The invalidation note's hope ("the plateau is very plausibly this bug") is now tested and **falsified**.
+2. **Crash survival REGRESSED** (4/4 → 2/4 comfortable; s2 catastrophically DQ'd at 63.7% DD, s3 grazing
+   at 25.8%). The pre-fix uniform defensiveness was partly trained *by the broken env* (sell-the-bottom
+   exits made aggression unsurvivable). On the honest env the policies are more aggressive and less
+   reliably safe. "RL-as-crash-insurance" is weaker than the invalid data suggested.
+3. **The structural read (the load-bearing fact): the RULE ITSELF loses the bull** — rung-0 makes −4.6%
+   on val while the basket B&H makes +27.5%. The event skeleton can only be long via ignition entries
+   and exits on trailing stops; in a grind-up bull it structurally bleeds vs holding. The agent inherits
+   that ceiling: **no reward/obs tweak inside the ignition-gated skeleton can reach a gate that demands
+   beating B&H in the bull**, because the action space cannot express "just stay long." This single
+   constraint explains the whole GATE-1→lever-2 plateau ("survives crashes, can't beat B&H in the bull").
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is

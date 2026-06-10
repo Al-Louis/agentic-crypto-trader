@@ -649,6 +649,28 @@ negative, correct-disc wins (+2.69 at γ=0.1, corr +0.239). The corner is provab
 *form* before any compute. 13 env tests pass. Sweep → `ppo-event-rank-test`; **corr now a success
 gate** (> +0.10). Full design → [[Experiment Log]] / [[AI Training]].
 
+## 2026-06-10 (cont.) — g2b re-run on the fixed env + PROOF that rung-0 gates the trades
+
+The post-`8ccad69` re-run (`ppo-event-g2b`, 4×1M @ `e466f0e`, launched by the prior session,
+landed 19:13Z) — full table + verdict in [[Experiment Log]]. Headline: **the env exit bug was NOT
+the plateau's cause** (val −7.6% vs −6.7% invalid), **crash survival regressed** (s2 DQ'd at 63.7%
+DD — the pre-fix "4/4 survive" was partly trained by the broken env), and the load-bearing fact is
+that **the rule itself loses the bull** (−4.6% vs B&H +27.5%) — the event skeleton's ceiling.
+
+**`scripts/verify_rung0_gating.py` (new)** — answers "is rung-0 actually driving the agent's
+entries/exits?" with run data, not claims: rebuilds the env's ignition/cushion signals locally from
+the bundle's provenance and cross-checks every published per-token trade marker. Result on all 4
+g2b seeds: **86/86 buys land exactly on rung-0 ignition bars; every sell is in the stop/EMA-zone
+or a loser-funded rotation; zero unexplained trades.** With `ungate=False` the code has no other
+entry path (`_scan_bar` requires `_ignite[bar,tok]`), and the empirical check confirms the build
+matches the claim. The one rung-0 discipline the agent CAN defeat is the **exit override**
+(action ≥ 0.95 re-anchors the trailing stop to the current price — repeated overrides ratchet the
+stop down indefinitely), which is rung-1's intended discretion but is the plausible mechanism for
+s2's −59.5% crash blowup. Bypass-flag inventory for any config review: `ungate` (drops
+cooldown/dead-zone only — ignition is ALWAYS required), exit-override/partial-trim re-anchoring,
+`universe_mode` (the agent's basket ≠ the canonical rung-0 baseline's vol-top-8), risk-parity caps
+(scale entry sizes), `crash_train` (training data only).
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
