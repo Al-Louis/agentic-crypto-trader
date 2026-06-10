@@ -45,6 +45,10 @@ def compare_seeds(prefix: str, seeds: list[int] | list[str], *, host: str = DATA
     rets: list[float] = []
     dds: list[float] = []
     baseline: float | None = None
+    buyhold: float | None = None
+    randoms: list[float] = []
+    regime: dict | None = None
+    gate_flags: list[bool] = []
     for s in seeds:
         rid = f"{prefix}-s{s}"
         try:
@@ -55,29 +59,63 @@ def compare_seeds(prefix: str, seeds: list[int] | list[str], *, host: str = DATA
         r = m.get("total_return_pct")
         d = m.get("max_drawdown_pct")
         b = m.get("baseline_return")
+        bh = m.get("buyhold_return")               # the honest market bar (None on pre-gate bundles)
+        rnd = m.get("random_return")
         if b is not None:
             baseline = b
+        if bh is not None:
+            buyhold = bh
+        if rnd is not None:
+            randoms.append(rnd)
+        if m.get("regime") is not None:
+            regime = m.get("regime")
+        if m.get("gate_pass") is not None:
+            gate_flags.append(bool(m.get("gate_pass")))
         if r is not None:
             rets.append(r)
         if d is not None:
             dds.append(d)
         per_seed.append({
             "run_id": rid, "return": r, "maxdd": d, "sharpe": m.get("sharpe_ratio"),
-            "trades": m.get("total_trades"), "baseline": b,
+            "trades": m.get("total_trades"), "baseline": b, "buyhold": bh, "random": rnd,
+            "gate_pass": m.get("gate_pass"), "gate_binding": m.get("gate_binding"),
             "vs_baseline": (r - b) if (r is not None and b is not None) else None,
+            "vs_buyhold": (r - bh) if (r is not None and bh is not None) else None,
         })
 
     out: dict[str, Any] = {"prefix": prefix, "per_seed": per_seed, "n": len(rets),
-                           "baseline": baseline}
+                           "baseline": baseline, "buyhold": buyhold,
+                           "random": (sum(randoms) / len(randoms)) if randoms else None,
+                           "regime": regime}
     if rets:
         mean = sum(rets) / len(rets)
+        mean_rnd = (sum(randoms) / len(randoms)) if randoms else None
+        # the honest gate at the sweep level: the seed-mean must beat rung-0 AND Buy&Hold AND Random.
+        beats_bh = (buyhold is not None and mean > buyhold)
+        beats_rnd = (mean_rnd is not None and mean > mean_rnd)
+        beats_base = (baseline is not None and mean > baseline)
+        # Buy&Hold (the market) is NON-NEGOTIABLE: a bundle without it predates the honest gate and
+        # CANNOT pass — silently checking only rung-0 is exactly the drift the gate exists to kill.
+        if buyhold is None:
+            gate_pass_mean, binding = False, "Buy&Hold (not computed - re-run on the gated build)"
+        else:
+            checks = {"Buy&Hold": beats_bh, "Random": beats_rnd, "rung-0": beats_base}
+            # only enforce baselines that are present, but Buy&Hold is guaranteed present here
+            present = {k: ok for k, ok in checks.items()
+                       if k == "Buy&Hold" or (k == "Random" and mean_rnd is not None)
+                       or (k == "rung-0" and baseline is not None)}
+            gate_pass_mean = all(present.values())
+            binding = None if gate_pass_mean else next(k for k, ok in present.items() if not ok)
         out.update({
             "mean_return": mean,
             "spread": statistics.pstdev(rets) if len(rets) > 1 else 0.0,
             "worst_return": min(rets), "best_return": max(rets),
             "mean_maxdd": (sum(dds) / len(dds)) if dds else None,
             "worst_maxdd": max(dds) if dds else None,
-            "beats_baseline": (baseline is not None and mean > baseline),
+            "beats_baseline": beats_base,
+            "beats_buyhold": beats_bh,
+            "gate_pass_mean": gate_pass_mean, "gate_binding": binding,
+            "gate_pass_all_seeds": (bool(gate_flags) and all(gate_flags)),
         })
     return out
 

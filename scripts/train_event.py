@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from remote_train.progress import write_progress  # noqa: E402
 from trader import config  # noqa: E402
 from trader.report import apentic as ap  # noqa: E402
+from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd  # noqa: E402
 from trader.sim.metrics import PerformanceMetrics  # noqa: E402
 
 HOURS_PER_YEAR = 24 * 365
@@ -62,6 +63,68 @@ def rung0_baseline_return(eval_r, liq, vol):
     uni = select_vol_tokens(eval_r, 8)
     eq, _, _ = run_rung0(eval_r, build_rung0(eval_r, tokens=uni, volume=vol), liq, warmup=WARMUP)
     return float(eq.iloc[-1] / eq.iloc[0] - 1.0)
+
+
+def _eval_universe(eval_r, k=8, warmup=WARMUP):
+    """The same causal vol-top-k universe the env trades (EventRungEnv._pick_universe at start=WARMUP):
+    rank by trailing-`warmup` return std measured at WARMUP-1 (no look-ahead)."""
+    std = eval_r.rolling(warmup, min_periods=8).std().to_numpy()
+    order = np.argsort(np.nan_to_num(std[warmup - 1], nan=-1.0))[::-1][:k]
+    return [eval_r.columns[j] for j in order]
+
+
+def buy_and_hold_return(eval_r, liq, k=8, warmup=WARMUP, capital=10_000.0):
+    """Equal-weight BUY & HOLD of the eval window's vol-top-k universe — the honest market baseline
+    every model must beat to earn a version ([[AI Training]]). Entry AMM cost charged once via the
+    SAME broker the agent pays (costs applied equally to agent and benchmark)."""
+    uni = _eval_universe(eval_r, k, warmup)
+    px = (1.0 + eval_r.fillna(0.0)).cumprod().to_numpy()
+    cix = {t: i for i, t in enumerate(eval_r.columns)}
+    alloc, eq_end = capital / len(uni), 0.0
+    for t in uni:
+        j = cix[t]
+        p0 = px[warmup, j]
+        if p0 <= 0:
+            eq_end += alloc
+            continue
+        invested = alloc - amm_cost_usd(alloc, liq.get(t, 0.0), DEFAULT_LP_FEE_BPS, DEFAULT_GAS_USD)
+        eq_end += invested * px[-1, j] / p0
+    return eq_end / capital - 1.0
+
+
+def random_baseline_return(eval_r, btc, liq, vol, env_kwargs, n=3, seed=0):
+    """RANDOM discretion through the SAME event env — the floor a learned policy must clear. Mean of
+    `n` seeded random-action passes (the env's event timing is fixed; only the discretion is random)."""
+    rets = []
+    for s in range(n):
+        rng = np.random.default_rng(seed + 100 + s)
+        eq, *_ = evaluate_event_policy(lambda o: np.array([rng.uniform(-1.0, 1.0)]),
+                                       eval_r, btc, liq, vol, env_kwargs)
+        rets.append(float(eq.iloc[-1] / eq.iloc[0] - 1.0))
+    return float(np.mean(rets))
+
+
+def honest_gate(pol, rung0, buyhold, random_):
+    """The structural gate ([[AI Training]]): a model earns a version only if it beats rung-0 AND
+    Buy&Hold AND Random. Returns (passed, binding_baseline) — binding is the first baseline it fails,
+    checked Buy&Hold -> Random -> rung-0 (the market is the hardest, most important bar). Single
+    source of truth for the verdict AND the future MCP train-loop continue/stop decision."""
+    beats = {"Buy&Hold": pol > buyhold, "Random": pol > random_, "rung-0": pol > rung0}
+    passed = all(beats.values())
+    binding = None if passed else next(n for n in beats if not beats[n])
+    return passed, binding
+
+
+def eval_regime(eval_r, btc, k=8, warmup=WARMUP):
+    """The eval window's regime so 'beats the rule' can never hide 'lost to the market': BTC return
+    and the universe equal-weight return over warmup->end, with a bull/bear/flat label."""
+    uni = _eval_universe(eval_r, k, warmup)
+    px = (1.0 + eval_r.fillna(0.0)).cumprod()
+    uni_ew = float(np.mean([px[t].iloc[-1] / px[t].iloc[warmup] - 1.0 for t in uni]))
+    b = btc.reindex(eval_r.index).ffill().bfill().to_numpy()
+    btc_ret = float(b[-1] / b[warmup] - 1.0) if b[warmup] else 0.0
+    label = "bull" if uni_ew > 0.10 else "bear" if uni_ew < -0.10 else "flat"
+    return {"btc_return": btc_ret, "universe_ew_return": uni_ew, "label": label}
 
 
 def main() -> None:
@@ -165,11 +228,25 @@ def main() -> None:
     d0, d1 = int(eval_r.index[0]), int(eval_r.index[-1])
     weights, candles, trades = build_portfolio_artifacts(records, universe, d0, d1)
     metrics.update(trade_stats(trades))
+    # --- the honest gate: every model is judged against rung-0 AND Buy&Hold AND Random, with the
+    # eval regime printed so "beats the rule" can never hide "lost to the market" ([[AI Training]]).
+    pol = report.total_return_pct
     base = rung0_baseline_return(eval_r, liq, vol)
-    metrics["baseline_return"] = base
-    print(f"[verdict] policy {report.total_return_pct:+.1%} (Sh {report.sharpe_ratio:.2f}, "
-          f"DD {report.max_drawdown_pct:.1%}) vs rung-0 rule {base:+.1%} on {args.eval_split} -> "
-          f"{'BEATS' if report.total_return_pct > base else 'loses to'} the rule")
+    bh = buy_and_hold_return(eval_r, liq)
+    rnd = random_baseline_return(eval_r, btc, liq, vol, env_kwargs, seed=args.seed)
+    regime = eval_regime(eval_r, btc)
+    gate_pass, binding = honest_gate(pol, base, bh, rnd)
+    metrics.update({"baseline_return": base, "buyhold_return": bh, "random_return": rnd,
+                    "regime": regime, "gate_pass": gate_pass, "gate_binding": binding})
+    print(f"[regime] {args.eval_split}: BTC {regime['btc_return']:+.1%}  "
+          f"universe-EW {regime['universe_ew_return']:+.1%}  ({regime['label']})")
+    print(f"[baselines] Buy&Hold {bh:+.1%}  Random {rnd:+.1%}  rung-0 {base:+.1%}")
+    print(f"[verdict] policy {pol:+.1%} (Sh {report.sharpe_ratio:.2f}, DD {report.max_drawdown_pct:.1%}) | "
+          f"vs Buy&Hold {'BEATS' if pol > bh else 'LOSES'} ({pol - bh:+.1%}) | "
+          f"vs rung-0 {'BEATS' if pol > base else 'LOSES'} ({pol - base:+.1%}) | "
+          f"vs Random {'BEATS' if pol > rnd else 'LOSES'} ({pol - rnd:+.1%})")
+    print(f"[gate] {'PASS - beats all honest baselines' if gate_pass else 'FAIL'}"
+          + ("" if gate_pass else f" - must beat Buy&Hold + Random + rung-0; binding: {binding}"))
 
     import subprocess
     try:
