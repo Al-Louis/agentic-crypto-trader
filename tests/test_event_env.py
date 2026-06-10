@@ -134,7 +134,8 @@ def test_shadow_rule_curve_matches_rung0():
     returns, btc, vol, liq = _panel()
     env = _env(episode_bars=200)
     env.reset(start=40)
-    curve = env._rule_equity_curve(40, 240)
+    curve, rule_w = env._rule_equity_curve(40, 240)
+    assert rule_w.shape == (201, env.k) and rule_w.max() <= 1.0001, "rule weights matrix shape/bounds"
     shadow_ret = curve[-1] / curve[0] - 1.0
     win = returns.iloc[10:241]                            # warmup 30, then trade [40, 240]
     vwin = vol.iloc[10:241]
@@ -162,6 +163,27 @@ def test_relative_reward_runs_and_zeroes_a_rule_mimic():
         if done:
             break
     assert env._rule_eq is not None and len(env._rule_eq) == 201
+    assert np.isfinite(rsum)
+
+
+def test_residual_reward_runs_and_credits_only_deviations():
+    """Residual mode: the reward is the agent's weight DEVIATION from the rule dotted with returns -
+    so an agent holding exactly the rule's book would score ~0. Here we just confirm it wires up,
+    produces finite per-step rewards, and the rule-exposure obs feature is populated."""
+    returns, btc, vol, liq = _panel()
+    env = _env(reward_mode="residual", episode_bars=200)
+    obs = env.reset(start=40)
+    assert obs.shape == (OBS_DIM,) and np.isfinite(obs).all()
+    rsum, done = 0.0, False
+    for _ in range(800):
+        if env._pending[0] == "none":
+            break
+        _, r, done, _ = env.step([0.5])
+        assert np.isfinite(r)
+        rsum += r
+        if done:
+            break
+    assert env._rule_w is not None and env._rule_w.shape[1] == env.k
     assert np.isfinite(rsum)
 
 

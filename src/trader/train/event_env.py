@@ -26,7 +26,7 @@ import pandas as pd
 
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
 
-OBS_DIM = 11
+OBS_DIM = 12   # ... + the rung-0 rule's current exposure (0 in absolute mode)
 SURGE_CLIP, CUSHION_CLIP, RET_CLIP = 10.0, 1.0, 5.0
 SKIP_EPS, HOLD_EPS = 0.05, 0.95   # action < SKIP_EPS on entry = skip; >= HOLD_EPS on exit = full hold
 
@@ -102,10 +102,16 @@ class EventRungEnv:
         self._eq_mark = self.capital
         self._trades = []                                       # trades made in the current step (markers)
         self._eq_trace = [(int(self.returns.index[self.start]), self.capital)]  # per-bar equity (eval)
-        # relative reward: precompute the rung-0 RULE's per-bar equity over the episode (the benchmark
-        # the agent must BEAT to score positive) - so passivity/melt-up beta nets ~0 reward
-        self._rule_eq = self._rule_equity_curve(self.start, self.end) if self.reward_mode == "relative" else None
+        # relative/residual reward: precompute the rung-0 RULE's per-bar equity AND per-token weights
+        # over the episode - the benchmark the agent must BEAT. "relative" = beat the rule's portfolio
+        # return; "residual" = beat it per-decision (only the agent's weight DEVIATIONS earn/lose).
+        if self.reward_mode in ("relative", "residual"):
+            self._rule_eq, self._rule_w = self._rule_equity_curve(self.start, self.end)
+        else:
+            self._rule_eq = self._rule_w = None
         self._rule_eq_mark = float(self._rule_eq[0]) if self._rule_eq is not None else self.capital
+        self._prev_bar = self.start                             # residual: interval + agent-weight snapshot
+        self._agent_w_snap = {}
         self._advance_to_event(first=True)                      # roll to the first decision point
         return self._obs()
 
@@ -124,6 +130,8 @@ class EventRungEnv:
             ri = min(self.bar - self.start, len(self._rule_eq) - 1)
             rule_ret = self._rule_eq[ri] / self._rule_eq_mark - 1.0 if self._rule_eq_mark > 0 else 0.0
             ret = ret - rule_ret
+        elif self.reward_mode == "residual":                   # per-decision: only DEVIATIONS earn/lose
+            ret = self._residual_return()
         dd = (self.peak_eq - eq_pre) / self.peak_eq if self.peak_eq > 0 else 0.0
         reward = float(np.clip(ret, -RET_CLIP, RET_CLIP)) - self.dd_lambda * self._dd_penalty(dd)
 
@@ -140,6 +148,9 @@ class EventRungEnv:
         self._eq_mark = eq_post
         if self.reward_mode == "relative":
             self._rule_eq_mark = float(self._rule_eq[min(self.bar - self.start, len(self._rule_eq) - 1)])
+        elif self.reward_mode == "residual":                   # snapshot agent weights for the next interval
+            self._agent_w_snap = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
+            self._prev_bar = self.bar
         self._advance_to_event()
         info = self._info()
         info.update({"trades": traded, "trade_time": decision_time, "weights": weights})
@@ -263,17 +274,20 @@ class EventRungEnv:
         order = np.argsort(np.nan_to_num(row, nan=-1.0))[::-1][:self.k]
         return [self.cols[j] for j in order]
 
-    def _rule_equity_curve(self, start: int, end: int) -> np.ndarray:
-        """The rung-0 RULE's per-bar equity over [start, end] on this episode's universe — a faithful
-        mirror of `run_rung0` (exits on stop/EMA, ignition entries, loser-funded rotation) using the
-        precomputed signals. The relative-reward benchmark the agent must beat. O(bars x k)."""
+    def _rule_equity_curve(self, start: int, end: int):
+        """The rung-0 RULE's per-bar equity AND per-token weights over [start, end] on this episode's
+        universe — a faithful mirror of `run_rung0` (exits on stop/EMA, ignition entries, loser-funded
+        rotation) using the precomputed signals. The benchmark the agent must beat. Returns
+        `(eq[n], w[n, k])` with `w[bar, i]` = the rule's weight in `universe[i]`. O(bars x k)."""
         px, cush, ig, cix = self._px, self._cush, self._ignite, self.col_ix
         sk, cd, ef = self.stop_k, self.cooldown, self.rule_entry_frac
         fee, gas, liq = self.lp_fee_bps, self.gas_usd, self.liquidity
         cash, pos = self.capital, {}                            # t -> dict(usd, entry_bar, peak_px, origin)
         cool = {t: -10 ** 9 for t in self.universe}
         prior = {t: None for t in self.universe}
+        upos = {t: i for i, t in enumerate(self.universe)}     # universe-position index for the weight matrix
         eq = np.empty(end - start + 1)
+        w = np.zeros((end - start + 1, len(self.universe)))
 
         def value(t, bar):
             p = pos[t]
@@ -310,8 +324,30 @@ class EventRungEnv:
                         j = cix[t]
                         cash -= size + amm_cost_usd(size, liq.get(t, 0.0), fee, gas)
                         pos[t] = {"usd": size, "entry_bar": bar, "peak_px": px[bar, j], "origin": px[bar, j]}
-            eq[kbar] = cash + sum(value(t, bar) for t in pos)
-        return eq
+            e = cash + sum(value(t, bar) for t in pos)
+            eq[kbar] = e
+            if e > 0:
+                for t in pos:
+                    w[kbar, upos[t]] = value(t, bar) / e
+        return eq, w
+
+    def _residual_return(self) -> float:
+        """Per-decision (residual) signal: the agent's weight DEVIATIONS from the rule, dotted with
+        token returns over the interval since the last decision. Shared positions (agent_w==rule_w)
+        cancel, so only the agent's *active bets vs the rule* earn/lose - the gradient the
+        whole-portfolio relative reward smeared into base-divergence noise."""
+        pb, cb = self._prev_bar, self.bar
+        if cb <= pb:
+            return 0.0
+        ro = pb - self.start
+        s = 0.0
+        for i, t in enumerate(self.universe):
+            j = self.col_ix[t]
+            p0 = self._px[pb, j]
+            if p0 > 0:
+                tok_ret = self._px[cb, j] / p0 - 1.0
+                s += (self._agent_w_snap.get(t, 0.0) - self._rule_w[ro, i]) * tok_ret
+        return float(s)
 
     def _obs(self) -> np.ndarray:
         eq = self._equity()
@@ -333,8 +369,11 @@ class EventRungEnv:
         dd = (self.peak_eq - eq) / self.peak_eq if self.peak_eq > 0 else 0.0
         ema = float(self.btc_ema.iloc[self.bar])
         btc_trend = float(self.btc.iloc[self.bar]) / ema - 1.0 if ema else 0.0
+        rule_expo = 0.0                                        # the rung-0 rule's current invested fraction
+        if self._rule_w is not None:
+            rule_expo = float(self._rule_w[min(self.bar - self.start, len(self._rule_w) - 1)].sum())
         obs = [is_exit, cush, surge, unreal, held_frac, giveback,
-               self.cash / eq, exposure, len(self.pos) / self.k, dd, btc_trend]
+               self.cash / eq, exposure, len(self.pos) / self.k, dd, btc_trend, rule_expo]
         return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
 
     def _info(self) -> dict:

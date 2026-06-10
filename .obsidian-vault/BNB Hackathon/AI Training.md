@@ -277,11 +277,28 @@ future config re-pins.)
 **under-trading is solved** (16–22 trades vs 0–4), every seed positive and gate-safe, the first RL
 config that behaves like a real active agent across seeds. It does **not yet beat the rule** (~+18%
 causal) — return ≈ the absolute version but now *with* participation, i.e. it learned to **act like**
-the rule, not yet to **out-discriminate** it. A **capacity** gap. Standings table → [[Experiment Log]].
+the rule, not yet to **out-discriminate** it. Standings table → [[Experiment Log]].
 
-**Next (experiment 2 — capacity):** RecurrentPPO/LSTM for the partially-observable hold-through
-decision, + regime/breadth obs (be aggressive in melt-ups, defensive in chop) — convert
-participation into alpha over the rule.
+### Rung-1 experiment 2 — per-decision (residual) reward (2026-06-10)
+
+A 2nd `rl-ml-trainer` consult + a **deviation-alpha diagnostic** redirected the next step from
+"capacity (LSTM)" to "reward": correlating each executed entry's over-size-vs-rule with its
+forward-24h return gave **corr = −0.027** (`scripts/diag_deviation_alpha.py`) — the agent's bigger
+bets land on up- and down-moves **indiscriminately**, and it never sizes *below* the rule. So it's
+**reward-bound, not capacity-bound**: the flat "copy-the-rule" basin, where the whole-portfolio
+relative reward smears the marginal decision into base-divergence noise. *Don't buy an LSTM to escape
+a flat-gradient basin — fix the gradient.*
+
+**Experiment 2 — `reward_mode="residual"`:** reward the agent's **weight deviations from the rule**
+dotted with token returns, `Σ_tok (agent_w − rule_w)·ret_tok`, over the interval since the last
+decision. Shared positions (`agent_w == rule_w`) cancel, so **only the agent's active bets vs the
+rule earn/lose** — oversizing a winner pays, oversizing a loser hurts. The shadow book now also
+tracks the rule's **per-token weights** (`_rule_equity_curve` returns `(eq, w)`); the rule's exposure
+is added to the obs (O1, OBS_DIM 11→12); `norm_reward=True` for the small zero-centered reward.
+**Verified locally:** a rule-mimic agent nets **~0** residual (+0.013), a max-size agent **+0.538**
+(deviations score) — the gradient the −0.027 says is missing. Sweep: `... test residual` →
+`ppo-event-res-test-s<seed>`. **Gate: seed-mean test > +18%, worst-DD < 25%.** LSTM + regime obs stay
+**deferred** — earned only if a clean reward still can't beat the rule.
 
 ## Is RL worth it here? (candid)
 

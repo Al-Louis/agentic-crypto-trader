@@ -583,6 +583,23 @@ Process note: the smoke-first discipline paid off (caught the collapse before a 
 the launch/verify/kill-by-PID runbook held across ~5 desktop sweeps today with no repeat incidents.
 Standings → [[Experiment Log]]; mechanics + experiment-2 plan (LSTM + regime obs) → [[AI Training]].
 
+## 2026-06-10 (cont.) - deviation-alpha diagnostic -> RL experiment 2 (per-decision reward)
+
+Before building "experiment 2 = LSTM", asked the [[rl-ml-trainer]] (2nd consult) whether to refine
+the reward first. It called the +8.6% gap **reward-bound** and proposed a cheap check: the
+**deviation-alpha diagnostic** (`scripts/diag_deviation_alpha.py`) - correlate each executed entry's
+over-size-vs-rule with its forward-24h return on the exp1 bundles. **Result: corr = −0.027** (flat;
+the agent over-sizes indiscriminately and never sizes below the rule). Confirmed reward-bound, so the
+LSTM stays deferred.
+
+Built **experiment 2 (`reward_mode="residual"`)**: reward = the agent's **weight deviations from the
+rule** dotted with token returns (`Σ(agent_w − rule_w)·ret`), so shared positions cancel and only the
+agent's active bets score. Shadow book now returns per-token weights too; rule-exposure added to the
+obs (12-dim); `norm_reward=True`. **Verified locally:** rule-mimic agent nets ~0 residual (+0.013),
+max-size agent +0.538 - the missing gradient is now present. 11 env tests pass, eval/publish path
+torch-free. Sweep `... test residual` -> `ppo-event-res-test-s<seed>`; gate seed-mean > +18%, DD < 25%.
+Full reasoning → [[Experiment Log]] / [[AI Training]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

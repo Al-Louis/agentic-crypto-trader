@@ -185,15 +185,32 @@ smoke then traded actively (action mean 0.649, full range).
   the [−1,1] reparam did exactly what the diagnosis predicted. This is the first RL config that
   *behaves* like a real agent across seeds.
 - **Doesn't beat the rule yet** (+8.6% vs the causal ~+18%). Return ≈ the absolute-reward version,
-  but now *with* participation — so the agent has learned to **act like** the rule, not yet to
-  **out-discriminate** it. A **capacity** gap, not a behavior gap.
+  but now *with* participation — it learned to **act like** the rule, not yet to **out-discriminate** it.
 
-### Decided next — experiment 2 (capacity to beat the rule)
-1. **RecurrentPPO / LSTM** for the **hold-through-vs-cut** decision (intrinsically partially
-   observable — an MLP can't remember the path) and regime state across the interval.
-2. **Regime / breadth obs** (fraction of universe above its EMA, BTC realized-vol) so the agent is
-   aggressive in melt-ups and defensive in chop — the thing a fixed rule *can't* do.
-Convert "trades like the rule" into "beats the rule." Mechanics → [[AI Training]].
+### Deviation-alpha diagnostic — it's REWARD-bound, not capacity-bound (2026-06-10)
+Before spending an LSTM, the `rl-ml-trainer` (2nd consult) called the gap reward-bound and proposed a
+cheap check on the exp1 bundles: correlate each executed entry's **over/under-size vs the rule (0.20)**
+with that token's **forward-24h return**. If oversizing doesn't predict the move, the agent is
+deviating *without skill* → the **reward** isn't teaching discrimination. (`scripts/diag_deviation_alpha.py`.)
+- **Result: corr = −0.027** (37 entries, 4 seeds) — **flat zero.** And every entry was sized **≥ 0.20**
+  (0.20–0.34): the agent learned a crude "always size big," never "size by conviction," and the
+  within-range sizing is **pure noise**. The flat "copy-the-rule" basin made visible.
+- **Verdict:** the binding constraint is the objective's signal-to-noise on *beat the rule*, NOT the
+  policy's representational power (the regime obs `btc_trend` is already present; the agent already
+  out-sizes the rule and still doesn't win). **Don't buy capacity (LSTM) to escape a flat-gradient
+  basin — fix the gradient first.** Caveat: tests entry-sizing only (not exits/skips), but random
+  sizing is strong reward-bound evidence.
+
+### Decided next — experiment 2: per-decision (residual) reward
+Fix the credit assignment so the gradient points at *beating the rule per decision*, on the cheap MLP:
+1. **Per-decision / residual credit** (highest-leverage) — reward the agent's **weight deviation from
+   the rule** dotted with token returns, `Σ(agent_w − rule_w)·ret`, so the SHARED positions cancel and
+   only the agent's *active bets* earn/lose. Oversizing a winner pays; oversizing a loser hurts — the
+   signal the −0.027 says is missing.
+2. **Rule-context obs** (the rule's current exposure) + **`norm_reward=True`** (the reward is now
+   small & zero-centered).
+LSTM + regime obs stay **deferred** — earned only if a clean reward still can't beat the rule.
+Gate: seed-mean test **> +18%**, worst-DD **< 25%**. Mechanics → [[AI Training]].
 
 ## Thesis (the lens for reading all of the above)
 
