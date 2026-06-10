@@ -218,6 +218,8 @@ def main() -> None:
                    "force a full close (kills the sub-$1 gas-bleeding trim tail); 0 = legacy")
     p.add_argument("--rule-prior", type=float, default=0.0, help="rung-1b: +logit bias on action idx 0 at "
                    "init so the untrained policy ~= the rule and PPO must learn to deviate")
+    p.add_argument("--tp-rungs", default="", help="profit-take prompts at these unrealized-gain levels "
+                   "(comma list, e.g. 0.25,0.5,1,2) — lets the agent SELL INTO STRENGTH; '' = off")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
     p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
@@ -272,7 +274,8 @@ def main() -> None:
                       universe_mode=args.universe_mode, vol_target=args.vol_target,
                       cap_floor=args.cap_floor, harvest_obs=args.harvest_obs,
                       rule_default=args.rule_default, exit_commit=args.exit_commit,
-                      dust_usd=args.dust_usd, seed=args.seed)
+                      dust_usd=args.dust_usd,
+                      tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x], seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -365,7 +368,7 @@ def main() -> None:
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
                              "harvest_obs": args.harvest_obs, "rule_default": args.rule_default,
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
-                             "rule_prior": args.rule_prior,
+                             "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
@@ -374,7 +377,7 @@ def main() -> None:
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows
     flags = (f"{args.reward_mode} k{args.k}/{args.universe_mode} dd{args.dd_lambda}"
-             + (" +rd" if args.rule_default else "")
+             + (" +rd" if args.rule_default else "") + (" +tp" if args.tp_rungs else "")
              + (" +harvest" if args.harvest_obs else "") + (" +crash" if args.crash_eval else ""))
     model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"
     entry = ap.export_portfolio_run(out, args.run_id, equity=eq_pub, metrics=metrics, weights=weights,

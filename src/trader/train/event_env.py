@@ -38,6 +38,7 @@ SKIP_EPS, HOLD_EPS = 0.05, 0.95   # action < SKIP_EPS on entry = skip; >= HOLD_E
 # by the risk-parity cap; exits are keep-fractions (1.0 = hold-through/override).
 RULE_DEFAULT_ENTRY_MULT = (1.0, 0.5, 0.0, 2.0)   # idx -> multiple of the RULE's sizing (0 = skip)
 RULE_DEFAULT_EXIT_KEEP = (0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0)   # idx -> fraction kept (0 = the rule's cut)
+RULE_DEFAULT_TP_KEEP = (1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0)   # profit prompts: idx0 = let it run (the rule)
 
 
 class EventRungEnv:
@@ -57,6 +58,7 @@ class EventRungEnv:
                  universe_mode: str = "voltopk", vol_target: float = 0.0, cap_floor: float = 0.02,
                  harvest_obs: bool = False,
                  rule_default: bool = False, exit_commit: int = 0, dust_usd: float = 0.0,
+                 tp_rungs: tuple | list = (),
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -82,6 +84,9 @@ class EventRungEnv:
         self.rule_default = bool(rule_default)              # rung-1b: action idx 0 EXECUTES rung-0's decision
         self.exit_commit = int(exit_commit)                 # bars an exit decision (non-cut) commits for
         self.dust_usd = float(dust_usd)                     # partial keeps below this force a full close
+        self.tp_rungs = tuple(sorted(float(x) for x in tp_rungs))   # profit-take prompts at these
+        #   unrealized-gain levels (e.g. 0.25,0.5,1,2): the only way to SELL INTO STRENGTH — exit
+        #   prompts fire on weakness only. Each rung prompts once per position; default = let it run.
         if self.rule_default and (action_mode != "discrete" or self.n_action_levels != 4):
             raise ValueError("rule_default needs action_mode='discrete' with n_action_levels=4")
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
@@ -164,6 +169,7 @@ class EventRungEnv:
             if self.rule_default:                          # idx 0 = EXECUTE the rule; deviations earned
                 etype0 = self._pending[0]
                 m = (RULE_DEFAULT_ENTRY_MULT[idx] if etype0 == "entry"
+                     else RULE_DEFAULT_TP_KEEP[idx] if etype0 == "profit"
                      else RULE_DEFAULT_EXIT_KEEP[idx])
             else:
                 m = idx / max(self.n_action_levels - 1, 1)  # 4 levels -> {0, 1/3, 2/3, 1}
@@ -193,6 +199,8 @@ class EventRungEnv:
         etype, tok = self._pending
         if etype == "entry":
             self._do_entry(tok, m)
+        elif etype == "profit":
+            self._do_profit(tok, m)
         else:
             self._do_exit(tok, m)
         eq_post = self._equity()
@@ -248,6 +256,14 @@ class EventRungEnv:
             ema_hit = self._cush[bar, j] < 0.0
             if stop_hit or ema_hit:
                 ev.append(("exit", t))
+        if self.tp_rungs:                                        # profit prompts: a position crossed its
+            for t, p in self.pos.items():                        # next unrealized-gain rung (sell-into-
+                if p.get("tp_i", 0) >= len(self.tp_rungs):       # strength is now expressible)
+                    continue
+                j = self.col_ix[t]
+                unreal = self._px[bar, j] / self._px[p["entry_bar"], j] - 1.0
+                if unreal >= self.tp_rungs[p["tp_i"]]:
+                    ev.append(("profit", t))
         for t in self.universe:                                  # fresh ignitions on flat, cooled, reclaimed
             if t in self.pos or not self.ignite_armed[t]:
                 continue
@@ -281,7 +297,7 @@ class EventRungEnv:
                 c = amm_cost_usd(size, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
                 self.cash -= size + c
                 self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
-                                 "origin": self._px[self.bar, j]}
+                                 "origin": self._px[self.bar, j], "tp_i": 0}
                 self._trades.append((tok, size, c))              # +buy marker
             else:
                 size = 0.0                                       # couldn't fund -> a skip (dev = -0.20)
@@ -299,7 +315,27 @@ class EventRungEnv:
             else:                                                # re-anchor — the old re-anchor let
                 p["peak_px"] = self._px[self.bar, self.col_ix[tok]]  # repeated overrides ratchet the
             return                                               # stop down a crash (g2b-s2, 63.7% DD)
-        keep = max(a, 0.0)
+        self._sell_down(tok, max(a, 0.0))
+
+    def _do_profit(self, tok: str, a: float):
+        """Take-profit prompt (the position crossed its next unrealized-gain rung): `a` = fraction
+        to KEEP. Default (rule_default idx 0 -> keep 1.0) = rung-0's let-winners-run; selling here
+        is the 'sell into strength' deviation that exit prompts (weakness-triggered) cannot express."""
+        p = self.pos.get(tok)
+        if p is None:
+            return
+        j = self.col_ix[tok]
+        unreal = self._px[self.bar, j] / self._px[p["entry_bar"], j] - 1.0
+        while p["tp_i"] < len(self.tp_rungs) and unreal >= self.tp_rungs[p["tp_i"]]:
+            p["tp_i"] += 1                                       # consume every rung crossed
+        if a >= HOLD_EPS:
+            return                                               # let it run (the rule's behavior)
+        self._sell_down(tok, max(a, 0.0))
+
+    def _sell_down(self, tok: str, keep: float):
+        """Sell a position down to `keep` of its value (shared by exit cuts/trims and profit-takes):
+        dust floor, AMM cost, markers, cooldown + dead-zone on a full close, commit on a trim."""
+        p = self.pos[tok]
         val = self._pos_value(tok)
         if self.dust_usd > 0.0 and keep * val < self.dust_usd:  # dust floor: a remainder below $dust
             keep = 0.0                                          # is a full close, not a gas-bleeding tail
@@ -504,7 +540,7 @@ class EventRungEnv:
         eq = self._equity()
         eq = eq if eq > 0 else 1.0
         etype, tok = self._pending
-        is_exit = 1.0 if etype == "exit" else 0.0
+        is_exit = 1.0 if etype == "exit" else 0.5 if etype == "profit" else 0.0
         cush = surge = unreal = held_frac = giveback = 0.0
         if tok is not None:
             j = self.col_ix[tok]

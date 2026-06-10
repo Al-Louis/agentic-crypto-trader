@@ -13,6 +13,7 @@ unique argmax AND both corners (skip-all, all-max) do not beat rule-mimic.
 """
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 
@@ -22,10 +23,14 @@ sys.path.insert(0, "scripts")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 WARMUP = 168
-RD = dict(k=12, warmup=WARMUP, max_entry_frac=0.34, stop_k=0.25, cooldown=48,
-          reward_mode="relative", action_mode="discrete", n_action_levels=4,
-          universe_mode="broad", vol_target=0.005, cap_floor=0.02, dd_lambda=0.5, dd_soft=0.15,
-          rule_default=True, exit_commit=12, dust_usd=10.0)
+
+
+def rd_kwargs(args):
+    return dict(k=args.k, warmup=WARMUP, max_entry_frac=0.34, stop_k=0.25, cooldown=48,
+                reward_mode="relative", action_mode="discrete", n_action_levels=4,
+                universe_mode=args.universe_mode, vol_target=0.005, cap_floor=0.02,
+                dd_lambda=0.5, dd_soft=0.15, rule_default=True, exit_commit=12, dust_usd=10.0,
+                tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x])
 
 
 def run_scripted(eval_r, btc, liq, vol, kw, decide):
@@ -53,6 +58,13 @@ def run_scripted(eval_r, btc, liq, vol, kw, decide):
 
 
 def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--universe-mode", default="broad")
+    p.add_argument("--k", type=int, default=12)
+    p.add_argument("--tp-rungs", default="")
+    args = p.parse_args()
+    RD = rd_kwargs(args)
+
     from train_rl import build_volume_panel, load_data, time_split
     from trader.train.event_env import EventRungEnv
 
@@ -61,13 +73,13 @@ def main():
     vol = build_volume_panel(list(returns.columns), returns.index)
 
     def rule_mimic(env, etype, tok):
-        return 0
+        return 0                                       # idx0 = the rule at EVERY event type
 
     def skip_all(env, etype, tok):
         return 2 if etype == "entry" else 0            # never enter; cut anything (there is nothing)
 
     def all_max(env, etype, tok):
-        return 3                                       # 2x every entry, hold through every exit
+        return 3                                       # 2x entries, hold exits, dump at first tp rung
 
     def oracle24(env, etype, tok):
         j = env.col_ix[tok]
@@ -75,6 +87,8 @@ def main():
         fwd = env._px[min(b + 24, env.n_bars - 1), j] / env._px[b, j] - 1.0
         if etype == "entry":
             return 3 if fwd > 0.0 else 2               # 2x winners, skip losers
+        if etype == "profit":
+            return 0 if fwd > 0.0 else 3               # tp table: keep a riser, dump a roller
         return 3 if fwd > 0.0 else 0                   # hold winners, cut losers
 
     agents = [("rule-mimic", rule_mimic), ("skip-all", skip_all),
@@ -87,7 +101,9 @@ def main():
         rule_eq, _ = env._rule_equity_curve(WARMUP, env.end)
         mirror = rule_eq[-1] / rule_eq[0] - 1.0
 
-        print(f"\n=== {name} ===  uncapped rule mirror {mirror:+.1%}")
+        print(f"\n=== {name} ({args.universe_mode} k={args.k}"
+              + (f", tp={args.tp_rungs}" if args.tp_rungs else "")
+              + f") ===  uncapped rule mirror {mirror:+.1%}")
         # Gate B: parity, capped + uncapped
         ret_c, _, n_c, dd_c = run_scripted(eval_r, btc, liq, vol, RD, rule_mimic)
         kw_u = {**RD, "vol_target": 0.0}

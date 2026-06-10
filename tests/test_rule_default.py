@@ -154,6 +154,42 @@ def test_legacy_defaults_unchanged_trim_still_reanchors():
     assert ("exit", t) in env._scan_bar(bar) or True   # no commit suppression exists with flags off
 
 
+def test_profit_prompt_fires_and_default_lets_winner_run():
+    """RUN climbs ~3%/bar after entry -> the +25% rung must prompt; answering idx0 (keep all, the
+    rule's let-winners-run) consumes the rung, keeps the position, and the +50% rung prompts later."""
+    env = _rd_env(tp_rungs=(0.25, 0.5))
+    env.reset(start=40)
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    env.step([0])                                     # enter at the rule's sizing
+    assert _advance_to(env, "profit", "RUN", filler=0)
+    j = env.col_ix["RUN"]
+    p = env.pos["RUN"]
+    assert env._px[env.bar, j] / env._px[p["entry_bar"], j] - 1.0 >= 0.25
+    env.step([0])                                     # idx0 on a profit prompt = LET IT RUN
+    assert "RUN" in env.pos and env.pos["RUN"]["tp_i"] >= 1
+    assert _advance_to(env, "profit", "RUN", filler=0)  # the +50% rung prompts later
+    assert env.pos["RUN"]["tp_i"] == 1
+
+
+def test_profit_take_idx3_sells_all_realizing_the_gain():
+    env = _rd_env(tp_rungs=(0.25,))
+    env.reset(start=40)
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    env.step([0])
+    assert _advance_to(env, "profit", "RUN", filler=0)
+    bar = env.bar
+    env.step([3])                                     # idx3 on a profit prompt = SELL INTO STRENGTH
+    assert "RUN" not in env.pos
+    assert env.cool["RUN"] == bar                     # full close arms cooldown + dead-zone
+    assert env._equity() > 10_000.0                   # the +25% was realized, not given back
+
+
+def test_no_tp_rungs_means_no_profit_events():
+    env = _rd_env()                                   # tp_rungs off
+    env.reset(start=40)
+    assert not _advance_to(env, "profit", max_steps=400, filler=0)
+
+
 def test_all_default_policy_tracks_the_rule_mirror():
     """Parity (gate B, unit-scale): a policy answering idx0 at EVERY prompt through the env should
     track the rule mirror's equity on the synthetic panel (flat caps -> sizing matches ef=0.20)."""
