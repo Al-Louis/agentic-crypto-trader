@@ -244,6 +244,45 @@ encode the discipline as rules first, then let RL learn only the *discretion* th
   OOS), not features-on-a-rigid-clock (inherits the rigidity) - RL constrained to **rung-0's
   event-driven skeleton**, learning only the discretion, with the rules' anti-churn discipline intact.
 
+### Rung-1 experiment 1 — relative-to-rule reward (2026-06-10)
+
+The first event-driven sweep (absolute reward) **under-traded**: 2–4 trades/seed, +9.7% test, the
+agent riding 2 winners and skipping rung-0's ~30 ignitions. Diagnosis (`rl-ml-trainer`, grounded in
+`event_env.py`): the **absolute interval-return reward makes passivity optimal** in a bull sample,
+and it **never references the rule** — so skipping an ignition the rule would have taken costs the
+agent nothing. Five compounding mechanisms all point at inaction (absolute reward, the one-sided
+drawdown penalty acting as a hidden position-count tax, the Gaussian-on-[0,1] boundary attractor,
+sparse semi-MDP credit, the melt-up-biased sample).
+
+**The fix — reward relative to the rung-0 rule.** Each interval, subtract the rung-0 RULE's return
+over the same bars: `reward = (agent interval-return − rule interval-return) − dd_lambda·penalty`.
+Now *matching* the rule = 0; the **only** way to score positive is to **beat** it (size a winner
+bigger, skip a loser the rule took, hold through a stop it cut). Passivity and melt-up beta net ~0,
+so they stop paying. Implemented as a **shadow rung-0 equity curve precomputed in-env**
+(`EventRungEnv._rule_equity_curve`, a faithful mirror of `run_rung0` on the precomputed signals),
+**parity-verified VAL 0.0pt / TEST 0.3pt** before trusting any reward (the guard the plan requires).
+Paired with a relaxed drawdown penalty (`dd_lambda` 0.5, `dd_soft` 0.20), the post-mortem's
+exploration config (`ent_coef` 0.2, `lr` 3e-4→3e-5 anneal), and 2-week episodes.
+
+**The boundary-collapse detour (exp 1b).** The 100k smoke collapsed completely — **action mean
+0.000, 0 trades**: a Gaussian policy on a `Box[0,1]` drifts its mean to the lower bound, every
+sub-0 sample clips to the same no-trade outcome, and the dead gradient traps it before the relative
+reward can teach it to act. Fix: **reparameterize the action to `[−1,1]`** (`m = (a+1)/2`), so the
+network's neutral init (a≈0 → m=0.5) lands in the **interior and trades** — collapsing to never-trade
+now means actively driving to −1 against exploration *and* a reward that punishes idleness. The
+smoke then traded actively (action mean 0.649, full range). (Beta-policy head held in reserve if a
+future config re-pins.)
+
+**Result (frozen TEST, 4 seeds): +8.6% avg (±3.7%), maxDD 15.7%, ~18 trades/seed** — the
+**under-trading is solved** (16–22 trades vs 0–4), every seed positive and gate-safe, the first RL
+config that behaves like a real active agent across seeds. It does **not yet beat the rule** (~+18%
+causal) — return ≈ the absolute version but now *with* participation, i.e. it learned to **act like**
+the rule, not yet to **out-discriminate** it. A **capacity** gap. Standings table → [[Experiment Log]].
+
+**Next (experiment 2 — capacity):** RecurrentPPO/LSTM for the partially-observable hold-through
+decision, + regime/breadth obs (be aggressive in melt-ups, defensive in chop) — convert
+participation into alpha over the rule.
+
 ## Is RL worth it here? (candid)
 
 A single 7-day live ranking is a hostile setting for a learned policy. Both sides honestly:

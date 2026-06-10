@@ -149,6 +149,52 @@ The direction is set by the clue (baseline generalizes, RL overfits):
 4. **Reframe RL as a tuner on top of the baseline**, not a from-scratch allocator — the baseline is
    what generalizes. See [[Strategy Logic]], [[Market Conditions]], [[Trading Strategies]].
 
+## Standings — Event-Driven Rung-1 (RL learns the discretion, 2026-06-10)
+
+Acting on "Decided next" #4 (reframe RL as a tuner on the baseline). **Rung 0** = a hand-coded,
+event-driven volume-ignition rule (the baseline that generalizes; **+29% frozen-test**, full-window
+universe). **Rung 1** = RL learns only the *discretion* rung-0 hard-codes (entry sizing, exit
+override) on rung-0's event skeleton — intra-day, no daily clock. Env `trader.train.event_env`,
+trainer `scripts/train_event.py`, 4 seeds × 1M, frozen **TEST**. Baseline per run = the rung-0 RULE
+on the **same causal-at-start universe** (**~+18%** test; the +29% used hindsight universe selection).
+
+**Absolute-reward sweep (first event-driven run).** Test **+9.7%** avg, maxDD 9.8% — but only
+**2–4 trades/seed**, 3 of 4 seeds byte-identical. The agent **under-trades**: skips rung-0's ~30
+ignitions, rides 2 winners. Diagnosis (`rl-ml-trainer`): the **absolute** equity-change reward makes
+passivity optimal in a bull sample and never references the rule, so skipping costs nothing.
+
+**Experiment 1 — relative-to-rule reward.** `reward = agent interval-return − the rung-0 RULE's on
+the same bars` (shadow book in-env, parity-verified **VAL 0.0pt / TEST 0.3pt** vs `run_rung0`), so
+matching the rule = 0 and only **beating** it scores. + relaxed drawdown (`dd_lambda` 0.5, soft
+0.20), post-mortem exploration (`ent_coef` 0.2, `lr` 3e-4→3e-5), 2-week episodes. The 100k **smoke
+collapsed** (action mean 0.000, **0 trades**) — a Gaussian-on-[0,1] dead-gradient at the skip
+boundary. **Fix 1b:** reparameterize the action to **[−1,1]** (neutral a=0 → trades from init); the
+smoke then traded actively (action mean 0.649, full range).
+
+| seed | **test (OOS)** | maxDD | Sharpe | trades |
+|------|----------------|-------|--------|--------|
+| s0 | +4.1% | 12.8% | 0.99 | 16 |
+| s1 | +14.3% | 21.3% | 1.97 | 20 |
+| s2 | +9.1% | 12.2% | 1.60 | 22 |
+| s3 | +6.9% | 16.4% | 1.39 | 16 |
+| **avg** | **+8.6%** (±3.7%) | **15.7%** | ~1.5 | **~18** |
+
+### What it means — the under-trading is solved; the alpha gap is next
+- **Behavior fixed (robustly).** 16–22 trades/seed (vs 0–4), all positive, all gate-safe, tight
+  ±3.7% spread — a **stable, active, learned** policy, not a collapsed one. The relative reward +
+  the [−1,1] reparam did exactly what the diagnosis predicted. This is the first RL config that
+  *behaves* like a real agent across seeds.
+- **Doesn't beat the rule yet** (+8.6% vs the causal ~+18%). Return ≈ the absolute-reward version,
+  but now *with* participation — so the agent has learned to **act like** the rule, not yet to
+  **out-discriminate** it. A **capacity** gap, not a behavior gap.
+
+### Decided next — experiment 2 (capacity to beat the rule)
+1. **RecurrentPPO / LSTM** for the **hold-through-vs-cut** decision (intrinsically partially
+   observable — an MLP can't remember the path) and regime state across the interval.
+2. **Regime / breadth obs** (fraction of universe above its EMA, BTC realized-vol) so the agent is
+   aggressive in melt-ups and defensive in chop — the thing a fixed rule *can't* do.
+Convert "trades like the rule" into "beats the rule." Mechanics → [[AI Training]].
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is

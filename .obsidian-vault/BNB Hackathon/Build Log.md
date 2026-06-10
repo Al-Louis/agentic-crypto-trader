@@ -557,6 +557,32 @@ incidents - (1) fast post-launch checks fired before the ~30-60s torch+volume-pa
 and dropped the box off the tailnet. Both written up as hard rules (launch-once-wait-verify; stop by
 specific PID, never the process group; SSH via PowerShell; tiny SSH output for the tailnet MTU).
 
+## 2026-06-10 (cont.) - RL experiment 1: relative-to-rule reward solves the under-trading
+
+The event-driven rung-1 sweep (above) under-traded (2-4 trades/seed, +9.7% test) and lost to the
+rule. **Consulted the [[rl-ml-trainer]] agent** (first use) for a forward plan rather than abandoning
+RL - the thesis is a real learned agent, and rung-0 is the **baseline to beat**, not a replacement.
+
+Its diagnosis: the **absolute** reward makes passivity optimal and never references the rule, so the
+agent has no signal that skipping the rule's ignitions costs anything. **Experiment 1 (built +
+shipped):**
+
+- **Relative-to-rule reward** - a shadow rung-0 equity curve precomputed in-env
+  (`EventRungEnv._rule_equity_curve`, mirrors `run_rung0`), reward = agent's interval return MINUS
+  the rule's. Parity-verified **VAL 0.0pt / TEST 0.3pt** before any training. + relaxed dd, the
+  post-mortem exploration config, 2-week episodes.
+- **The smoke caught a dud cheaply** (100k, ~2 min): action mean **0.000, 0 trades** - a
+  Gaussian-on-[0,1] dead-gradient collapse to the skip boundary. **Fix 1b:** action reparam to
+  **[−1,1]** so neutral trades from init. Re-smoke: action mean 0.649, full range, 239 trades - alive.
+- **4-seed × 1M frozen-TEST sweep:** **+8.6% avg (±3.7%), 15.7% DD, ~18 trades/seed.** The
+  **under-trading is solved** (16-22 trades vs 0-4), all positive + gate-safe + tight spread - the
+  first RL config that behaves like a real active agent. Does **not yet beat the rule** (~+18%
+  causal); it learned to *act like* the rule, not yet *out-discriminate* it (a capacity gap).
+
+Process note: the smoke-first discipline paid off (caught the collapse before a 20-min sweep), and
+the launch/verify/kill-by-PID runbook held across ~5 desktop sweeps today with no repeat incidents.
+Standings → [[Experiment Log]]; mechanics + experiment-2 plan (LSTM + regime obs) → [[AI Training]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
