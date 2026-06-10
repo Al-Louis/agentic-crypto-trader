@@ -21,7 +21,7 @@ REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
 if [ "$REWARD_MODE" = "residual" ]; then              # Experiment 2b: per-decision (residual) reward + R4
   PFX="ppo-event-res"
-  EXTRA="--reward-mode residual --r4-beta 0.4 --norm-reward --dd-lambda 0.5 --dd-soft 0.20 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+  EXTRA="--reward-mode residual --r4-beta 0.8 --norm-reward --dd-lambda 0.5 --dd-soft 0.20 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "relative" ]; then            # Experiment 1: relative-to-rule reward + dense exploration
   PFX="ppo-event-rel"
   EXTRA="--reward-mode relative --dd-lambda 0.5 --dd-soft 0.20 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
