@@ -567,6 +567,28 @@ helps in combination — the nonlinearity the spec predicted. The breakout-dista
 lever-2 obs and A/B vs the GATE-2 champion; let the **net-of-cost** gate (not IC) decide success — the
 breakout edge (+0.38% < ~1% round-trip) lives in the convex tail the risk-parity caps must harvest.
 
+**LEVER-2 A/B RESULT (2026-06-10, `ppo-event-l2`, momentum obs 13→16, 4×1M) — clean NEGATIVE.**
+Treatment (g2b + r24/r3d/r7d) vs the on-disk g2b control:
+
+| regime | g2b control | lever-2 | read |
+|--------|-------------|---------|------|
+| val (bull) | −6.7% | **−8.0%** | NO lift — slightly worse |
+| test (pump) | +3.1% | +6.5% | better |
+| crash | +0.9%, **4/4 survive** (worst DD 14.8%) | −11.1%, **s3 DQ'd 41.1%** | worse |
+
+The harvest momentum obs **failed the A/B** — no bull lift on the seed-mean AND degraded crash
+survival. (The smoke's +13.4% val was froth: one undertrained seed — the "+198% was froth" lesson.)
+It adjudicates the agent split: **momentum-only is too BLUNT** — "size up when recent returns are
+positive" fires *before crashes too*, so it ramped into the crash (s3 DQ) without reliably ramping the
+bull. That's `market-indicator`'s critique (→ the *selective* breakout-distance, lever-2b), but it also
+vindicates `rl-ml`'s cost-wall worry: the bucket edge (+0.38%) is **below the ~1% round-trip**, so
+net-of-cost there may be no harvestable bull edge to capture. **Open fork:** (a) lever-2b — breakout-
+distance + fresh-flag (the *selective* signal, ramps only on fresh breakouts, less crash-correlated);
+(b) accept the cost-wall — the bull may not be beatable net-of-cost by event-driven trading, and g2b's
+**crash-survival (4/4, the thing no static posture does)** is the real asset (RL-as-crash-insurance).
+**Persistent pattern across GATE-2 / g2b / lever-2: the policy survives crashes but cannot beat
+Buy&Hold in the bull.** Decision pending (loop both agents with this result).
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
