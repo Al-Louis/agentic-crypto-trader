@@ -77,6 +77,8 @@ def transform_leaderboard(lb: dict, generated: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="execute (default: dry-run)")
+    ap.add_argument("--invalidate-all", action="store_true",
+                    help="invalidate /* on the CDN (flush deleted bundles from the edge), then exit")
     ap.add_argument("--target", default=None, help="default: env APENTIC_PUBLISH_TARGET")
     args = ap.parse_args()
     config.load_dotenv()
@@ -84,6 +86,14 @@ def main() -> None:
     if not target:
         raise SystemExit("no publish target (APENTIC_PUBLISH_TARGET)")
     dist = config.get("APENTIC_CLOUDFRONT_DIST_ID")
+
+    if args.invalidate_all:                          # standalone edge-cache flush after a reset
+        if not dist:
+            raise SystemExit("no APENTIC_CLOUDFRONT_DIST_ID to invalidate")
+        inv = publish.invalidate_cloudfront(dist, ["/*"], caller_reference="reset-invalidate-all")
+        print(f"invalidated /* on {dist}: {inv}")
+        return
+
     bucket = _bucket(target)
     client = publish._s3_client()
 
