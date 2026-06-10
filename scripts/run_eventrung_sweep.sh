@@ -19,8 +19,11 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "gate1" ]; then                 # GATE 1: discrete + risk-parity + PnL reward
-  PFX="ppo-event-g1"                                   # (clean isolation: agent/rung-0/B&H all on voltopk)
+if [ "$REWARD_MODE" = "gate1b" ]; then                # GATE 1 (broad): discrete + risk-parity on a
+  PFX="ppo-event-g1b"                                  # 12-token universe (stables + monsters), DQ gate
+  EXTRA="--reward-mode relative --action-mode discrete --n-action-levels 4 --universe-mode broad --k 12 --vol-target 0.005 --cap-floor 0.02 --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "gate1" ]; then               # GATE 1 (isolation): all on voltopk-8
+  PFX="ppo-event-g1"
   EXTRA="--reward-mode relative --action-mode discrete --n-action-levels 4 --universe-mode voltopk --vol-target 0.005 --cap-floor 0.02 --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "selector" ]; then            # Experiment 5: ungated cross-sectional selector
   PFX="ppo-event-sel"                                  # (in-env landscape gate PASSED at gamma=0.1)

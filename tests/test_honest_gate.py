@@ -55,6 +55,26 @@ def test_gate_binding_prefers_market_over_rule():
     assert binding == "Buy&Hold"
 
 
+def test_gate_dqs_a_policy_that_breaches_the_drawdown_gate():
+    # beats every return bar, but maxDD 35% > 30% -> DQ'd, worthless (return that can't go live)
+    passed, binding = te.honest_gate(pol=0.50, rung0=0.10, buyhold=0.15, random_=-0.05,
+                                     pol_maxdd=0.35)
+    assert passed is False and binding.startswith("DQ")
+
+
+def test_gate_exempts_a_dqd_rung0_from_being_a_return_bar():
+    # rung-0 made +29% but at 40% maxDD (itself DQ'd) -> not a valid live bar; agent need not match it
+    passed, _ = te.honest_gate(pol=0.05, rung0=0.29, buyhold=0.02, random_=-0.10,
+                               pol_maxdd=0.12, rung0_maxdd=0.40)
+    assert passed is True                                   # beats Buy&Hold + Random; DQ'd rung-0 exempt
+
+
+def test_gate_still_requires_beating_a_surviving_rung0():
+    passed, binding = te.honest_gate(pol=0.05, rung0=0.29, buyhold=0.02, random_=-0.10,
+                                     pol_maxdd=0.12, rung0_maxdd=0.20)  # rung-0 survives -> real bar
+    assert passed is False and binding == "rung-0"
+
+
 # -- the baselines (computed on the same universe/broker the agent uses) -------
 
 def test_buyhold_over_agent_universe_and_deterministic():

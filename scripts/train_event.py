@@ -56,13 +56,17 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
     return eq, records, universe, fees, raw
 
 
-def rung0_baseline_return(eval_r, liq, vol):
-    """The rung-0 RULE (hand-coded discretion) on the same window — the bar the RL must clear."""
+def rung0_baseline(eval_r, liq, vol):
+    """The rung-0 RULE (hand-coded discretion, canonical vol-top-8) on the same window — the bar the RL
+    must clear. Returns (return, maxDD>=0). A rung-0 that is ITSELF DQ'd (maxDD >= the 30% gate) is not
+    a valid live strategy, so the honest gate stops forcing the agent to match its (unsurvivable) return."""
     from trader.strategy.candidate import select_vol_tokens
     from trader.strategy.rung0 import build_rung0, run_rung0
     uni = select_vol_tokens(eval_r, 8)
     eq, _, _ = run_rung0(eval_r, build_rung0(eval_r, tokens=uni, volume=vol), liq, warmup=WARMUP)
-    return float(eq.iloc[-1] / eq.iloc[0] - 1.0)
+    ret = float(eq.iloc[-1] / eq.iloc[0] - 1.0)
+    maxdd = abs(float((eq / eq.cummax() - 1.0).min()))
+    return ret, maxdd
 
 
 def eval_universe_and_caps(eval_r, btc, liq, vol, env_kwargs):
@@ -111,12 +115,20 @@ def random_baseline_return(eval_r, btc, liq, vol, env_kwargs, n=3, seed=0):
     return float(np.mean(rets))
 
 
-def honest_gate(pol, rung0, buyhold, random_):
-    """The structural gate ([[AI Training]]): a model earns a version only if it beats rung-0 AND
-    Buy&Hold AND Random. Returns (passed, binding_baseline) — binding is the first baseline it fails,
-    checked Buy&Hold -> Random -> rung-0 (the market is the hardest, most important bar). Single
-    source of truth for the verdict AND the future MCP train-loop continue/stop decision."""
-    beats = {"Buy&Hold": pol > buyhold, "Random": pol > random_, "rung-0": pol > rung0}
+def honest_gate(pol, rung0, buyhold, random_, pol_maxdd=0.0, rung0_maxdd=0.0, dq_gate=0.30):
+    """The structural gate ([[AI Training]]): a model earns a version only if it survives the DQ gate
+    AND beats Buy&Hold AND Random AND a SURVIVING rung-0. Returns (passed, binding).
+
+    Competition reality (PnL scored under a hard ~30% max-drawdown DQ): (1) the POLICY itself must keep
+    maxDD < dq_gate — a higher return that breaches the gate is worthless (DQ'd). (2) A baseline that is
+    itself DQ'd is not a valid live competitor, so beating its (unsurvivable) return is NOT required —
+    this is what stops a concentrated, DQ-prone rung-0 from setting an unbeatable bar that only risk
+    *avoidance* could clear. Buy&Hold and Random remain return bars (risk-parity B&H is low-DD by design)."""
+    if pol_maxdd > dq_gate:
+        return False, f"DQ: policy maxDD {pol_maxdd:.0%} > {dq_gate:.0%}"
+    beats = {"Buy&Hold": pol > buyhold, "Random": pol > random_}
+    if rung0_maxdd <= dq_gate:                              # only a SURVIVING rung-0 is a bar to beat
+        beats["rung-0"] = pol > rung0
     passed = all(beats.values())
     binding = None if passed else next(n for n in beats if not beats[n])
     return passed, binding
@@ -138,23 +150,25 @@ def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed)
     Buy&Hold, Random-through-env, rung-0, regime). Returns everything needed to publish + report."""
     eq, records, universe, fees, raw = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
     report = PerformanceMetrics.compute_all(eq.to_numpy(), steps_per_year=HOURS_PER_YEAR)
-    pol = report.total_return_pct
+    pol, pol_dd = report.total_return_pct, report.max_drawdown_pct
     uni, caps = eval_universe_and_caps(eval_r, btc, liq, vol, env_kwargs)
-    base = rung0_baseline_return(eval_r, liq, vol)
+    base, base_dd = rung0_baseline(eval_r, liq, vol)
     bh = buy_and_hold_return(eval_r, liq, uni, caps)
     rnd = random_baseline_return(eval_r, btc, liq, vol, env_kwargs, seed=seed)
     regime = eval_regime(eval_r, btc, uni)
-    gate_pass, binding = honest_gate(pol, base, bh, rnd)
+    gate_pass, binding = honest_gate(pol, base, bh, rnd, pol_maxdd=pol_dd, rung0_maxdd=base_dd)
     return {"name": name, "eq": eq, "records": records, "universe": universe, "fees": fees, "raw": raw,
-            "report": report, "pol": pol, "base": base, "bh": bh, "rnd": rnd, "regime": regime,
-            "gate_pass": gate_pass, "binding": binding}
+            "report": report, "pol": pol, "base": base, "base_dd": base_dd, "bh": bh, "rnd": rnd,
+            "regime": regime, "gate_pass": gate_pass, "binding": binding}
 
 
 def print_verdict(r):
     """Print the per-split [regime]/[baselines]/[verdict]/[gate] block for one split's result."""
     rg, rep = r["regime"], r["report"]
+    dqd = " [DQ'd >30%]" if r.get("base_dd", 0.0) > 0.30 else ""
     print(f"[{r['name']}] regime: BTC {rg['btc_return']:+.1%}  universe-EW {rg['universe_ew_return']:+.1%}  "
-          f"({rg['label']})  |  Buy&Hold {r['bh']:+.1%}  Random {r['rnd']:+.1%}  rung-0 {r['base']:+.1%}")
+          f"({rg['label']})  |  Buy&Hold {r['bh']:+.1%}  Random {r['rnd']:+.1%}  "
+          f"rung-0 {r['base']:+.1%} (DD {r.get('base_dd', 0.0):.0%}{dqd})")
     print(f"[{r['name']}] policy {r['pol']:+.1%} (Sh {rep.sharpe_ratio:.2f}, DD {rep.max_drawdown_pct:.1%}) | "
           f"vs Buy&Hold {'BEATS' if r['pol'] > r['bh'] else 'LOSES'} ({r['pol'] - r['bh']:+.1%}) | "
           f"vs rung-0 {'BEATS' if r['pol'] > r['base'] else 'LOSES'} ({r['pol'] - r['base']:+.1%}) | "
@@ -190,6 +204,8 @@ def main() -> None:
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
+    p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
+                   "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
     p.add_argument("--norm-reward", action="store_true", help="VecNormalize norm_reward (for the small "
                    "zero-centered relative/residual rewards)")
     p.add_argument("--r4-beta", type=float, default=0.0, help="residual R4 foregone-opportunity penalty: "
@@ -221,7 +237,7 @@ def main() -> None:
     train_r, val_r, test_r = time_split(returns)
     eval_r = test_r if args.eval_split == "test" else val_r
     vol = build_volume_panel(list(returns.columns), returns.index)
-    env_kwargs = dict(k=8, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
+    env_kwargs = dict(k=args.k, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
                       reward_mode=args.reward_mode, r4_beta=args.r4_beta, res_gamma=args.res_gamma,
                       fwd_horizon=args.fwd_horizon, ungate=args.ungate,
@@ -309,7 +325,7 @@ def main() -> None:
                              "res_gamma": args.res_gamma, "fwd_horizon": args.fwd_horizon,
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
-                             "vol_target": args.vol_target, "cap_floor": args.cap_floor,
+                             "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
                              "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
                              "eval_split": args.eval_split}
