@@ -11,6 +11,7 @@ import numpy as np
 from gymnasium import spaces
 
 from trader.train.env import PortfolioEnv
+from trader.train.event_env import EventRungEnv
 
 
 class GymPortfolioEnv(gym.Env):
@@ -39,4 +40,29 @@ class GymPortfolioEnv(gym.Env):
     def step(self, action):
         obs, reward, done, info = self.core.step(action)
         # episode end is a natural terminal here (not a time-limit truncation)
+        return obs.astype(np.float32), reward, done, False, info
+
+
+class GymEventRungEnv(gym.Env):
+    """Gymnasium wrapper for the event-driven `EventRungEnv` (rung 1). One scalar action in [0,1]
+    interpreted by event type (entry sizing / exit keep-fraction); obs is the core env's vector."""
+
+    metadata = {"render_modes": []}
+
+    def __init__(self, returns, btc_close, liquidity, **env_kwargs):
+        super().__init__()
+        self.core = EventRungEnv(returns, btc_close, liquidity, **env_kwargs)
+        self.action_space = spaces.Box(low=0.0, high=1.0, shape=(self.core.action_dim,),
+                                       dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.core.obs_dim,),
+                                            dtype=np.float32)
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        start = (options or {}).get("start")
+        obs = self.core.reset(start=start, seed=seed)
+        return obs.astype(np.float32), {}
+
+    def step(self, action):
+        obs, reward, done, info = self.core.step(action)
         return obs.astype(np.float32), reward, done, False, info
