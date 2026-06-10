@@ -54,13 +54,14 @@ else
   EXTRA="--episode-bars 168"
 fi
 PY=.venv/bin/python
-LOGDIR=runs-rl/eventrung-logs
+SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)   # stamp the code version into every run-id
+LOGDIR=runs-rl/eventrung-logs                                 # -> re-runs NEVER overwrite/alias an old name
 mkdir -p "$LOGDIR"
 
 echo "[eventrung] START $(date -u +%FT%TZ)  timesteps=$TIMESTEPS  seeds='$SEEDS'  split=$EVAL_SPLIT  reward=$REWARD_MODE"
 n=0
 for seed in $SEEDS; do
-  rid="${PFX}${SFX}-s${seed}"
+  rid="${PFX}-${SHA}${SFX}-s${seed}"                          # e.g. ppo-event-g2b-8ccad69-test-s3
   n=$((n+1))
   echo "[eventrung] === ($n) $rid  $(date -u +%FT%TZ) ==="
   # shellcheck disable=SC2086

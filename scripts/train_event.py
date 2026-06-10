@@ -356,9 +356,13 @@ def main() -> None:
                              "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
                              "eval_split": args.eval_split}
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
+    # self-describing display name: the frontend should never be ambiguous about which run/config it shows
+    flags = (f"{args.reward_mode} k{args.k}/{args.universe_mode} dd{args.dd_lambda}"
+             + (" +harvest" if args.harvest_obs else "") + (" +crash" if args.crash_eval else ""))
+    model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"
     entry = ap.export_portfolio_run(out, args.run_id, equity=eq_pub, metrics=metrics, weights=weights,
                                     token_candles=candles, token_trades=trades, universe=universe,
-                                    model_name=f"PPO event-rung s{args.seed} ({args.timesteps:,} steps)",
+                                    model_name=model_name,
                                     action_mode="event", regime=args.eval_split,
                                     timestamp=datetime.now(timezone.utc).isoformat())
     target = args.publish_target or config.get("APENTIC_PUBLISH_TARGET")
