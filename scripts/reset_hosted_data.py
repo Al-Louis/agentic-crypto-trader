@@ -61,6 +61,22 @@ def list_keys(client, bucket: str, prefix: str) -> list[str]:
     return keys
 
 
+def delete_keys(client, bucket: str, keys: list[str]) -> tuple[int, int, dict | None]:
+    """Batch-delete keys, CHECKING the per-key error report (delete_objects never raises on a
+    permission denial — it returns Errors[]). Returns (deleted, errors, first_error)."""
+    deleted = errors = 0
+    sample = None
+    for i in range(0, len(keys), 1000):
+        resp = client.delete_objects(
+            Bucket=bucket, Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]]})
+        deleted += len(resp.get("Deleted", []))
+        errs = resp.get("Errors", [])
+        errors += len(errs)
+        if errs and sample is None:
+            sample = errs[0]
+    return deleted, errors, sample
+
+
 def transform_leaderboard(lb: dict, generated: str) -> dict:
     """Prefix every config_label + run_id with lb_; refresh totals + generated. Content unchanged."""
     nlb = copy.deepcopy(lb)
@@ -79,6 +95,8 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true", help="execute (default: dry-run)")
     ap.add_argument("--invalidate-all", action="store_true",
                     help="invalidate /* on the CDN (flush deleted bundles from the edge), then exit")
+    ap.add_argument("--purge-only", action="store_true",
+                    help="delete every non-lb_ run prefix (finish a reset whose deletes failed)")
     ap.add_argument("--target", default=None, help="default: env APENTIC_PUBLISH_TARGET")
     args = ap.parse_args()
     config.load_dotenv()
@@ -96,6 +114,20 @@ def main() -> None:
 
     bucket = _bucket(target)
     client = publish._s3_client()
+
+    if args.purge_only:                              # delete every non-lb_ run prefix (idempotent;
+        prefixes, _ = list_top_level_prefixes(client, bucket)   # can't touch the kept lb_ set)
+        victims = sorted(p for p in prefixes if not p.startswith("lb_"))
+        keys = [k for rid in victims for k in list_keys(client, bucket, f"{rid}/")]
+        if not args.apply:
+            print(f"[dry-run] would delete {len(victims)} non-lb_ prefixes ({len(keys)} objects)")
+            return
+        deleted, errors, sample = delete_keys(client, bucket, keys)
+        print(f"purge-only: {len(victims)} prefixes, {len(keys)} keys -> deleted={deleted} "
+              f"errors={errors}")
+        if sample:
+            print(f"ERROR sample: {sample.get('Code')} {sample.get('Message','')[:120]}")
+        return
 
     man = json.loads(publish.get_bytes(f"{target}/manifest.json") or b"[]")
     lb = json.loads(publish.get_bytes(f"{target}/leaderboard.json") or b"{}")
@@ -143,15 +175,17 @@ def main() -> None:
         publish.invalidate_cloudfront(dist, ["/manifest.json", "/leaderboard.json"],
                                       caller_reference="reset-hosted-data")
 
-    # 3) delete the old KEEP originals + every purged run prefix
+    # 3) delete the old KEEP originals + every purged run prefix (CHECK the error report)
     victims = rename + delete
     keys = [k for rid in victims for k in list_keys(client, bucket, f"{rid}/")]
-    for i in range(0, len(keys), 1000):
-        client.delete_objects(Bucket=bucket,
-                              Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]]})
+    deleted, errors, sample = delete_keys(client, bucket, keys)
 
-    print(f"DONE: renamed {len(rename)} runs ({copied} objs copied), deleted {len(delete)} runs + "
-          f"{len(rename)} old originals ({len(keys)} objs), manifest now {len(new_man)} entries")
+    print(f"DONE: renamed {len(rename)} runs ({copied} objs copied), manifest now {len(new_man)} "
+          f"entries. delete: {deleted}/{len(keys)} objs, errors={errors}")
+    if errors:
+        print(f"!! DELETE FAILED on {errors} objs ({sample.get('Code') if sample else '?'}: "
+              f"{(sample.get('Message','') if sample else '')[:120]}) — creds likely lack "
+              f"s3:DeleteObject. Re-run with --purge-only once fixed.")
 
 
 if __name__ == "__main__":
