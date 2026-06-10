@@ -6,10 +6,11 @@ lesson made structural). Source of truth = the immutable published `metrics.json
 carries a `provenance` block: git commit + every hyperparameter).
 
 Runs group by **config label** = the run_id with its `-s<seed>` suffix stripped. The **champion**
-is the highest mean-return config that has PASSED the frozen test: `split == test`, beats its test
-baseline, AND worst-seed maxDD under the DQ gate. `None` ⇒ nothing has generalized out-of-sample
-yet (the honest state). `read_champion` reads the committed artifact instantly (no network); the
-heavier `rebuild_ledger` re-derives everything from the CDN (network injected via `fetch`).
+is the highest mean-return config that has PASSED the **honest gate** on the frozen test (vault
+"Agent Communication Contract"): `split == test`, worst-seed maxDD under the DQ gate, AND the
+seed-mean beats rung-0 AND Buy&Hold AND Random — Buy&Hold non-negotiable. `None` ⇒ nothing has
+generalized out-of-sample yet (the honest state). `read_champion` reads the committed artifact
+instantly (no network); `rebuild_ledger` re-derives everything from the CDN (`fetch` injected).
 
 scripts/build_ledger.py is now a thin CLI over these functions.
 """
@@ -68,6 +69,7 @@ def _row(rid: str, m: dict, model_name: str = "") -> dict:
         "pf": m.get("profit_factor"), "win": m.get("win_rate"), "trades": m.get("total_trades"),
         "turnover_usd": m.get("eval_turnover_usd"), "realized_usd": m.get("eval_realized_usd"),
         "giveback": m.get("eval_giveback"), "baseline": base,
+        "buyhold": m.get("buyhold_return"), "random": m.get("random_return"),
         "beats_baseline": (ret or 0) > (base or 0),
         "legal_dd": (dd is not None and dd < DD_GATE),
         "config": prov or "(pre-provenance: see model_name / run_id)",
@@ -87,6 +89,10 @@ def _summarize(rows: list[dict], dd_gate: float) -> tuple[dict, dict]:
         n = len(rs)
         def mean(k, rs=rs, n=n):
             return sum(x[k] for x in rs if x[k] is not None) / max(n, 1)
+        # Buy&Hold is a fixed per-window baseline (same for every seed); Random discretion varies
+        # per seed, so it is meaned. Both feed the honest gate.
+        bh = next((x["buyhold"] for x in rs if x["buyhold"] is not None), None)
+        rnd_vals = [x["random"] for x in rs if x["random"] is not None]
         summary[label] = {
             "n": n, "seeds": sorted(x["seed"] for x in rs),
             "mean_return": mean("return"), "mean_maxdd": mean("maxdd"),
@@ -95,17 +101,37 @@ def _summarize(rows: list[dict], dd_gate: float) -> tuple[dict, dict]:
             "timesteps": rs[0].get("timesteps"), "git": rs[0].get("git"),
             "split": rs[0].get("split", "val"),
             "baseline": next((x["baseline"] for x in rs if x["baseline"] is not None), None),
+            "buyhold": bh, "random": (sum(rnd_vals) / len(rnd_vals)) if rnd_vals else None,
             "reproduce": reproduce_cmd(rs[0].get("config"), label),
             "legal_mean": mean("maxdd") < dd_gate,
         }
     return summary, by_cfg
 
 
+def _honest_gate(v: dict, dd_gate: float) -> tuple[bool, str | None]:
+    """The honest gate on a config's seed-mean (vault "Agent Communication Contract").
+
+    Pass = frozen test + worst-seed DD under the gate + seed-mean beats ALL present baselines
+    { rung-0, Buy&Hold, Random }. **Buy&Hold is non-negotiable** — a config with no Buy&Hold
+    number cannot pass. Returns (passed, binding) where `binding` is the first baseline it fails
+    (or "no-buyhold" / "drawdown" / "not-test").
+    """
+    if v.get("split") != "test":
+        return False, "not-test"
+    if v.get("worst_maxdd") is None or v["worst_maxdd"] >= dd_gate:
+        return False, "drawdown"
+    if v.get("buyhold") is None:                  # B&H non-negotiable
+        return False, "no-buyhold"
+    mr = v["mean_return"]
+    for name, b in (("rung-0", v.get("baseline")), ("Buy&Hold", v.get("buyhold")),
+                    ("Random", v.get("random"))):
+        if b is not None and not mr > b:
+            return False, name
+    return True, None
+
+
 def _passed_oos(v: dict, dd_gate: float) -> bool:
-    """Champion gate: frozen test, beats its test baseline, worst-seed DD under the gate."""
-    return (v.get("split") == "test" and v["worst_maxdd"] is not None
-            and v["worst_maxdd"] < dd_gate
-            and v["baseline"] is not None and v["mean_return"] > v["baseline"])
+    return _honest_gate(v, dd_gate)[0]
 
 
 def pick_champion(summary: dict, dd_gate: float = DD_GATE) -> dict | None:
@@ -144,14 +170,17 @@ def rebuild_ledger(*, host: str = DEFAULT_HOST, dd_gate: float = DD_GATE,
     def cfg_card(label, v):
         runs_d = sorted(by_cfg[label], key=lambda r: r["seed"] if r["seed"] is not None else -1)
         cfg_base = next((r["baseline"] for r in runs_d if r["baseline"] is not None), None)
+        passed, binding = _honest_gate(v, dd_gate)
         return {
             "config_label": label, "timesteps": v["timesteps"], "n": v["n"], "seeds": v["seeds"],
             "split": runs_d[0]["split"] if runs_d else "val",
-            "baseline": cfg_base, "mean_return": v["mean_return"], "mean_maxdd": v["mean_maxdd"],
+            "baseline": cfg_base, "buyhold": v.get("buyhold"), "random": v.get("random"),
+            "mean_return": v["mean_return"], "mean_maxdd": v["mean_maxdd"],
             "worst_maxdd": v["worst_maxdd"], "mean_sharpe": v["mean_sharpe"], "mean_pf": v["mean_pf"],
             "legal_mean": v["legal_mean"],
             "gate_safe_worst": v["worst_maxdd"] is not None and v["worst_maxdd"] < dd_gate,
             "beats_baseline": cfg_base is not None and v["mean_return"] > cfg_base,
+            "honest_gate_pass": passed, "honest_gate_binding": binding,   # beats rung-0+B&H+Random
             "git": v["git"], "reproduce": v["reproduce"],
             "seeds_detail": [{"seed": r["seed"], "return": r["return"], "maxdd": r["maxdd"],
                               "sharpe": r["sharpe"], "pf": r["pf"], "run_id": r["run_id"]}
@@ -164,8 +193,9 @@ def rebuild_ledger(*, host: str = DEFAULT_HOST, dd_gate: float = DD_GATE,
         "totals": {"runs": len(rows), "configs": len(summary)},
         "baseline": {"name": "vol-tilt(trend50)", "return_pct": baseline_ret, "window": "val"},
         "champion": champion,
-        "champion_criterion": ("PASSED frozen-test OOS: split=test, beats its test baseline, AND "
-                               "worst-seed maxDD under the gate. null = nothing generalized yet."),
+        "champion_criterion": ("PASSED the honest gate on frozen test: split=test, worst-seed maxDD "
+                               "under the gate, AND seed-mean beats rung-0 AND Buy&Hold AND Random "
+                               "(Buy&Hold non-negotiable). null = nothing generalized yet."),
         "configs": [cfg_card(label, v) for label, v in
                     sorted(summary.items(), key=lambda x: -x[1]["mean_return"])],
     }

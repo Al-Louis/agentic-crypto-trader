@@ -95,11 +95,14 @@ def buy_and_hold_return(eval_r, liq, k=8, warmup=WARMUP, capital=10_000.0):
 def random_baseline_return(eval_r, btc, liq, vol, env_kwargs, n=3, seed=0):
     """RANDOM discretion through the SAME event env — the floor a learned policy must clear. Mean of
     `n` seeded random-action passes (the env's event timing is fixed; only the discretion is random)."""
+    discrete = env_kwargs.get("action_mode") == "discrete"
+    n_lvl = env_kwargs.get("n_action_levels", 4)
     rets = []
     for s in range(n):
         rng = np.random.default_rng(seed + 100 + s)
-        eq, *_ = evaluate_event_policy(lambda o: np.array([rng.uniform(-1.0, 1.0)]),
-                                       eval_r, btc, liq, vol, env_kwargs)
+        sample = ((lambda o: np.array([rng.integers(0, n_lvl)])) if discrete
+                  else (lambda o: np.array([rng.uniform(-1.0, 1.0)])))
+        eq, *_ = evaluate_event_policy(sample, eval_r, btc, liq, vol, env_kwargs)
         rets.append(float(eq.iloc[-1] / eq.iloc[0] - 1.0))
     return float(np.mean(rets))
 
@@ -146,6 +149,14 @@ def main() -> None:
     p.add_argument("--fwd-horizon", type=int, default=24, help="entry_forward forward-return window (bars)")
     p.add_argument("--ungate", action="store_true", help="exp5 selector: decide over every in-universe "
                    "ignition (drop rung-0's cooled&reclaimed gate -> ~960 vs 39 decisions)")
+    p.add_argument("--action-mode", default="continuous", choices=["continuous", "discrete"],
+                   help="discrete = categorical size/keep levels (no continuous-head boundary collapse)")
+    p.add_argument("--n-action-levels", type=int, default=4, help="discrete: # of size/keep levels")
+    p.add_argument("--universe-mode", default="voltopk", choices=["voltopk", "broad", "lowvol"],
+                   help="curriculum volatility axis: voltopk (chaos) | broad (stratified) | lowvol (calm)")
+    p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
+                   "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
+    p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
     p.add_argument("--norm-reward", action="store_true", help="VecNormalize norm_reward (for the small "
                    "zero-centered relative/residual rewards)")
     p.add_argument("--r4-beta", type=float, default=0.0, help="residual R4 foregone-opportunity penalty: "
@@ -180,7 +191,10 @@ def main() -> None:
     env_kwargs = dict(k=8, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
                       reward_mode=args.reward_mode, r4_beta=args.r4_beta, res_gamma=args.res_gamma,
-                      fwd_horizon=args.fwd_horizon, ungate=args.ungate, seed=args.seed)
+                      fwd_horizon=args.fwd_horizon, ungate=args.ungate,
+                      action_mode=args.action_mode, n_action_levels=args.n_action_levels,
+                      universe_mode=args.universe_mode, vol_target=args.vol_target,
+                      cap_floor=args.cap_floor, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -260,7 +274,9 @@ def main() -> None:
                              "cooldown": args.cooldown, "reward_mode": args.reward_mode,
                              "norm_reward": args.norm_reward, "r4_beta": args.r4_beta,
                              "res_gamma": args.res_gamma, "fwd_horizon": args.fwd_horizon,
-                             "ungate": args.ungate,
+                             "ungate": args.ungate, "action_mode": args.action_mode,
+                             "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
+                             "vol_target": args.vol_target, "cap_floor": args.cap_floor,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
                              "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
                              "eval_split": args.eval_split}

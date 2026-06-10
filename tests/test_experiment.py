@@ -117,16 +117,21 @@ def test_deviation_alpha_degenerate_is_inconclusive():
 # ---- champion: frozen-test gate + selection + read --------------------------------------
 
 def _man_fetch(configs):
-    """Build a fetch that serves manifest + per-run metrics for the given config map."""
+    """Build a fetch serving manifest + per-run metrics. Config tuple: (split, ret, dd, base[,
+    buyhold, random]). buyhold/random default BELOW base so a beats-rung-0 config also clears the
+    honest gate; pass them explicitly to exercise a Buy&Hold/Random failure."""
     runs = {}
-    for label, (split, ret, dd, base) in configs.items():
+    for label, cfg in configs.items():
+        split, ret, dd, base = cfg[:4]
+        buyhold = cfg[4] if len(cfg) > 4 else (base * 0.8 if base is not None else None)
+        random = cfg[5] if len(cfg) > 5 else (base * 0.5 if base is not None else None)
         for seed in (0, 1):
             runs[f"{label}-s{seed}"] = {
                 "provenance": {"eval_split": split, "timesteps": 1_000_000,
                                "reward_mode": "composite", "git_commit": "abc"},
                 "total_return_pct": ret + seed * 0.01, "max_drawdown_pct": dd,
                 "sharpe_ratio": 2.0, "profit_factor": 1.5, "baseline_return": base,
-                "total_trades": 100}
+                "buyhold_return": buyhold, "random_return": random, "total_trades": 100}
 
     def fetch(url):
         if url.endswith("manifest.json"):
@@ -139,16 +144,27 @@ def _man_fetch(configs):
     return fetch
 
 
-def test_champion_requires_frozen_test_pass():
-    # A val config with great returns must NOT be champion; only a passing test config qualifies.
+def test_champion_requires_frozen_test_honest_gate():
+    # A val config with great returns must NOT be champion; only a test config that clears the
+    # HONEST gate (beats rung-0 + Buy&Hold + Random, DD ok) qualifies.
     fetch = _man_fetch({
         "val-great": ("val", 1.50, 0.20, 0.30),       # huge but val -> ineligible
-        "test-win": ("test", 0.40, 0.25, 0.30),       # test, beats base, DD<gate -> champion
+        "test-win": ("test", 0.40, 0.25, 0.30),       # test, beats all 3, DD<gate -> champion
         "test-dd": ("test", 0.90, 0.45, 0.30),         # test but worst DD>gate -> ineligible
     })
     res = champion.rebuild_ledger(fetch=fetch, generated="t")
     assert res["champion"]["config_label"] == "test-win"
     assert res["leaderboard"]["totals"]["configs"] == 3
+
+
+def test_champion_blocked_when_loses_to_buyhold():
+    # Beats rung-0 but LOSES to Buy&Hold on test -> honest gate fails -> NO champion (the contract).
+    fetch = _man_fetch({"test-proxy": ("test", 0.40, 0.25, 0.30, 0.55, 0.10)})  # buyhold 0.55 > mean
+    res = champion.rebuild_ledger(fetch=fetch, generated="t")
+    assert res["champion"] is None
+    card = res["leaderboard"]["configs"][0]
+    assert card["honest_gate_pass"] is False and card["honest_gate_binding"] == "Buy&Hold"
+    assert card["beats_baseline"] is True              # beats rung-0, but that's not enough
 
 
 def test_champion_none_when_nothing_generalizes():
@@ -229,6 +245,52 @@ def test_north_star_header_handles_no_run():
     from trader.experiment.contract import north_star_header
     h = north_star_header("propose the first experiment", None)
     assert "no completed run yet" in h and "GOAL:" in h
+
+
+# ---- loop controller (continue / promote / drift-alarm) ------------------------------------
+
+def _R(exp_id, split, gate, margin, binding=None):
+    from trader.experiment.loop_control import ExperimentResult
+    return ExperimentResult(exp_id, split, gate, margin, binding)
+
+
+def test_loop_promotes_on_frozen_test_pass():
+    from trader.experiment.loop_control import decide
+    hist = [_R("e1", "val", False, -0.05), _R("e2", "test", True, 0.03)]
+    d = decide(hist)
+    assert d["action"] == "promote" and d["champion"] == "e2"
+
+
+def test_loop_drift_alarm_after_patience():
+    from trader.experiment.loop_control import decide
+    # best margin set at e1; e2,e3,e4 never beat it -> stall 3 -> escalate (drift alarm).
+    hist = [_R("e1", "val", False, -0.02), _R("e2", "val", False, -0.05, "Buy&Hold"),
+            _R("e3", "val", False, -0.04, "Buy&Hold"), _R("e4", "val", False, -0.03, "Buy&Hold")]
+    d = decide(hist, patience=3)
+    assert d["action"] == "escalate" and d["drift_alarm"] is True and d["stall"] >= 3
+
+
+def test_loop_continues_while_improving():
+    from trader.experiment.loop_control import decide
+    hist = [_R("e1", "val", False, -0.08), _R("e2", "val", False, -0.05),
+            _R("e3", "val", False, -0.02)]            # each a new best -> stall 0
+    d = decide(hist, patience=3)
+    assert d["action"] == "continue" and d["stall"] == 0
+
+
+def test_loop_escalates_when_budget_exhausted():
+    from trader.experiment.loop_control import decide
+    d = decide([_R("e1", "val", False, -0.05)], budget_remaining=False)
+    assert d["action"] == "escalate" and d.get("drift_alarm") is False
+
+
+def test_result_from_diagnose_bridge():
+    from trader.experiment.loop_control import decide, result_from_diagnose
+    diag = {"performance": {"mean_return": -0.047, "buyhold": 0.07},
+            "honest_gate": {"gate_pass": False, "binding": "Buy&Hold"}}
+    r = result_from_diagnose("ppo-event-sel", "val", diag)
+    assert r.margin_vs_buyhold == pytest.approx(-0.117) and r.binding == "Buy&Hold"
+    assert decide([r])["action"] == "continue"
 
 
 # ---- launch tier: reward-config translation, smoke gate, verify, kill -----------------------

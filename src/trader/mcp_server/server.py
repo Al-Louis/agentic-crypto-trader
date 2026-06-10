@@ -192,6 +192,23 @@ def rl_obs_probe(split: str = "train", horizon: int = 24) -> dict:
 
 
 @mcp.tool()
+def experiment_record() -> dict:
+    """Rebuild the committed ledger/champion/leaderboard from the published bundles (honest gate).
+
+    Re-derives `experiments/{ledger.jsonl,champion.json,leaderboard.json}` from the CDN manifest —
+    the permanent, version-controlled performance trail the loop appends to after each sweep. The
+    champion is recomputed on the honest gate (beat rung-0 AND Buy&Hold AND Random on frozen test).
+    """
+    from datetime import datetime, timezone
+    from trader.experiment.champion import rebuild_ledger, write_ledger
+    res = rebuild_ledger(host=DATA_CDN, generated=datetime.now(timezone.utc).isoformat())
+    write_ledger(res, EXPERIMENTS)
+    champ = res["champion"]
+    return {"champion": (champ or {}).get("config_label") if champ else None,
+            "n_runs": len(res["rows"]), "n_configs": len(res["summary"])}
+
+
+@mcp.tool()
 def experiment_champion() -> dict:
     """The current best config + its exact reproduce command (reads committed experiments/champion.json)."""
     from trader.experiment.champion import read_champion
