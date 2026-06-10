@@ -617,6 +617,21 @@ basin without a new over-size incentive. **Verified:** R4 (β=0.4) drives a min-
 -0.544 while the rule-mimic stays ≈0; 12 env tests pass. Sweep `... test residual` now carries
 β=0.4. Full reasoning → [[Experiment Log]] / [[AI Training]].
 
+## 2026-06-10 (cont.) - exp2b verdict: the corner-solution finding
+
+β-tuned exp2b on smokes (β=0.4 under-sized, β=0.8 sized up) then ran 4 seeds x 1M frozen-TEST at
+β=0.8: **+15.2% avg** (up from exp1's +8.6%) but **fails the gate** - s0 breaches the 30% DQ (31.8%
+DD) and **corr = +0.013** (no skill). The +15.2% is **beta, not discrimination** (over-size
+everything -> more return + more drawdown).
+
+**The corner-solution finding:** across all four reward variants (relative oversize-all; residual
+β=0 undersize-all; R4 β=0.4 undersize-all; R4 β=0.8 oversize-all) the agent always goes to a sizing
+**corner**, never to the `cush`-conditional sizing the probe proved is learnable (IC +0.246). Every
+reward so far rewards/penalizes sizing **magnitude**, so tuning β just slides between corners. The
+alpha is untouched because **no reward pays for *rank-correct* sizing**. Next: a conditional /
+IC-based reward (4th [[rl-ml-trainer]] consult); LSTM still deferred (the alpha is in the obs).
+Full data → [[Experiment Log]].
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

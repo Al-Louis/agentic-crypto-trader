@@ -235,6 +235,44 @@ directions cost a skill-less agent, so hugging the rule nets ~0 and the *only* p
 min-size agent −0.155 → −0.544 while the rule-mimic stays ≈0. Sweep `... test residual` (now β=0.4) →
 `ppo-event-res-test`. **Gate: seed-mean > +18%, worst-DD < 25%, AND deviation-alpha corr > 0.**
 
+### exp2b verdict → the corner-solution finding (the real result)
+β-tuned on smokes (β=0.4 → entries all *under* 0.20; β=0.8 → action mean up, return positive), then
+4 seeds × 1M, frozen TEST at **β=0.8**:
+
+| seed | test | maxDD | trades |
+|------|------|-------|--------|
+| s0 | +13.6% | **31.8% (DQ breach)** | 20 |
+| s1 | +15.2% | 20.9% | 22 |
+| s2 | +18.6% | 18.9% | 23 |
+| s3 | +13.6% | 13.7% | 23 |
+| **avg** | **+15.2%** (±2.0%) | 21.3% | ~22 |
+
+corr = **+0.013** (43 entries), sizes **0.13–0.35 (mostly maxed)**. Return improved (+8.6% → +15.2%)
+but **fails the gate**: avg < +18%, s0 breaches the 30% DQ, and corr ≈ 0 — the +15.2% is **beta, not
+skill** (over-size everything → more return, more drawdown).
+
+**The corner-solution finding (the lesson across all four reward variants):**
+
+| reward | sizing | corr |
+|--------|--------|------|
+| exp1 relative | oversize-all (0.20–0.34) | −0.027 |
+| exp2 residual β=0 | undersize-all | ~0 |
+| exp2b R4 β=0.4 | undersize-all | +0.008 |
+| exp2b R4 β=0.8 | **oversize-all** (beta+DD) | +0.013 |
+
+Every reward so far penalizes/rewards sizing **magnitude**, and the agent responds by going to a
+**corner** (all-small or all-big by β) — never to the `cush`-conditional sizing the probe proved is
+there (**IC +0.246**). Tuning β just slides between corners; it can't manufacture *conditional*
+behavior. The alpha is sitting untouched because **no reward yet pays for *rank-correct* sizing**
+(size up the low-cush winners, down the high-cush losers) — only for sizing direction in aggregate.
+
+### Decided next — a conditional / rank-correct sizing reward
+The magnitude penalties can't reach this; the next design must credit **sizing that tracks the
+predicted outcome** (an IC- / rank-based term tying each bet's size to whether the deviation was
+*right*), forcing the agent to *use* the cush signal rather than pick one global size. Redesign with
+[[rl-ml-trainer]] (4th consult). LSTM still deferred — the alpha is in the obs; the reward must make
+the agent use it conditionally. → [[AI Training]].
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
