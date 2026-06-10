@@ -589,6 +589,19 @@ distance + fresh-flag (the *selective* signal, ramps only on fresh breakouts, le
 **Persistent pattern across GATE-2 / g2b / lever-2: the policy survives crashes but cannot beat
 Buy&Hold in the bull.** Decision pending (loop both agents with this result).
 
+> ## ⚠ ALL RESULTS ABOVE (GATE-1, GATE-2, g2b, lever-2) ARE INVALID — env exit bug (fixed `8ccad69`)
+> Found 2026-06-10 by inspecting the agent's trades: `EventRungEnv._scan_bar` stopped off `ref_px`
+> (the **entry** price), not the trailing `peak_px` — so a winner gave back its **whole run** before
+> exiting ("sell the bottom"). Proof: env rule-mimic returned **−27.1%** on val where the canonical
+> tested `run_rung0` returned **−9.4%** (18pp gap); after the fix, matched-causal-universe **parity**
+> (−5.1% vs −4.6%). Also fixed: `rung0_baseline` used `select_vol_tokens` (full-window std = LOOKAHEAD),
+> inflating the bar (test +29% lookahead → +18% causal). **Every model above trained in the broken env
+> — the "survives crashes, can't beat Buy&Hold in the bull" plateau is very plausibly this bug giving
+> back every winner.** TradeSim's #1 lesson (exits carried performance) — and our exit was the broken
+> one. Re-run everything on the fixed env. Regression: `test_trailing_stop_fires_off_peak_not_entry`.
+> See [[env-exit-stop-bug-fixed]]. The ENTRY side (agent rides rung-0's momentum, can't buy dips) is the
+> next frontier — the user wants the agent to own entry/exit TIMING (buy low, sell high), not just sizing.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
