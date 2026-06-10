@@ -61,16 +61,43 @@ and [[Tech Stack]] for context.
 | `backtest_report` | Metrics suite vs baselines | run id → Sharpe/Sortino/Calmar/maxDD/VaR/fees |
 | `run_baseline` | Buy&Hold / SMA / RSI / Random through same broker | baseline, period → metrics |
 
-### Training — AI Training  🟡
-*Owner: [[rl-ml-trainer]] · Phase 4+ (see [[AI Training]])*
+### Training / RL experiment loop — AI Training  🟡
+*Owner: [[rl-ml-trainer]] · Phase 4+ (see [[AI Training]], [[Experiment Log]], [[Remote Capabilities]])*
 
-| Tool | Purpose | Key inputs → output |
-|------|---------|---------------------|
-| `start_training` | Launch a training run (background subprocess) | config → run id |
-| `training_status` | Progress + live metrics of a run | run id → status, metrics |
-| `list_models` / `model_info` | Enumerate / describe finalized models | — / model id → metadata |
-| `evaluate_model` | Held-out eval vs baselines | model id, period → metrics |
-| `diagnose_run` | Rule-based failure-mode checks → recommendations | run id → issues (under-random, over/under-trading, fee drag, drawdown, neg-Sharpe) |
+The verbs of the **automated reward-shaping loop** (Phase A of the experiment-loop automation). The
+MCP server runs on the **laptop**, drives the keyless training desktop over SSH, and reads results
+from the CDN (`data.alexlouis.dev`) — it holds **no state itself** (fire-and-poll, survives a
+restart). It wraps `remote_train` + the committed diagnostics (`compare_seeds`,
+`diag_deviation_alpha`, `probe_obs_alpha`).
+
+| Tool | Tier | Purpose | inputs → output |
+|------|------|---------|-----------------|
+| `rl_obs_probe` | 🟢 | Cheap reward-bound vs capacity-bound check, **no training** | split, horizon → OOS IC, per-feature corr, verdict |
+| `rl_train` | 🟡 | **Launch a sweep, safely** — the guard tool (see below) | reward_config, seeds, split, timesteps, smoke, final_verdict → prefix, run_ids, state |
+| `rl_status` | 🟢 | Which seeds published + liveness (CDN + one tiny ssh) | prefix → published[], running, load |
+| `rl_compare` | 🟢 | Per-seed + mean return / DD / Sharpe vs the rung-0 baseline | prefix, seeds → per_seed, mean, spread, worst_dd, gate_pass |
+| `rl_diagnose` | 🟢 | Deviation-alpha corr + trade count + action dist + the full gate | prefix → corr, straddle, the verdict packet the agent reads |
+| `rl_kill` | 🟡 | **Stop a sweep by specific PID** (driver bash + train main) | prefix → killed_pids, load_after |
+| `experiment_record` / `experiment_champion` | 🟢 | Append to the ledger / current best + repro command | … → ledger id / champion |
+
+**Discipline baked into the tools (so an autonomous loop can't re-learn it the hard way — these are
+the scars from [[Remote Capabilities]]):**
+- **SSH via the Windows OpenSSH** (the MSYS/bash ssh can't route the tailnet — it hangs); every
+  status reply kept **< ~2 KB** (the path-MTU black hole). One `_ssh()` helper enforces both.
+- **`rl_train` is launch-once by construction:** refuses if a sweep is already running (`pgrep`
+  guard), syncs + preflights data, `mkdir`s `runs-rl`, launches detached, then **waits 60–90 s and
+  verifies exactly one clean run** (`load ≈ n_envs`) — auto-aborting on a stacked run. This makes the
+  Vmmem-stacking incident *structurally impossible*.
+- **`rl_train(split="test")` refuses without `final_verdict=True`** — the meta-overfitting guard at
+  the tool layer: tuning runs go to **val**, the frozen test can't be auto-burned ([[Experiment Log]]).
+- **`rl_train` runs the 100 k smoke + smoke-gate first** (alive + straddle) and won't sweep a dud.
+- **`rl_kill` targets specific PIDs, never `kill -- -<PGID>`** (the group-kill that took *tailscaled*
+  down and dropped the box off the tailnet).
+
+These **supersede** the placeholder `start_training` / `training_status` / `evaluate_model` /
+`diagnose_run`. Phase B composes them into a `run_rl_experiment` workflow (probe-gate → smoke-gate →
+sweep → diagnose → verdict); Phase C is the agent-driven `/loop` with a compute budget + the
+[[quant-analyst]] block-bootstrap CI gate (so a lucky seed can't be crowned champion).
 
 ### Strategy — Trading Strategies  🟡
 *Owner: [[market-indicator-expert]] · Phase 4 (see [[Trading Strategies]])*
@@ -111,7 +138,8 @@ and [[Tech Stack]] for context.
 |-------|---------------|---------|
 | **2 · Stack spike** | `eligible_tokens`, `cmc_market`, `cmc_history`, `bscscan_wallet_txs`, `wallet_status`, `guardrails_get`, `simulate_trade`, `execute_trade` (dust), `competition_register` (dry) | The **June 16 PoC**: a real guarded trade on-chain |
 | **3 · Loop + monitoring** | `guardrails_set`, `watch_wallets`, `recent_activity`, `portfolio_pnl`, `cmc_token_info`, `bscscan_transfers`/`token_holders`, `cmc_news` | Autonomous loop with live risk + PnL visibility |
-| **4 · Strategy + training** | `prepare_dataset`, `run_backtest`, `backtest_report`, `run_baseline`, `register_strategy`, `evaluate_strategy`, `start_training`, `training_status`, `evaluate_model`, `diagnose_run`, `list_models` | The full train → evaluate → diagnose loop, workflow-drivable |
+| **4 · Strategy + training** | `prepare_dataset`, `run_backtest`, `backtest_report`, `run_baseline`, `register_strategy`, `evaluate_strategy` | Backtest/strategy evaluation, workflow-drivable |
+| **4A · RL experiment loop** | `rl_obs_probe`, `rl_train`, `rl_status`, `rl_compare`, `rl_diagnose`, `rl_kill`, `experiment_record`/`champion` | The safe **probe → smoke → sweep → diagnose** loop; the substrate for the automated reward-shaping search (workflow in 4B, agent-`/loop` in 4C) |
 | **Later** | `social_scan` | Sentiment overlay |
 
 ## How workflows use this
@@ -121,6 +149,14 @@ strategy*: `market-indicator-expert` → `register_strategy` → `evaluate_strat
 `quant-analyst` verifies `backtest_report` against baselines → `diagnose_run` → loop until
 the report clears the bar. Execution-tier tools stay behind the guardrail gate even inside a
 workflow.
+
+The **RL experiment loop** is the marquee case (mirrors the manual cycle in [[Experiment Log]]):
+`rl_obs_probe` (cheap reward-vs-capacity gate) → `rl_train` (safe launch, smoke-gated, on **val**)
+→ poll `rl_status` → `rl_diagnose` → `experiment_record`. The [[rl-ml-trainer]] reads the verdict +
+`experiment_champion` and proposes the next `reward_config`; the [[quant-analyst]] adjudicates the
+gate (mean > rule, corr > 0, gate-safe, CI-validated). A `/loop` drives this across iterations under
+a compute budget, promoting a champion and ending when one beats the rung-0 rule on the **frozen
+test** (`final_verdict=True`) — the one place the test split is spent.
 
 > **Open items:** confirm the CMC Agent Hub MCP vs the `cmc` CLI as the data backend (x402
 > lives in the Agent Hub MCP — see [[Tech Stack]]); confirm the exact `twak compete register`
