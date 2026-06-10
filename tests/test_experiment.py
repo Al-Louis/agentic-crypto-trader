@@ -263,7 +263,16 @@ def test_verify_launch_clean_vs_stacked():
     assert launch.verify_launch({"running": True, "load": 7.8, "trainers": 2}, 8)["clean"] is True
     stacked = launch.verify_launch({"running": True, "load": 15.5, "trainers": 4}, 8)
     assert stacked["stacked"] is True and stacked["clean"] is False
-    assert launch.verify_launch({"running": False, "load": 0.0, "trainers": 0}, 8)["clean"] is False
+    # not running, nothing published ⇒ died (default behaviour preserved)
+    dead = launch.verify_launch({"running": False, "load": 0.0, "trainers": 0}, 8)
+    assert dead["clean"] is False and dead["completed"] is False
+    # not running BUT all seeds published ⇒ a short sweep that self-completed, not a death
+    done = launch.verify_launch({"running": False, "load": 0.2, "trainers": 0}, 8,
+                                published=2, expected=2)
+    assert done["completed"] is True and done["clean"] is True
+    # partial publish ⇒ still flagged (died mid-sweep)
+    partial = launch.verify_launch({"running": False}, 8, published=1, expected=4)
+    assert partial["clean"] is False
 
 
 def test_parse_preflight_and_kill():

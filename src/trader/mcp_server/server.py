@@ -266,7 +266,11 @@ def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
     driver_pid = run_ssh(sweep_cmd, timeout=120.0).splitlines()[-1].strip()
     import time
     time.sleep(max(0, int(verify_wait_s)))
-    verify = L.verify_launch(sweep_status(), n_envs)
+    # A short sweep can self-complete before the check — count published seeds so a COMPLETION
+    # isn't misread as a death (a real 1M sweep publishes none in 90 s, so this only helps shorts).
+    from trader.experiment.diagnostics import compare_seeds
+    published = sum(1 for p in compare_seeds(prefix, seed_list).get("per_seed", []) if "skip" not in p)
+    verify = L.verify_launch(sweep_status(), n_envs, published=published, expected=len(seed_list))
     return {"launched": True, "driver_pid": driver_pid, "verify": verify,
             "smoke": smoke_result, "preflight": pf, "plan": plan,
             "warning": ("STACKED OR DEAD — inspect and rl_kill if needed" if not verify["clean"]

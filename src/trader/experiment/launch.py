@@ -194,22 +194,34 @@ def parse_kill(stdout: str) -> dict:
     return {"killed_pids": pids, "n_killed": len(pids)}
 
 
-def verify_launch(status: dict, n_envs: int) -> dict:
-    """Judge whether exactly ONE clean run is on the box after a launch — the stack detector.
+def verify_launch(status: dict, n_envs: int, *, published: int = 0, expected: int = 0) -> dict:
+    """Judge the box state ~60–90 s after a launch — the stack detector (and completion check).
 
-    `status` is a `remote.sweep_status()` reading taken ~60–90 s post-launch (after the torch
-    import + volume-panel build). A single n_envs sweep loads the box ~n_envs and shows ~2 matched
-    procs (driver bash + train main; the SubprocVecEnv workers don't carry the script name). Load
-    well above n_envs, or >3 matched procs, means a SECOND sweep stacked — the Vmmem-throttle
-    scenario — and the caller must abort/kill. Low load while `running` is just warm-up, not a fail.
+    `status` is a `remote.sweep_status()` reading. A single n_envs sweep loads the box ~n_envs and
+    shows ~2 matched procs (driver bash + train main; the SubprocVecEnv workers don't carry the
+    script name). Load well above n_envs, or >3 matched procs, means a SECOND sweep stacked — the
+    Vmmem-throttle scenario — and the caller must abort/kill. Low load while `running` is just
+    warm-up, not a fail.
+
+    `published`/`expected` disambiguate the not-running case: a real 1M sweep cannot finish in 90 s,
+    so not-running normally means it died. But a SHORT sweep can self-complete before the check —
+    if every expected seed published, that is a clean COMPLETION, not a death. Without these
+    (defaults 0/0) the behaviour is unchanged: not-running ⇒ not clean.
     """
     running = bool(status.get("running"))
     load = status.get("load") or 0.0
     trainers = int(status.get("trainers") or 0)
     stacked = load > 1.7 * n_envs or trainers > 3
-    clean = running and not stacked
-    reason = ("STACKED run detected — abort/kill" if stacked
-              else "not running (launch failed or finished early)" if not running
-              else "one clean run")
-    return {"clean": clean, "stacked": stacked, "running": running,
-            "load": load, "trainers": trainers, "reason": reason}
+    completed = (not running) and not stacked and expected > 0 and published >= expected
+    clean = completed or (running and not stacked)
+    if stacked:
+        reason = "STACKED run detected — abort/kill"
+    elif running:
+        reason = "one clean run"
+    elif completed:
+        reason = f"sweep already completed ({published}/{expected} seeds published)"
+    else:
+        reason = f"not running — launch failed or died ({published}/{expected} published)"
+    return {"clean": clean, "stacked": stacked, "running": running, "completed": completed,
+            "load": load, "trainers": trainers, "published": published, "expected": expected,
+            "reason": reason}
