@@ -522,6 +522,41 @@ baselines on return AND drawdown** on the test split, the first time it has. **C
 (plain-hold made +109%). Regime-dependence, not trained-overfit (these are hand rules), but it
 **must be understood before trusting +29%**. Bundle: `rung0-rotation-v4`. See [[Trading Strategies]].
 
+## 2026-06-10 - RL on rung-0: features experiment, then the event-driven pivot
+
+Continued from the rung-0 forensics. Widened rung-0's trailing stop **11% -> 25%** so winners ride
+pullbacks instead of whipsawing (test +13.9% -> **+18.2%**, fewer trades). Published rung-0 on the
+**VAL** window for visual inspection and confirmed the regime caveat directly: **VAL is a melt-up**
+(vol-top8 plain-hold +137%, rung-0 -10.9%) - stand-aside discipline *hurts* when everything trends
+up. Also fixed a frontend confusion (trades table renders local time, candle axis UTC -> a 4h
+display offset, **not** a PnL bug).
+
+Then took up the user's ask: **train RL with the rung-0 rules.** Two attempts (full reasoning ->
+[[AI Training]] "As-built 2026-06-10"):
+
+- **Option A - rung-0 signals as RL features** (`--rung0-obs` on the daily-rebalance `PortfolioEnv`).
+  Built, locally validated (causal obs, +3 features/token), and a 4-seed x 1M sweep launched. **Killed
+  on inspection:** seed-0 put **all 241 trades at 07:00 UTC** (the env's daily rebalance clock - the
+  exact rigidity we reject) and its +137% on val merely **matched plain-hold** (the melt-up, not
+  skill). Lesson: features can carry rung-0's *information* into the policy but not rung-0's *intra-day
+  execution* - the **daily-rebalance env is the ceiling**, not the signal. Shelved.
+
+- **Option D - event-driven rung-1** (`trader.train.event_env.EventRungEnv`). The pivot. A semi-MDP
+  that steps at rung-0's **events** (ignition / stop-or-EMA trigger), advancing bar-by-bar between
+  them so execution is intra-day by construction. **rung-0 owns the edge** (timing, exits,
+  dead-zone/cooldown, loser-funded rotation); **RL learns the discretion** (entry sizing + exit
+  override). Built + validated on the laptop: 8 tests + a real-data smoke (**51 decisions across 20
+  of 24 hours** vs all-at-07:00 for Option A); the eval/publish path proven torch-free. Trainer
+  `train_event.py` + sweep `run_eventrung_sweep.sh`, baseline = the **rung-0 rule itself**. 4-seed x
+  1M event-driven sweep launched on the desktop.
+
+**Operational (cost real time, now in the runbook -> [[Remote Capabilities]]):** two remote-training
+incidents - (1) fast post-launch checks fired before the ~30-60s torch+volume-panel startup, so a
+"dead" launch was relaunched, **stacking parallel sweeps** that spiked Vmmem and forced a reboot;
+(2) stopping a sweep with `kill -- -<PGID>` took **tailscaled** down with it (shared process group)
+and dropped the box off the tailnet. Both written up as hard rules (launch-once-wait-verify; stop by
+specific PID, never the process group; SSH via PowerShell; tiny SSH output for the tailnet MTU).
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.

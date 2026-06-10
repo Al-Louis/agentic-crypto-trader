@@ -193,6 +193,57 @@ frozen-test split is reserved; tuning happens on validation to avoid the loop me
 **Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
 is a valid result the `beats_baseline` gate is built to surface.
 
+## As-built (2026-06-10) - the rungs ladder + event-driven rung-1
+
+After the exposure-overlay PPO failed OOS (val +83..156% -> frozen-test +11% / -1.8%, both
+breaching the gate), RL-**from-scratch** was shelved and the work reframed as a **rungs ladder**:
+encode the discipline as rules first, then let RL learn only the *discretion* those rules hard-code
+- never the whole policy from zero.
+
+- **Rung 0 - the rule (`trader.strategy.rung0`).** A per-token, **event-driven (intra-day)** state
+  machine encoding the user's discretionary discipline: enter on a **volume ignition** (a sharp
+  `vol_fast`-bar surge >= `vol_mult`x baseline while price rises **above a rising trend-EMA**), let
+  winners run untrimmed, exit on the rollover (price `stop_k` off the peak OR below the trend-EMA),
+  with a **dead-zone/cooldown** anti-churn guard (no FOMO re-entry below a prior runup's origin) and
+  **loser-funded rotation** (fund a fresh ignition by closing the weakest holding, only if it's
+  weaker than the candidate). On the frozen-test split it **beats both vol-top8 baselines on return
+  AND drawdown** (+29% / 17% DD). Detail + the trade-logic forensics that built it: [[Build Log]],
+  [[Trading Strategies]].
+
+- **Rung 1 - RL learns rung-0's discretion.** Two ways to "train RL with the rung-0 rules" were
+  tried; the first revealed *why* the env architecture, not the signal, was the constraint:
+
+  - **Option A - signals as features (shelved).** Fed rung-0's per-token signals (ignite /
+    volume-surge / price-EMA cushion) into the **daily-rebalance** `PortfolioEnv` as observations
+    (`--rung0-obs`). It trains and the obs are causal, but the env **acts once per day** - so every
+    trade lands at the same hour (07:00 UTC), the exact rigid clock the discretionary thesis
+    rejects. And on **val (a melt-up)** the policy's +137% merely **matched plain-hold** (+137%):
+    full allocation wins in an up-only regime, so "perfectly timed" was the regime, not skill.
+    Verdict: features-on-the-daily-env can give the policy rung-0's *information* but never rung-0's
+    *intra-day execution*. Dead end for the goal.
+
+  - **Option D - event-driven rung-1 (`trader.train.event_env.EventRungEnv`, the pivot).** A
+    **semi-MDP** that steps at rung-0's **events**, not a clock: the agent acts only when a volume
+    ignition fires (size it / skip it) or a held position trips its stop / EMA-break (cut it / hold
+    through). Between events the env advances bar-by-bar - positions drift, no trades - so execution
+    is **intra-day and event-timed, structurally unable to collapse to a clock** (smoke: decisions
+    on 20 of 24 hours-of-day vs all-at-07:00 for Option A). **rung-0 supplies the edge** (ignition
+    timing, exit triggers, dead-zone/cooldown, loser-funded rotation); **RL learns the discretion
+    rung-0 hard-codes** - entry **sizing** (conviction, up to `max_entry_frac`) and whether to
+    **override an exit** (hold a winner through its stop / re-arm it, or cut early). One scalar
+    action in [0,1] interpreted by event type. **Reward** = the interval equity change since the
+    last decision minus the same quadratic drawdown brake (semi-MDP credit assignment). Positions
+    valued by price-index ratios; signals precomputed once (causal, scale-invariant) so the per-bar
+    advance is cheap. Trainer `scripts/train_event.py` (eval/publish path torch-free + laptop-
+    validated; PPO `learn()` desktop-only); seed sweep `scripts/run_eventrung_sweep.sh`; the
+    **baseline is the rung-0 RULE itself** - the honest question is *does learned discretion beat
+    the hand-coded version, with intra-day execution?* (4-seed x 1M-step sweep running 2026-06-10).
+
+  v1 keeps rung-0's rotation rule fixed (learns sizing + override only); "which candidate to fund"
+  is a later lever. Why this beats both prior attempts: not RL-from-scratch (no edge prior, failed
+  OOS), not features-on-a-rigid-clock (inherits the rigidity) - RL constrained to **rung-0's
+  event-driven skeleton**, learning only the discretion, with the rules' anti-churn discipline intact.
+
 ## Is RL worth it here? (candid)
 
 A single 7-day live ranking is a hostile setting for a learned policy. Both sides honestly:
