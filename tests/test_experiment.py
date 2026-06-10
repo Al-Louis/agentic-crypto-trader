@@ -203,6 +203,17 @@ def test_build_reward_args_storetrue_and_unknown():
         launch.build_reward_args({"r4_betaa": 0.8})
 
 
+def test_reward_args_reproduces_exp5_selector_preset():
+    # The freeform knob dict must reproduce run_eventrung_sweep.sh's selector EXTRA exactly.
+    exp5 = {"reward_mode": "entry_forward", "ungate": True, "fwd_horizon": 24, "res_gamma": 0.1,
+            "norm_reward": True, "dd_lambda": 1.0, "dd_soft": 0.15, "ent_coef": 0.2,
+            "lr": 3e-4, "lr_end": 3e-5, "episode_bars": 336}
+    got = " ".join(launch.build_reward_args(exp5))
+    assert got == ("--reward-mode entry_forward --ungate --fwd-horizon 24 --res-gamma 0.1 "
+                   "--norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 "
+                   "--lr 0.0003 --lr-end 3e-05 --episode-bars 336")
+
+
 def test_sweep_command_sequences_seeds_detached():
     cmd = launch.build_sweep_command(python="py", workdir="/w", reward_config={"reward_mode": "absolute"},
                                      seeds=[0, 1, 2, 3], split="val", prefix="pfx")

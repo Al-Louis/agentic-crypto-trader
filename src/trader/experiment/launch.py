@@ -28,9 +28,11 @@ from typing import Any
 # Freeform reward-shaping knobs -> (train_event.py flag, kind). `bool` flags are store_true:
 # emitted only when truthy. Anything NOT here is refused by `build_reward_args` (typo guard).
 REWARD_KEYS: dict[str, tuple[str, type]] = {
-    "reward_mode": ("--reward-mode", str),     # absolute | relative | residual
+    "reward_mode": ("--reward-mode", str),     # absolute|relative|residual|residual_ranked|entry_forward
     "r4_beta": ("--r4-beta", float),           # residual R4 foregone-opportunity penalty weight
-    "res_gamma": ("--res-gamma", float),
+    "res_gamma": ("--res-gamma", float),       # residual/entry_forward shaping weight (exp5: 0.1)
+    "fwd_horizon": ("--fwd-horizon", int),      # entry_forward forward-return window (bars)
+    "ungate": ("--ungate", bool),               # exp5 selector: decide over every in-universe token
     "norm_reward": ("--norm-reward", bool),     # VecNormalize norm_reward (store_true)
     "dd_lambda": ("--dd-lambda", float),
     "dd_soft": ("--dd-soft", float),
