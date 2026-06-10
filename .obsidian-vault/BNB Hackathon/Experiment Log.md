@@ -312,6 +312,72 @@ not clearly passing.** exp4 reward is built + correctly aligned (14 env tests pa
 the in-env landscape (not the preflight)** is the lesson. Decision pending: sweep (definitive but
 likely another beta-corner) vs redesign the realized-entry dynamics (6th consult). → [[AI Training]].
 
+### exp4 blocker resolved — the entry-sizing lever has NO headroom (the make-or-break probe)
+6th `rl-ml-trainer` consult. Before sweeping exp4, ran the decisive check the whole arc skipped:
+restrict the headroom probe to the subset the agent **actually sizes** (`scripts/probe_subset_ic.py`,
+nested L0→L2 through the env's real event engine, OOS temporal holdout). The result kills entry-sizing
+as the lever and explains every prior corner:
+
+| level | what | n events (train, ~128d) | OOS combined IC | univariate cush-IC (in-test) |
+|-------|------|------|------|------|
+| L0 all ignitions | what `probe_obs_alpha` scored | 2176 | **+0.246** | −0.285 |
+| L1 +in vol-top-k universe | the candidate pool | 960 | **+0.103** | −0.250 |
+| L2gate +cooled & reclaimed | the entry-gate set (cash-decoupled) | **39** | noise (+0.07..+0.59, spread flips sign by horizon) | −0.39..−0.75 |
+| L2real +cash-throttled | **realized entries** | **14** | — (too few to measure) | — |
+
+**Three findings, in order of force:**
+1. **The decision set is nearly empty.** The rung-0 entry gate fires **39 times in ~128 days** (≈ one
+   fundable decision every 3.3 days); only **14** survive the cash/rotation throttle. Entry-sizing
+   discretion operates on ~1–2 dozen decisions — **far too few for PPO to learn a conditional `cush→size`
+   map.** This is why every reward cornered: with ~20 gradient-bearing entries per episode the policy can
+   only learn a *scalar* (all-big / all-small), never a *function* of cush. The corner was never a reward
+   bug — it's a **sample-starvation** bug the reward shape can't fix.
+2. **L1 alone halves the IC** (+0.246→+0.103): restricting to the vol-top-k universe removes most of the
+   discriminative signal `probe_obs_alpha` advertised.
+3. **The alpha *sign* survives the gate** (cush stays −0.4..−0.75 in-test) but the **OOS combined IC at the
+   gate is noise** — n_test = 12–20, spread flips sign across horizons {12,24,48} and holdouts {0.3,0.5}.
+   There is no measurable, stable headroom to discriminate *among* rung-0's selected entries. rung-0's
+   `cush>0 & rising & ema_up` gate **already harvested the entry-cush alpha** — exactly the structural
+   worry in the hypothesis, now confirmed empirically.
+
+**This rediscovers TradeSim's #1 hard lesson** ([[AI Training]]): *entry timing never clearly beat random;
+exits/risk-management carried performance.* The arc spent exp1→exp4 trying to make RL out-discriminate the
+rule on **entry sizing** — the one lever that lesson says has no edge.
+
+**The corrected process gate (replaces the free-ignition preflight, which false-PASSed exp3 AND exp4):**
+no sweep until an **in-env landscape** check — scripted agents (rule-mimic / all-big / all-small /
+correct-disc) scored through the actual env on **total reward** — shows correct-disc the **unique argmax**
+with both corners ≤ rule-mimic. The preflight's fatal flaw was structural: it scores all ignitions with
+free sizing; the env scores the funding/selection-constrained realized subset (a different `(dev,fwd)`
+distribution). Only running the env is faithful.
+
+**The exit lever has the SAME starvation** (checked, not assumed). Under realistic play (rule cuts each
+stop), exit prompts = **exactly 39** — one per position, because you can't exit more positions than you
+open. (A naive replay showed 5564 "exit events," but that was the degenerate all-override path re-prompting
+the same un-closed positions every bar — an artifact, not decisions.) And the override-value IC on the
+exit subset is also flat: `corr(giveback, post-exit fwd-24h) = −0.058`, post-exit move 51% up / +1.11% mean
+— a coin flip. **Both event-level discretion levers (entry-size, exit-override) are capped at ~39 sparse
+decisions with no measurable obs-conditional alpha.** The event skeleton itself is the ceiling.
+
+### Decided next — exp5: the bottleneck is rung-0's sparsity; loosen the SELECTION, don't tune discretion
+The arc's framing — "RL learns the *discretion* rung-0 hard-codes" — is the trap: rung-0's strict gate
+(`surge≥2.5 & rising & cush>0 & ema_up`, +cooldown +dead-zone +loser-rotation) leaves only **39 decisions
+in 128 days**, far too few to learn *any* conditional map, and its `cush>0` filter already spent the
+entry-alpha. The lever must move to where decisions are **plentiful** and alpha is **unspent**:
+1. **RL as SELECTION / sizing over the candidate POOL (primary).** L0's +0.246 cush-IC lives in the
+   ignitions rung-0 *discards*. Reframe the action from per-isolated-entry sizing to a **cross-sectional
+   ranker**: at each bar, over all in-universe ignition candidates, allocate by a learned `f(cush, surge,
+   …)` (loosen rung-0's hard gate into a soft, learned score). This (a) multiplies the decision count by
+   un-gating, (b) targets the IC that survives OOS (cush, robustly negative), and (c) is a *rank* objective
+   — structurally immune to the magnitude-corner that broke exp1–4. The honest baseline stays rung-0.
+2. **Exit-override is retired** alongside entry-sizing — same 39-decision ceiling, flat IC.
+
+**Process gate (the structural fix):** no sweep until an **in-env landscape** check — scripted agents
+scored *through the env* on total reward — shows the correct discriminator the **unique argmax**, both
+corners ≤ rule-mimic. The free-pool preflight is abandoned (it false-PASSed exp3 AND exp4). Gate unchanged:
+seed-mean test **> ~+18%**, worst-seed maxDD **< 25%**, selection-IC corr **> +0.10**, gated in-env.
+Probe: `scripts/probe_subset_ic.py`. Full design in [[AI Training]].
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
