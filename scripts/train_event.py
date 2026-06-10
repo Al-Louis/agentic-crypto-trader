@@ -75,9 +75,13 @@ def main() -> None:
     p.add_argument("--max-entry-frac", type=float, default=0.34)
     p.add_argument("--stop-k", type=float, default=0.25)
     p.add_argument("--cooldown", type=int, default=48)
+    p.add_argument("--reward-mode", default="absolute", choices=["absolute", "relative"],
+                   help="relative = reward vs the rung-0 RULE's interval return (only BEATING it scores)")
     p.add_argument("--dd-lambda", type=float, default=2.0)
+    p.add_argument("--dd-soft", type=float, default=0.15, help="drawdown penalty soft knee")
     p.add_argument("--ent-coef", type=float, default=0.1)
     p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--lr-end", type=float, default=None, help="if set, linearly anneal lr -> lr-end")
     p.add_argument("--eval-split", default="val", choices=["val", "test"])
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
@@ -98,7 +102,8 @@ def main() -> None:
     eval_r = test_r if args.eval_split == "test" else val_r
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = dict(k=8, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
-                      cooldown=args.cooldown, dd_lambda=args.dd_lambda, seed=args.seed)
+                      cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
+                      reward_mode=args.reward_mode, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -122,8 +127,12 @@ def main() -> None:
                                mean_reward=float(np.mean(rews)) if rews else None, history_key="curve")
             return True
 
+    lr = args.lr
+    if args.lr_end is not None:                            # linear anneal lr -> lr_end (progress: 1->0)
+        lr0, lr1 = args.lr, args.lr_end
+        lr = lambda pr: lr1 + (lr0 - lr1) * pr  # noqa: E731
     model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
-                ent_coef=args.ent_coef, learning_rate=args.lr)
+                ent_coef=args.ent_coef, learning_rate=lr)
     model.learn(total_timesteps=args.timesteps, callback=ProgressCb())
 
     write_progress(out, state="running", phase="evaluate")
@@ -157,8 +166,10 @@ def main() -> None:
     metrics["provenance"] = {"git_commit": sha, "env": "event_rung", "timesteps": args.timesteps,
                              "seed": args.seed, "n_envs": args.n_envs, "episode_bars": args.episode_bars,
                              "max_entry_frac": args.max_entry_frac, "stop_k": args.stop_k,
-                             "cooldown": args.cooldown, "dd_lambda": args.dd_lambda,
-                             "ent_coef": args.ent_coef, "lr": args.lr, "eval_split": args.eval_split}
+                             "cooldown": args.cooldown, "reward_mode": args.reward_mode,
+                             "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
+                             "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
+                             "eval_split": args.eval_split}
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     entry = ap.export_portfolio_run(out, args.run_id, equity=eq_pub, metrics=metrics, weights=weights,
                                     token_candles=candles, token_trades=trades, universe=universe,

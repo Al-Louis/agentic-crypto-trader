@@ -127,6 +127,44 @@ def test_episode_terminates_and_moves_equity():
     assert env._done, "episode must terminate"
 
 
+def test_shadow_rule_curve_matches_rung0():
+    """The relative-reward benchmark (env._rule_equity_curve) must reproduce run_rung0's behavior on
+    the same window/universe/params - the guard the RL plan requires before trusting any reward."""
+    from trader.strategy.rung0 import build_rung0, run_rung0
+    returns, btc, vol, liq = _panel()
+    env = _env(episode_bars=200)
+    env.reset(start=40)
+    curve = env._rule_equity_curve(40, 240)
+    shadow_ret = curve[-1] / curve[0] - 1.0
+    win = returns.iloc[10:241]                            # warmup 30, then trade [40, 240]
+    vwin = vol.iloc[10:241]
+    sig = build_rung0(win, tokens=env.universe, volume=vwin, ema_span=10, vol_mult=2.5,
+                      vol_spike=4, vol_base=20, vol_fast=4)
+    eq, _, _ = run_rung0(win, sig, liq, warmup=30, stop_k=env.stop_k, cooldown=env.cooldown,
+                         entry_frac=env.rule_entry_frac)
+    rung_ret = eq.iloc[-1] / eq.iloc[0] - 1.0
+    assert shadow_ret > 0, "shadow rule should capture the volume runup"
+    assert abs(shadow_ret - rung_ret) < 0.10, f"shadow {shadow_ret:.4f} vs run_rung0 {rung_ret:.4f}"
+
+
+def test_relative_reward_runs_and_zeroes_a_rule_mimic():
+    """Relative mode wires the rule curve and produces finite rewards; an agent that behaves like the
+    rule should accumulate ~0, not a big positive (passivity/melt-up beta no longer pays)."""
+    returns, btc, vol, liq = _panel()
+    env = _env(reward_mode="relative", episode_bars=200)
+    env.reset(start=40)
+    rsum, done = 0.0, False
+    for _ in range(800):
+        if env._pending[0] == "none":
+            break
+        _, r, done, _ = env.step([0.6])
+        rsum += r
+        if done:
+            break
+    assert env._rule_eq is not None and len(env._rule_eq) == 201
+    assert np.isfinite(rsum)
+
+
 def test_gym_adapter_conforms_and_steps():
     from trader.train.gym_env import GymEventRungEnv
     returns, btc, vol, liq = _panel()

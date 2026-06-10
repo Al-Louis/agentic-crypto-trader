@@ -42,7 +42,7 @@ class EventRungEnv:
                  vol_mult: float = 2.5, vol_spk: int = 24, vol_base: int = 168, vol_fast: int = 4,
                  stop_k: float = 0.25, cooldown: int = 48, max_entry_frac: float = 0.34,
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
-                 record_trace: bool = False, seed: int | None = None):
+                 reward_mode: str = "absolute", record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
@@ -52,6 +52,8 @@ class EventRungEnv:
         self.lp_fee_bps, self.gas_usd = lp_fee_bps, gas_usd
         self.stop_k, self.cooldown, self.max_entry_frac = stop_k, cooldown, max_entry_frac
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
+        self.reward_mode = reward_mode                      # "absolute" | "relative" (vs the rung-0 rule)
+        self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
         self.n_bars = len(self.returns)
@@ -100,6 +102,10 @@ class EventRungEnv:
         self._eq_mark = self.capital
         self._trades = []                                       # trades made in the current step (markers)
         self._eq_trace = [(int(self.returns.index[self.start]), self.capital)]  # per-bar equity (eval)
+        # relative reward: precompute the rung-0 RULE's per-bar equity over the episode (the benchmark
+        # the agent must BEAT to score positive) - so passivity/melt-up beta nets ~0 reward
+        self._rule_eq = self._rule_equity_curve(self.start, self.end) if self.reward_mode == "relative" else None
+        self._rule_eq_mark = float(self._rule_eq[0]) if self._rule_eq is not None else self.capital
         self._advance_to_event(first=True)                      # roll to the first decision point
         return self._obs()
 
@@ -108,8 +114,13 @@ class EventRungEnv:
         if self._done:
             return self._obs(), 0.0, True, self._info()
         eq_pre = self._equity()
-        # reward = interval return since the previous decision's post-action equity, minus dd brake
+        # reward = interval return since the previous decision's post-action equity, minus dd brake.
+        # In "relative" mode subtract the rung-0 RULE's interval return -> only BEATING the rule scores.
         ret = eq_pre / self._eq_mark - 1.0 if self._eq_mark > 0 else 0.0
+        if self.reward_mode == "relative":
+            ri = min(self.bar - self.start, len(self._rule_eq) - 1)
+            rule_ret = self._rule_eq[ri] / self._rule_eq_mark - 1.0 if self._rule_eq_mark > 0 else 0.0
+            ret = ret - rule_ret
         dd = (self.peak_eq - eq_pre) / self.peak_eq if self.peak_eq > 0 else 0.0
         reward = float(np.clip(ret, -RET_CLIP, RET_CLIP)) - self.dd_lambda * self._dd_penalty(dd)
 
@@ -124,6 +135,8 @@ class EventRungEnv:
         traded = list(self._trades)
         weights = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
         self._eq_mark = eq_post
+        if self.reward_mode == "relative":
+            self._rule_eq_mark = float(self._rule_eq[min(self.bar - self.start, len(self._rule_eq) - 1)])
         self._advance_to_event()
         info = self._info()
         info.update({"trades": traded, "trade_time": decision_time, "weights": weights})
@@ -246,6 +259,56 @@ class EventRungEnv:
         row = self._std[at - 1]
         order = np.argsort(np.nan_to_num(row, nan=-1.0))[::-1][:self.k]
         return [self.cols[j] for j in order]
+
+    def _rule_equity_curve(self, start: int, end: int) -> np.ndarray:
+        """The rung-0 RULE's per-bar equity over [start, end] on this episode's universe — a faithful
+        mirror of `run_rung0` (exits on stop/EMA, ignition entries, loser-funded rotation) using the
+        precomputed signals. The relative-reward benchmark the agent must beat. O(bars x k)."""
+        px, cush, ig, cix = self._px, self._cush, self._ignite, self.col_ix
+        sk, cd, ef = self.stop_k, self.cooldown, self.rule_entry_frac
+        fee, gas, liq = self.lp_fee_bps, self.gas_usd, self.liquidity
+        cash, pos = self.capital, {}                            # t -> dict(usd, entry_bar, peak_px, origin)
+        cool = {t: -10 ** 9 for t in self.universe}
+        prior = {t: None for t in self.universe}
+        eq = np.empty(end - start + 1)
+
+        def value(t, bar):
+            p = pos[t]
+            j = cix[t]
+            return p["usd"] * px[bar, j] / px[p["entry_bar"], j]
+
+        for kbar, bar in enumerate(range(start, end + 1)):
+            equity = cash + sum(value(t, bar) for t in pos)
+            if equity > 1.0:
+                for t in list(pos):                            # 1) exits (stop off the peak, or below EMA)
+                    j = cix[t]
+                    p = pos[t]
+                    p["peak_px"] = max(p["peak_px"], px[bar, j])
+                    if px[bar, j] < p["peak_px"] * (1.0 - sk) or cush[bar, j] < 0.0:
+                        v = value(t, bar)
+                        cash += v - amm_cost_usd(-v, liq.get(t, 0.0), fee, gas)
+                        cool[t], prior[t] = bar, p["origin"]
+                        del pos[t]
+                cands = [t for t in self.universe if ig[bar, cix[t]] and t not in pos
+                         and (bar - cool[t]) >= cd
+                         and (prior[t] is None or px[bar, cix[t]] > prior[t])]
+                cands.sort(key=lambda t: cush[bar, cix[t]], reverse=True)
+                for t in cands:                                # 2) fund strongest ignitions; rotate losers
+                    if min(ef * equity, cash) < 1.0 and pos:
+                        weak = min(pos, key=lambda h: cush[bar, cix[h]])
+                        if cush[bar, cix[weak]] < cush[bar, cix[t]]:
+                            v = value(weak, bar)
+                            cash += v - amm_cost_usd(-v, liq.get(weak, 0.0), fee, gas)
+                            cool[weak], prior[weak] = bar, pos[weak]["origin"]
+                            del pos[weak]
+                            equity = cash + sum(value(tt, bar) for tt in pos)
+                    size = min(ef * equity, cash)
+                    if size >= 1.0:
+                        j = cix[t]
+                        cash -= size + amm_cost_usd(size, liq.get(t, 0.0), fee, gas)
+                        pos[t] = {"usd": size, "entry_bar": bar, "peak_px": px[bar, j], "origin": px[bar, j]}
+            eq[kbar] = cash + sum(value(t, bar) for t in pos)
+        return eq
 
     def _obs(self) -> np.ndarray:
         eq = self._equity()
