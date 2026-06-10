@@ -206,6 +206,13 @@ def main() -> None:
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
+    p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
+                   "TRAINING data so the agent sees crashes and learns to de-risk into low breadth")
+    p.add_argument("--crash-eval", action="store_true", help="add a held-out CRASH regime (a crash spliced "
+                   "into the test window) to the per-regime gate — where de-risking finally pays")
+    p.add_argument("--crash-depth", type=float, default=-0.6, help="systemic drop of an injected crash")
+    p.add_argument("--crash-beta", type=float, default=1.4, help="alt stress beta in a crash (realized "
+                   "alt drop ~ beta*crash-depth; 1.4*-0.6 ~ -84%, SIREN-scale)")
     p.add_argument("--norm-reward", action="store_true", help="VecNormalize norm_reward (for the small "
                    "zero-centered relative/residual rewards)")
     p.add_argument("--r4-beta", type=float, default=0.0, help="residual R4 foregone-opportunity penalty: "
@@ -235,6 +242,12 @@ def main() -> None:
 
     returns, btc, anchor, liq = load_data()
     train_r, val_r, test_r = time_split(returns)
+    if args.crash_train > 0:                                # augment TRAINING data so the agent sees crashes
+        from trader.sim.crash import inject_random_crashes
+        train_r, placed = inject_random_crashes(train_r, n_crashes=args.crash_train,
+                                                rng=np.random.default_rng(args.seed),
+                                                total_drop=args.crash_depth, beta=args.crash_beta)
+        print(f"[crash] injected {len(placed)} training crashes at bars {placed}")
     eval_r = test_r if args.eval_split == "test" else val_r
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = dict(k=args.k, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
@@ -285,12 +298,16 @@ def main() -> None:
     # Per-regime held-out eval: grade the policy on BOTH val and test (the reversal pocket AND the
     # BTC-bear/alt-flat window) so a pass can't hide in the friendlier regime. Overall gate = all pass.
     held = {"val": val_r, "test": test_r}
+    if args.crash_eval:                                    # held-out CRASH regime: a crash spliced into test
+        from trader.sim.crash import inject_crash
+        held["crash"] = inject_crash(test_r, at=len(test_r) // 2, duration=8,
+                                     total_drop=args.crash_depth, beta=args.crash_beta, seed=args.seed)
     results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, predict_fn, args.seed)
                for nm, r in held.items()}
     pr = results[args.eval_split]                          # primary split -> the published bundle
     print(f"[eval] primary={args.eval_split} events={len(pr['raw'])} action "
           f"mean={np.mean(pr['raw']):.3f} min={min(pr['raw']):.3f} max={max(pr['raw']):.3f}")
-    for nm in ("val", "test"):
+    for nm in results:
         print_verdict(results[nm])
     overall_gate = all(r["gate_pass"] for r in results.values())
     print(f"[gate] OVERALL: {'PASS - beats every baseline on EVERY held-out regime' if overall_gate else 'FAIL'}"
@@ -326,6 +343,8 @@ def main() -> None:
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
+                             "crash_train": args.crash_train, "crash_eval": args.crash_eval,
+                             "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
                              "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
                              "eval_split": args.eval_split}

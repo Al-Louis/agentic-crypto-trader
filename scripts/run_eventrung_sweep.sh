@@ -19,7 +19,10 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "gate1b" ]; then                # GATE 1 (broad): discrete + risk-parity on a
+if [ "$REWARD_MODE" = "gate2" ]; then                 # GATE 2: regime-adaptive — breadth obs (auto) +
+  PFX="ppo-event-g2"                                   # crash-augmented training + a held-out CRASH regime
+  EXTRA="--reward-mode relative --action-mode discrete --n-action-levels 4 --universe-mode broad --k 12 --vol-target 0.005 --cap-floor 0.02 --crash-train 4 --crash-eval --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "gate1b" ]; then              # GATE 1 (broad): discrete + risk-parity on a
   PFX="ppo-event-g1b"                                  # 12-token universe (stables + monsters), DQ gate
   EXTRA="--reward-mode relative --action-mode discrete --n-action-levels 4 --universe-mode broad --k 12 --vol-target 0.005 --cap-floor 0.02 --norm-reward --dd-lambda 1.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "gate1" ]; then               # GATE 1 (isolation): all on voltopk-8
