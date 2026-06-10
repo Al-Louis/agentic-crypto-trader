@@ -396,6 +396,55 @@ Backtest numbers alone do not satisfy the June 16 PoC gate — only the live on-
 
 ---
 
+## Intraday breakout-reversal — a candidate HARVEST signal (2026-06-10)
+
+Origin: a dashboard-driven hypothesis off the [[Apentic Data Contract|market_metrics]] vol/correlation
+view, characterized empirically on train+val (test frozen), 67k pooled token-bars. **Status: candidate
+feature — validated in-sample as a signal, NOT yet net-of-cost or OOS. Do not hard-code it.**
+
+**Hypothesis (refined through three rounds).** In a multi-timeframe downtrend (30d↓, 7d↓), a short-term
+up-move (3d↑, 24h↑) is usually a *dead-cat bounce* — but one that **breaks structure** (makes a fresh
+short-window high) may be a genuine reversal worth sizing up on.
+
+**What the data says:**
+- **Bare reversal** (30d−, 7d−, 3d+, 24h+): forward-24h **−0.31%** mean (median −0.63%, win 41%) — a
+  *dead cat*, below the +0.44% baseline. Hard-coding it would have lost money.
+- **+ fresh 3-day-high confirmation**: flips to **+0.58–0.77%** mean (win ~50%). The breakout filter
+  separates real bounces from dead cats. (5d-high: negative; the literal "exceed the 30d high" never
+  occurs in a downtrend — so the signal is *short-window* by nature, and **definition-fragile**.)
+- **Horizon is the crux.** The edge **peaks at a ~4–6h hold (+0.65% over baseline) and goes negative by
+  48–72h** (≈ −0.5%): it is an **intraday momentum capture that fades into the dead cat on multi-day
+  holds.** `IC(trailing-24h, forward-H)` is negative and *strengthens* with horizon (−0.05 @1h → −0.13
+  @48h) — the universe mean-reverts on average, but the breakout condition selects a *momentum-
+  continuation sub-population*. A real **nonlinearity** (a linear signal can't capture it; RL can).
+
+**The binding constraint — cost.** Round-trip AMM friction is **~1.0%**; the peak *gross* edge is
+**+0.77% @6h — below cost.** Median ≈ 0 / win ≈ 50% ⇒ full cost is paid on the coin-flip majority.
+**Net of friction the bucket average is slightly negative; the profit lives entirely in the convex tail**
+(the minority that rip several % intraday). This is exactly the marginal-gross-vs-cost case the honest
+gate (net-of-cost, OOS, through the env) exists to adjudicate.
+
+**Why it matters now — it is the missing HARVEST lever (the GATE-2 gap).** GATE 2 ([[Experiment Log]],
+[[AI Training]]) found the regime-adaptive policy learned to *de-risk* well (3/4 seeds survived an 82%
+crash; s1 +5.8%) but is **defensive-everywhere** — it fails to *ramp up* in bulls (lost money in a +27%
+market by holding cash). This breakout-reversal is a **size-UP trigger**: paired with the existing
+universe-**breadth** obs feature, it is the other half of a regime-adaptive pair — *breadth-high +
+confirmed breakout → harvest; breadth-collapse → de-risk.*
+
+**Design implications (features + exit — NOT a hard-coded rule):**
+1. **Obs features** (causal): trailing multi-timeframe returns `r24 / r3d / r7d / r30d` + a continuous
+   **breakout-distance** (price vs trailing rolling-N-bar high). Let the discrete RL learn the
+   conditional sizing — robust to the definition-fragility (don't bake in one threshold).
+2. **Short-hold exit pairing.** The edge is intraday (4–6h); rung-0's trailing-stop / EMA exit may hold
+   into the negative multi-day zone. The **exit-override discretion** must learn to take the intraday
+   pop and get out — pairing this signal with a short-hold bias.
+3. **Selectivity + risk-parity caps** carry the convex tail: size up only the breakouts whose expected
+   pop clears ~1%; the per-token caps bound the loss on the ~50% that fail.
+
+**Validation bar (before it enters the obs):** must hold **OOS (frozen test)**, survive **transaction
+costs**, and be **incremental over `cush`** (already in the obs vector). Owned by `market-indicator-expert`
+(signal + exit pairing) with `rl-ml-trainer` (obs integration + training).
+
 ## Open questions
 
 - **Hourly `cmc_history` availability:** does the active CMC plan support hourly OHLCV for all
