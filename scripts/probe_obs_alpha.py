@@ -15,6 +15,7 @@ No training, no torch — reuses the env's precomputed causal signals. Run:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 sys.path.insert(0, "scripts")
@@ -38,6 +39,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--horizon", type=int, default=24, help="forward bars for the target return")
     ap.add_argument("--holdout", type=float, default=0.3, help="temporal OOS fraction (last X of ignitions)")
+    ap.add_argument("--json", action="store_true",
+                    help="also emit one compact `RLPROBE {json}` line (parsed by rl_obs_probe over ssh)")
     args = ap.parse_args()
     H = args.horizon
 
@@ -61,9 +64,14 @@ def main():
     y = np.array(ys, float)
     order = np.argsort(times)                                  # temporal order for an honest OOS split
     X, y = X[order], y[order]
+    def emit(payload):
+        if args.json:
+            print("RLPROBE " + json.dumps(payload, separators=(",", ":")))
+
     print(f"ignition events on TRAIN: {len(y)}   |   forward horizon: {H} bars")
     if len(y) < 20:
         print("too few ignitions to probe")
+        emit({"n": int(len(y)), "verdict": "inconclusive (too few ignitions)"})
         return
 
     print(f"unconditional mean fwd-{H}b return of an ignition: {y.mean() * 100:+.2f}% "
@@ -87,6 +95,17 @@ def main():
           f"  (spread {(top.mean() - bot.mean()) * 100:+.2f}pt)")
     print(f"\n=> REWARD-BOUND (run R4) if OOS IC clearly > 0 and the top/bottom spread is positive;")
     print(f"   CAPACITY/INPUT-BOUND (upgrade obs) if IC ~ 0 — the obs can't discriminate winners.")
+
+    spread = float(top.mean() - bot.mean())
+    emit({
+        "n": int(len(y)), "horizon": H, "oos_ic": round(ic, 4),
+        "uncond_mean": round(float(y.mean()), 5), "top_bottom_spread": round(spread, 5),
+        "feat_corr": {nm: round(float(np.corrcoef(X[:, k], y)[0, 1]), 4)
+                      for k, nm in enumerate(names)},
+        # IC clearly > 0 ⇒ alpha IS in the obs ⇒ reward-bound (a reward fix can extract it).
+        "verdict": ("reward-bound (alpha in obs)" if ic > 0.05 and spread > 0
+                    else "capacity/input-bound (upgrade obs)"),
+    })
 
 
 if __name__ == "__main__":

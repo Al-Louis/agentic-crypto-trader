@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
+from trader.train.event_reward import entry_forward_reward
 
 OBS_DIM = 12   # ... + the rung-0 rule's current exposure (0 in absolute mode)
 SURGE_CLIP, CUSHION_CLIP, RET_CLIP = 10.0, 1.0, 5.0
@@ -43,7 +44,7 @@ class EventRungEnv:
                  stop_k: float = 0.25, cooldown: int = 48, max_entry_frac: float = 0.34,
                  dd_soft: float = 0.15, dd_gate: float = 0.30, dd_lambda: float = 2.0,
                  reward_mode: str = "absolute", r4_beta: float = 0.0, res_gamma: float = 0.0,
-                 record_trace: bool = False, seed: int | None = None):
+                 fwd_horizon: int = 24, record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
@@ -56,6 +57,7 @@ class EventRungEnv:
         self.reward_mode = reward_mode                      # absolute|relative|residual|residual_ranked
         self.r4_beta = r4_beta                              # residual: foregone-opportunity penalty weight
         self.res_gamma = res_gamma                          # residual_ranked: quadratic deviation-budget weight
+        self.fwd_horizon = int(fwd_horizon)                 # entry_forward: forward-return window (bars)
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.obs_dim, self.action_dim = OBS_DIM, 1
@@ -79,6 +81,9 @@ class EventRungEnv:
         self._surge = surge.clip(0.0, SURGE_CLIP).to_numpy()
         self._ignite = ignite.to_numpy()
         self._std = self.returns.rolling(warmup, min_periods=8).std().to_numpy()  # for causal universe
+        # entry_forward: the TYPICAL-ignition forward return (the demean null). A single scalar over
+        # this panel's ignitions -> the preflight computes it identically, so the reward landscapes match.
+        self._mu_base = self._ignition_base_rate() if reward_mode == "entry_forward" else 0.0
 
         self._min_start = warmup
         self._max_start = self.n_bars - episode_bars - 1
@@ -115,6 +120,8 @@ class EventRungEnv:
         self._rule_eq_mark = float(self._rule_eq[0]) if self._rule_eq is not None else self.capital
         self._prev_bar = self.start                             # residual: interval + agent-weight snapshot
         self._agent_w_snap = {}
+        self._pending_entries = []                              # entry_forward: (entry_bar, dev, tok) awaiting outcome
+        self._matured_reward = 0.0                             # entry_forward: matured entry rewards since last step
         self._advance_to_event(first=True)                      # roll to the first decision point
         return self._obs()
 
@@ -135,6 +142,9 @@ class EventRungEnv:
             ret = ret - rule_ret
         elif self.reward_mode in ("residual", "residual_ranked"):  # per-decision: only DEVIATIONS earn/lose
             ret = self._residual_return()
+        elif self.reward_mode == "entry_forward":              # delayed entry-forward residual (semi-MDP)
+            ret = self._matured_reward                          # entry rewards matured since the last step
+            self._matured_reward = 0.0
         dd = (self.peak_eq - eq_pre) / self.peak_eq if self.peak_eq > 0 else 0.0
         reward = float(np.clip(ret, -RET_CLIP, RET_CLIP)) - self.dd_lambda * self._dd_penalty(dd)
 
@@ -175,6 +185,8 @@ class EventRungEnv:
                 self._done, self._pending = True, ("none", None)
                 return
             self.peak_eq = max(self.peak_eq, eqb)
+            if self.reward_mode == "entry_forward":            # mature entries whose forward window elapsed
+                self._mature_entries(self.bar)
             if self.record_trace:
                 self._eq_trace.append((int(self.returns.index[self.bar]), eqb))
             self._queue = self._scan_bar(self.bar)
@@ -209,21 +221,24 @@ class EventRungEnv:
     # -- decisions ----------------------------------------------------------
     def _do_entry(self, tok: str, a: float):
         self.ignite_armed[tok] = False                           # consume this ignition edge
-        if a < SKIP_EPS:
-            return                                               # agent declined the ignition
         eq = self._equity()
-        want = a * self.max_entry_frac * eq
-        if want > self.cash:                                     # rung-0 loser-funded rotation
-            self._rotate_for(tok, want)
-        size = min(want, self.cash)
-        if size < 1.0:
-            return
-        j = self.col_ix[tok]
-        c = amm_cost_usd(size, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
-        self.cash -= size + c
-        self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
-                         "ref_px": self._px[self.bar, j], "origin": self._px[self.bar, j]}
-        self._trades.append((tok, size, c))                      # +buy marker
+        size = 0.0
+        if a >= SKIP_EPS:
+            want = a * self.max_entry_frac * eq
+            if want > self.cash:                                 # rung-0 loser-funded rotation
+                self._rotate_for(tok, want)
+            size = min(want, self.cash)
+            if size >= 1.0:
+                j = self.col_ix[tok]
+                c = amm_cost_usd(size, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
+                self.cash -= size + c
+                self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
+                                 "ref_px": self._px[self.bar, j], "origin": self._px[self.bar, j]}
+                self._trades.append((tok, size, c))              # +buy marker
+            else:
+                size = 0.0                                       # couldn't fund -> a skip (dev = -0.20)
+        if self.reward_mode == "entry_forward":                  # record for delayed forward crediting
+            self._pending_entries.append((self.bar, size / max(eq, 1.0) - self.rule_entry_frac, tok))
 
     def _do_exit(self, tok: str, a: float):
         """a = fraction of the position to KEEP. a>=HOLD_EPS overrides the exit (re-arm the stop)."""
@@ -276,6 +291,34 @@ class EventRungEnv:
         row = self._std[at - 1]
         order = np.argsort(np.nan_to_num(row, nan=-1.0))[::-1][:self.k]
         return [self.cols[j] for j in order]
+
+    def _ignition_base_rate(self) -> float:
+        """Mean forward-`fwd_horizon` return over every ignition in the panel — the typical-ignition
+        return the entry-forward reward demeans against. Shared verbatim with the preflight."""
+        H, rs = self.fwd_horizon, []
+        for j in range(len(self.cols)):
+            for bar in range(self.warmup, self.n_bars - H):
+                if self._ignite[bar, j] and self._px[bar, j] > 0:
+                    rs.append(self._px[bar + H, j] / self._px[bar, j] - 1.0)
+        return float(np.mean(rs)) if rs else 0.0
+
+    def _mature_entries(self, bar: int):
+        """Credit entries whose forward horizon has just elapsed (semi-MDP delayed reward) via the
+        shared `entry_forward_reward`. Entries whose window runs past the episode end stay pending and
+        are dropped at done — no look-ahead, no truncated-window bias."""
+        keep = []
+        for eb, dev, tok in self._pending_entries:
+            mb = eb + self.fwd_horizon
+            if mb > bar:                                       # outcome not realized yet
+                keep.append((eb, dev, tok))
+            elif mb < self.end:                                # realized within the episode -> credit
+                j = self.col_ix[tok]
+                p0 = self._px[eb, j]
+                if p0 > 0:
+                    fwd = self._px[mb, j] / p0 - 1.0
+                    self._matured_reward += entry_forward_reward(dev, fwd, self._mu_base, self.res_gamma)
+            # else (mb >= end): dropped — window not realized within the episode
+        self._pending_entries = keep
 
     def _rule_equity_curve(self, start: int, end: int):
         """The rung-0 RULE's per-bar equity AND per-token weights over [start, end] on this episode's

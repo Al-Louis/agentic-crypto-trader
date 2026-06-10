@@ -3,19 +3,19 @@ from the Apentic data host and reports per-seed return / maxDD / Sharpe plus the
 and spread — single-seed RL is unstable, so the mean (and how tight the seeds cluster) is the read,
 not one lucky run. Companion to the mode-based scripts/compare_sweep.py.
 
+Thin CLI over `trader.experiment.diagnostics.compare_seeds` (same logic the rl_compare MCP tool uses).
+
 Usage:  python scripts/compare_seeds.py --prefix ppo-rung0feat --seeds "0 1 2 3"
 """
 from __future__ import annotations
 
 import argparse
-import json
-import statistics
-import urllib.request
+import os
+import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-def fetch(url):
-    with urllib.request.urlopen(url, timeout=30) as r:
-        return json.load(r)
+from trader.experiment.diagnostics import compare_seeds  # noqa: E402
 
 
 def main():
@@ -24,34 +24,27 @@ def main():
     p.add_argument("--prefix", default="ppo-rung0feat")
     p.add_argument("--seeds", default="0 1 2 3")
     args = p.parse_args()
-    seeds = args.seeds.split()
+
+    r = compare_seeds(args.prefix, args.seeds.split(), host=args.host)
 
     print(f"\n  {'run':24}{'return':>9}{'maxDD':>8}{'Sharpe':>8}{'trades':>7}{'vs base':>9}")
-    rets, dds, base = [], [], None
-    for s in seeds:
-        rid = f"{args.prefix}-s{s}"
-        try:
-            m = fetch(f"{args.host}/{rid}/metrics.json")
-        except Exception as e:  # noqa: BLE001 — not-yet-published / missing run
-            print(f"  {rid:24}  (skip: {e})")
+    for row in r["per_seed"]:
+        if "skip" in row:
+            print(f"  {row['run_id']:24}  (skip: {row['skip']})")
             continue
-        r, d, sh = m.get("total_return_pct"), m.get("max_drawdown_pct"), m.get("sharpe_ratio")
-        b = m.get("baseline_return")
-        base = b if b is not None else base
-        rets.append(r)
-        dds.append(d)
-        delta = f"{(r - b) * 100:>+8.1f}%" if (r is not None and b is not None) else f"{'—':>9}"
-        print(f"  {rid:24}{r * 100:>+8.1f}%{d * 100:>7.1f}%{sh:>8.2f}{m.get('total_trades', 0):>7}{delta}")
+        sh = row["sharpe"] if row["sharpe"] is not None else 0.0
+        delta = (f"{row['vs_baseline'] * 100:>+8.1f}%" if row["vs_baseline"] is not None
+                 else f"{'—':>9}")
+        print(f"  {row['run_id']:24}{row['return'] * 100:>+8.1f}%{row['maxdd'] * 100:>7.1f}%"
+              f"{sh:>8.2f}{row.get('trades') or 0:>7}{delta}")
 
-    if rets:
-        avg = sum(rets) / len(rets)
-        sd = statistics.pstdev(rets) if len(rets) > 1 else 0.0
-        print(f"\n  AVERAGE across {len(rets)} seeds: return {avg * 100:+.1f}%  "
-              f"(spread +-{sd * 100:.1f}%, worst {min(rets) * 100:+.1f}%, best {max(rets) * 100:+.1f}%), "
-              f"maxDD {sum(dds) / len(dds) * 100:.1f}%")
-        if base is not None:
-            print(f"  vol-tilt(trend50) baseline on the same val window: {base * 100:+.1f}%")
-            print(f"  -> rung-0-features RL {'BEATS' if avg > base else 'loses to'} the baseline on average")
+    if r["n"]:
+        print(f"\n  AVERAGE across {r['n']} seeds: return {r['mean_return'] * 100:+.1f}%  "
+              f"(spread +-{r['spread'] * 100:.1f}%, worst {r['worst_return'] * 100:+.1f}%, "
+              f"best {r['best_return'] * 100:+.1f}%), maxDD {(r['mean_maxdd'] or 0) * 100:.1f}%")
+        if r["baseline"] is not None:
+            print(f"  baseline on the same window: {r['baseline'] * 100:+.1f}%")
+            print(f"  -> RL {'BEATS' if r['beats_baseline'] else 'loses to'} the baseline on average")
     print()
 
 

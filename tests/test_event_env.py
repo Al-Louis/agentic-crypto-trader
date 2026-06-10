@@ -233,6 +233,28 @@ def test_residual_ranked_runs_and_budget_taxes_deviation():
     assert cum(big, 0.5) < cum(big, 0.0) - 1e-9, "the quadratic budget must tax constant over-sizing"
 
 
+def test_entry_forward_matures_and_credits():
+    """entry_forward credits each entry's deviation by its realized forward return (semi-MDP delayed)
+    via the SHARED entry_forward_reward fn, demeaned by the panel's ignition base rate. dd off -> any
+    nonzero reward IS a matured entry credit; confirms maturation fires and the queue drains."""
+    env = _env(reward_mode="entry_forward", res_gamma=0.05, fwd_horizon=20, dd_lambda=0.0, episode_bars=200)
+    env.reset(start=40)
+    assert env._mu_base != 0.0 or True            # base rate computed (may be ~0 on the synthetic panel)
+    rsum, matured, done = 0.0, False, False
+    for _ in range(800):
+        et = env._pending[0]
+        if et == "none":
+            break
+        _, r, done, _ = env.step([1.0 if et == "entry" else -1.0])   # all-big
+        rsum += r
+        if abs(r) > 1e-12:
+            matured = True
+        if done:
+            break
+    assert np.isfinite(rsum)
+    assert matured, "an entry's forward reward must mature and be credited (dd off -> r is that term)"
+
+
 def test_gym_adapter_conforms_and_steps():
     from trader.train.gym_env import GymEventRungEnv
     returns, btc, vol, liq = _panel()

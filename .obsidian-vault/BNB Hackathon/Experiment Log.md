@@ -289,6 +289,29 @@ reward *form*, before any compute. Sweep `... test residual_ranked` → `ppo-eve
 mean > +18%, worst-DD < 25%, and corr > +0.10** (corr is now a *success gate*, not a diagnostic).
 LSTM still deferred — the alpha is in the obs; this reward makes the agent use it. → [[AI Training]].
 
+### exp3 verdict + exp4 (entry-forward) — reward==metric, and the preflight-fidelity wall
+**exp3 (residual_ranked γ=0.1), 4-seed test: +18.2% avg, all DD<25% (best yet, gate-safe) — but
+corr −0.068, sizes 0.32–0.34 (oversize-all). Cornered again.** Verified the cause in-env: the env's
+per-interval **universe** demean leaves the ignition-beta (all-big = +0.40 at γ=0, correct-disc ≈0) —
+the **preflight (global demean) gave a false PASS**, modeling a different objective than the env.
+
+**Root cause (5th consult):** we *grade* on `deviation_alpha` corr (`dev=size−0.20` vs the token's
+**fwd-24h return**) but *trained* on held-interval-vs-universe-mean — **different objects.** exp4
+fixes it: `reward_mode="entry_forward"`, `R = dev·(fwd_ret − mu_base) − γ·dev²`, credited per ENTRY,
+semi-MDP-delayed `H=24` bars (causal), demeaned by the **typical-ignition** return (`_ignition_base_rate`,
+not the universe). `dev·fwd_ret` **is** what corr measures → objective == metric. Meta-fix: one shared
+`event_reward.entry_forward_reward()` imported by both env and `scripts/preflight_entry_forward.py`.
+
+**But the preflight-fidelity wall is deeper than the shared function.** Faithful preflight **PASSES**
+(correct-disc +4.06, unique argmax), yet the **in-env check still has all-big winning** (+0.13 vs
+correct-disc −0.08). Why: **the preflight scores all ignitions with free sizing; the env scores the
+agent's *realized* entries** — a funding/selection/event-dependent subset, sizing constrained by cash
++ rotation. Different `(dev, fwd)` distributions. **So the preflight can't be made faithful by sharing
+the reward fn — the only faithful preflight is running the env, and that's the in-env check, which is
+not clearly passing.** exp4 reward is built + correctly aligned (14 env tests pass), but **gating on
+the in-env landscape (not the preflight)** is the lesson. Decision pending: sweep (definitive but
+likely another beta-corner) vs redesign the realized-entry dynamics (6th consult). → [[AI Training]].
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
