@@ -52,7 +52,7 @@ class GymEventRungEnv(gym.Env):
     def __init__(self, returns, btc_close, liquidity, **env_kwargs):
         super().__init__()
         self.core = EventRungEnv(returns, btc_close, liquidity, **env_kwargs)
-        self.action_space = spaces.Box(low=0.0, high=1.0, shape=(self.core.action_dim,),
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.core.action_dim,),
                                        dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.core.obs_dim,),
                                             dtype=np.float32)

@@ -78,17 +78,17 @@ def test_skip_entry_deploys_nothing():
         etype, tok = env._pending
         if etype == "none":
             break
-        _, _, done, _ = env.step([0.0])                   # skip entries / full-exit any holds
+        _, _, done, _ = env.step([-1.0])                  # a=-1 -> m=0: skip entries / full-exit holds
         if env.pos:
             deployed = True
         if done:
             break
-    assert not deployed, "a < SKIP_EPS on every entry must never open a position"
+    assert not deployed, "the most-negative action on every entry must never open a position"
 
 
 def test_exit_override_holds_longer_than_cut():
-    cut = _run(_env(), entry_a=1.0, exit_a=0.0)            # follow rung-0: cut on the trigger
-    hold = _run(_env(), entry_a=1.0, exit_a=1.0)           # override: hold through triggers
+    cut = _run(_env(), entry_a=1.0, exit_a=-1.0)           # a=-1 -> m=0: follow rung-0, cut on the trigger
+    hold = _run(_env(), entry_a=1.0, exit_a=1.0)           # a=+1 -> m=1: override, hold through triggers
     cut_exits = [e for e in cut if e["etype"] == "exit"]
     assert cut_exits, "a stop/EMA break must produce an exit decision"
     # holding through re-arms the stop, so the position survives more exit prompts (or to episode end)

@@ -110,7 +110,10 @@ class EventRungEnv:
         return self._obs()
 
     def step(self, action) -> tuple:
-        a = float(np.clip(np.asarray(action).reshape(-1)[0], 0.0, 1.0))
+        # action in [-1,1]: neutral a=0 -> m=0.5 lands in the INTERIOR (the policy trades from init),
+        # so a Gaussian head can't dead-gradient collapse to "never trade" at a [0,1] skip boundary
+        a = float(np.clip(np.asarray(action).reshape(-1)[0], -1.0, 1.0))
+        m = (a + 1.0) / 2.0                                # -> [0,1] sizing / keep-fraction
         if self._done:
             return self._obs(), 0.0, True, self._info()
         eq_pre = self._equity()
@@ -128,9 +131,9 @@ class EventRungEnv:
         self._trades = []
         etype, tok = self._pending
         if etype == "entry":
-            self._do_entry(tok, a)
+            self._do_entry(tok, m)
         else:
-            self._do_exit(tok, a)
+            self._do_exit(tok, m)
         eq_post = self._equity()
         traded = list(self._trades)
         weights = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
