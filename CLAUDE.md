@@ -90,6 +90,33 @@ workflows drive them deterministically — mirroring the train→evaluate→diag
 from [[TradeSim]]. **The full command-set design lives in [[MCP Server]]** (tool catalog,
 safety tiers, and build phasing); it is built incrementally from Phase 2 onward.
 
+## Remote training — deployment (READ before launching ANY training run)
+
+Full runbook: **[[Remote Capabilities]] §"Remote training — deploy runbook"**. This process took
+a full day to nail down and was once lost to context compression — **do not improvise it.** The
+training desktop is **`root@100.97.195.65`** (WSL2 `act-trainer`, FQDN
+`act-trainer.tail7214b2.ts.net`, 8c/16t, 32 GB; keyless, no mainnet; jobs self-publish to
+`data.alexlouis.dev`). The five rules that, if forgotten, break things:
+
+1. **SSH only via the PowerShell tool (Windows OpenSSH), never the Bash tool's ssh.** The
+   Bash/MSYS ssh can't route to the tailnet and hangs forever. From PowerShell:
+   `ssh root@100.97.195.65 '<cmd>'` (pass multi-line remote cmds via a single-quoted here-string).
+2. **Keep every SSH response tiny (< ~512 B).** The tailnet has a **path-MTU black hole** — replies
+   ≥ ~4 KB stall and kill the session. Status checks return *counts*, never full `ps` / `pgrep -fa`.
+3. **Launch the sweep ONCE, then WAIT 60–90 s before verifying.** Torch import + the volume-panel
+   build mean *no process or log appears for ~30–60 s*. A fast empty check is **not** failure —
+   relaunching stacks **parallel** sweeps that oversubscribe the WSL2 VM (Vmmem), throttle the
+   Windows host, and force a reboot. The sweep script already **sequences** seeds internally; the
+   word is **sequence, never parallel**.
+4. **`mkdir -p runs-rl runs-rl/<sweep>-logs` first.** It's gitignored (absent on a fresh checkout),
+   and a missing dir makes the `> runs-rl/<sweep>.log` redirect fail *silently* — looks like a dead
+   launch, tempting a (fatal) relaunch.
+5. **Sync + preflight before launching:** on the desktop `git fetch && git checkout <sha>`, confirm
+   HEAD == the pushed sha, and that `data/ohlcv/hour_1/` + `build_volume_panel` work (market data is
+   gitignored — it lives only on the box). Then `nohup bash scripts/<sweep>.sh TS "SEEDS" >
+   runs-rl/<sweep>.log 2>&1 < /dev/null &`. Aggregate via `compare_seeds.py` / `compare_sweep.py`
+   (pull `metrics.json` from `data.alexlouis.dev`). Pattern script: `scripts/run_reward_sweep.sh`.
+
 ## Conventions
 
 - **Neutral, factual docs.** Topic notes describe options and decisions on their merits;

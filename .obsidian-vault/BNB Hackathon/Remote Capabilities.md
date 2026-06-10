@@ -234,6 +234,58 @@ user `root`, repo `/root/agentic-crypto-trader`. Five things bit us; record them
   console but `tailscale status` says Logged out"). `systemd-timesyncd` (enabled via
   `/etc/wsl.conf [boot] systemd=true`) keeps the clock synced and the session stable.
 
+### Remote training — deploy runbook (2026-06-09)
+
+The end-to-end procedure for launching a training sweep on the desktop, with the failure modes
+that cost a full day (and a forced reboot) to learn. **CLAUDE.md carries the five-rule short form;
+this is the complete version.** Host facts: `root@100.97.195.65`
+(`act-trainer.tail7214b2.ts.net`), repo `/root/agentic-crypto-trader`, `.venv/bin/python`,
+self-publishes to `data.alexlouis.dev` (`APENTIC_PUBLISH_TARGET=s3://alexlouis-apentic-data` +
+`APENTIC_CLOUDFRONT_DIST_ID=E14F268NIY6WLZ` in the desktop `.env`). 8 physical / 16 logical cores →
+`--n-envs 8`, runs **sequential**.
+
+**Step by step:**
+
+1. **Build + validate locally**, then **commit + push to GitHub** — the pure-numpy env runs on the
+   laptop, so validate obs width / causality / tests before spending desktop hours.
+2. **SSH via the PowerShell tool only** (failure mode #1 below). Sync + preflight in one
+   small-output command: `cd /root/agentic-crypto-trader && git fetch -q && git checkout -q <sha>
+   && git rev-parse --short HEAD && ls data/ohlcv/hour_1 | wc -l`, plus a one-line
+   `build_volume_panel` smoke. Confirm HEAD == the pushed sha.
+3. **Sweep script** follows `scripts/run_reward_sweep.sh`: loop seeds/configs → `train_rl.py`, one
+   bundle per run, per-run logs in `runs-rl/<sweep>-logs/`, run-ids `ppo-<tag>-s<seed>`. The script
+   **sequences** the runs (each finishes before the next starts) — that IS the design. **Never
+   launch it more than once, and never background the seeds in parallel.**
+4. **Launch ONCE, detached:** `cd /root/agentic-crypto-trader; mkdir -p runs-rl
+   runs-rl/<sweep>-logs; nohup bash scripts/<sweep>.sh <TIMESTEPS> "<SEEDS>" >
+   runs-rl/<sweep>.log 2>&1 < /dev/null &`.
+5. **WAIT 60–90 s, then verify with tiny output:** exactly one driver bash + one `train_rl` main,
+   the log's last line, and `cut -d' ' -f1 /proc/loadavg` (load should sit near `--n-envs` ≈ 8; if
+   it's ~16+, duplicates are stacked — stop and kill the extras by **specific PID**, not broad pkill).
+6. **Monitor** via each run's `progress.json` (terminal `state` wins) or the published bundles;
+   **aggregate** with `scripts/compare_seeds.py` (seed average) / `scripts/compare_sweep.py` (reward
+   modes), pulling `metrics.json` from `data.alexlouis.dev`.
+
+**The five failure modes (each cost real time):**
+
+- **The Bash-tool `ssh` can't reach the tailnet — it hangs, never times out cleanly.** Windows
+  OpenSSH (the PowerShell tool) uses the Windows network stack, which routes. *Always drive SSH from
+  PowerShell.* Diagnose reachability with `Test-NetConnection -ComputerName 100.97.195.65 -Port 22`
+  (`TcpTestSucceeded:True` = up; `PingSucceeded:False` is just ICMP being firewalled — ignore it).
+- **Path-MTU black hole on the tailnet:** replies ≥ ~4 KB stall and the session dies (same root
+  cause as why artifacts aren't hauled back). Keep every status command's *output* tiny — counts and
+  a single `tail -1`, never `pgrep -fa` / full `ps` listings.
+- **Slow startup masquerades as a dead launch:** torch import + `build_volume_panel` (`--rung0-obs`)
+  take ~30–60 s before any process or log line exists. **Do not conclude failure from a fast check
+  and relaunch** — stacked parallel sweeps oversubscribe the WSL2 VM, spike **Vmmem** on the Windows
+  host, throttle the whole machine, and force a reboot. (This bit us 2026-06-09.)
+- **`runs-rl/` is gitignored** → absent on a fresh checkout → the `> runs-rl/<sweep>.log` redirect
+  fails silently and the launch looks dead. `mkdir -p runs-rl runs-rl/<sweep>-logs` first.
+- **Self-matching pkill/pgrep:** your SSH command line contains the very patterns you search for, so
+  a naive `pgrep -f`/`pkill -f` matches your own probe (and the lingering tailscaled ssh wrappers).
+  Use the bracket trick (`'[r]un_…'`) so a count/kill can't match itself, and prefer killing by
+  **specific PID** over a broad `pkill -9` (correctly blocked as too blunt on a shared host).
+
 ## CI/CD and validation gates
 
 - **Offline-first gate:** tests + lint + the strategy core's pure-logic checks must pass
