@@ -555,6 +555,18 @@ next: the harvest obs (13→17: r24/r3d/r7d + breakout-distance), but GATED — 
 `scripts/probe_subset_ic.py` shows incremental-over-`cush` OOS IC on the ungated ~960-event pool.**
 Signal spec: [[Trading Strategies]] §"Intraday breakout-reversal".
 
+**LEVER-2 GATE RESULT (2026-06-10, `scripts/probe_harvest_ic.py`) — PASS.** On the ungated in-universe
+pool (960 events, k=8; baseline `[cush,surge,btcT]` OOS IC **+0.103**, matching exp5 exactly): adding
+the harvest features lifts combined OOS IC to **+0.167 (incremental +0.063)**, well over the +0.02 bar.
+The breakout bucket (`r3d>0 & r7d<0`) is a real momentum-continuation sub-population: **+0.38% mean fwd
+vs the pool's −2.02%** (+2.4pp). **Decomposition refines the spec:** the *linear* lift comes from the
+**momentum** features (`r24/r3d/r7d`: +0.103→+0.176), NOT the breakout-distance (`bkout_s/m` alone
+*degrades* to +0.074). Each harvest feature is individually *negative* (universe mean-reverts) but
+helps in combination — the nonlinearity the spec predicted. The breakout-distance features are a
+**nonlinear hypothesis only the trained MLP can test** (a linear probe can't adjudicate them). → Build
+lever-2 obs and A/B vs the GATE-2 champion; let the **net-of-cost** gate (not IC) decide success — the
+breakout edge (+0.38% < ~1% round-trip) lives in the convex tail the risk-parity caps must harvest.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
