@@ -260,6 +260,68 @@ uniformly cautious (4–13% DD in every regime), so it *loses the bull* (val −
 (lower `dd_lambda`); (2) **RecurrentPPO** — breadth is a time series, now correctly sequenced with a
 feedforward champion to A/B against.
 
+### Post-GATE-2 plan (2026-06-10, `rl-ml-trainer`) — harvest obs, lever sequence, gate
+
+The GATE-2 gap (defensive-everywhere) is a **reward/credit problem, not an information-starvation
+one** — the exp1→exp5 arc proved adding obs features to a sample-starved decision set does not move
+the gate; exp5's fix was structural (`--ungate`, ~960 decisions), not a feature. So features are
+sequenced *after* a reward that can use them, not bolted onto one that taught the opposite.
+
+**Harvest obs spec (OBS_DIM 13 → 17, append-only so saved VecNormalize stats degrade gracefully).**
+Four token-relative slots (like `cush`/`surge`, describing the event token), all on `self._px`
+(causal — ratios of past cumprod rows):
+- **13 `r24`** = `px[bar]/px[bar−24]−1`, **14 `r3d`** = `/px[bar−72]`, **15 `r7d`** = `/px[bar−168]`,
+  each `clip(±RET_CLIP)` then `tanh(3·x)` to squash fat alt tails into [−1,1].
+- **16 `brk`** (breakout-distance) = `px[bar] / rolling_max(px, N=72)[bar−1] − 1` (the `bar−1` window
+  is the leakage guard — the current bar can't be its own high), clipped `[−CUSHION_CLIP, +small]`.
+  Takes whatever continuous breakout form `market-indicator-expert` finalizes.
+- **`r30d` dropped** from the original ask: the [[Trading Strategies]] §intraday spec says the edge is
+  short-window (the 30d/5d-high conditions don't occur in a downtrend), and r30d is collinear with
+  `cush` + breadth. Re-add only if the subset probe shows incremental IC over `cush`.
+- Leakage test to add: OBS_DIM==17 end-to-end through `GymEventRungEnv`; all slots finite/bounded; a
+  future-price perturbation leaves the obs at `bar` unchanged.
+
+**Why it (might) fix the gap + the DQ risk.** `breadth-high (slot 12) + fresh breakout (16) +
+short-horizon momentum (13–14) → size up` is the harvest half of the regime-adaptive pair. The
+breakout is the **nonlinearity** ([[Trading Strategies]]): linear trailing-24h return is *negatively*
+correlated with forward return (the universe mean-reverts), but the breakout condition selects the
+momentum-continuation sub-population — a feedforward MLP can represent the interaction. **Biggest
+risk:** a harvest feature is a *size-up* trigger, and the obvious "ramp up in bulls" lever (cutting
+`dd_lambda`) removes the only brake preventing the GATE-1/SIREN-corpse concentration that DQ'd GATE-1
+rung-0 (31%) and GATE-2 s3 (34.7%). Harvest and de-risk pull opposite ways. What makes it
+attemptable: **risk-parity per-token caps stay ON** (a high-vol breakout gets a tiny cap ∝
+vol_target/vol → convex tail harvested *bounded*, can't blow the gate); prefer a **selective,
+budgeted reward** (`residual_ranked` γ≈0.1, interior optimum — the targeted fix for β=0.8's DQ) over
+a blanket `dd_lambda` cut; and always read the **worst-seed crash DD**, not the mean.
+
+**Lever sequence (one variable per gate).**
+1. **Reward-rebalance — FIRST, cheapest/highest-info.** GATE-2 config frozen (broad k=12,
+   risk-parity, breadth obs OBS_DIM-13, 4 crashes, held-out crash), change **only** `dd_lambda 1.0 →
+   0.5`. 4×1M, val/test/crash. Isolates "is the bull-loss a reward problem?" with zero new code
+   surface. If it ramps the bull but blows the crash DD → the brake was load-bearing → switch the
+   reward to `residual_ranked` (γ≈0.1) rather than cutting `dd_lambda` blindly.
+2. **Harvest obs (13→17) — SECOND, gated by a probe before any compute.** No sweep until
+   `scripts/probe_subset_ic.py` shows r24/r3d/brk carry **incremental-over-`cush` OOS IC on the
+   ungated ~960-event pool**. No headroom ⇒ don't run (saves a day, the exp4 lesson). If headroom:
+   lever-(1) champion + OBS_DIM 17, A/B'd vs that champion.
+3. **RecurrentPPO — LAST.** GATE-2 says the gap is reward, not capacity; LSTM is the most expensive +
+   most overfit-prone; only buy it once a feedforward champion + the feature show the feedforward
+   ceiling. Breadth-as-time-series is the right use, but earned, not first.
+
+**Net-of-cost validation (not gross IC).** The env nets the ~1% round-trip into the equity path
+(`amm_cost_usd` on every entry/exit) so the reward sees post-cost equity; the gate runs B&H/Random/
+rung-0 through the *same* broker (equal costs); the subset-IC is only a go/no-go for *running* a
+sweep, never a success claim. Success = `honest_gate` PASS on held-out test+crash, seed-mean AND
+worst-seed < 30% DD. The breakout edge (+0.77% gross < 1% cost, profit in the convex tail) is exactly
+the case env-cost — not IC — adjudicates.
+
+**Recommended next single experiment + gate.** Reward-rebalance `dd_lambda 1.0→0.5`, GATE-2 otherwise
+frozen, 4×1M, val/test/crash. **PASS** = seed-mean beats Buy&Hold + Random + surviving rung-0 on
+val(bull) AND test(pump) AND crash, worst-seed maxDD < 30% every regime, AND **retains crash survival**
+(crash DD not regressing materially from GATE-2's 3–5%). Concretely: turn val from −6.9% toward basket
++27% *without* crash DD exceeding ~10% on any non-DQ'd seed. If it ramps the bull but blows the crash,
+that's the signal to go selective (`residual_ranked`), then add the harvest features.
+
 **Honest first question:** can the exposure-overlay PPO beat the vol-tilt baseline OOS? "No"
 is a valid result the `beats_baseline` gate is built to surface.
 

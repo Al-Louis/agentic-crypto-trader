@@ -431,15 +431,235 @@ market by holding cash). This breakout-reversal is a **size-UP trigger**: paired
 universe-**breadth** obs feature, it is the other half of a regime-adaptive pair — *breadth-high +
 confirmed breakout → harvest; breadth-collapse → de-risk.*
 
-**Design implications (features + exit — NOT a hard-coded rule):**
-1. **Obs features** (causal): trailing multi-timeframe returns `r24 / r3d / r7d / r30d` + a continuous
-   **breakout-distance** (price vs trailing rolling-N-bar high). Let the discrete RL learn the
-   conditional sizing — robust to the definition-fragility (don't bake in one threshold).
-2. **Short-hold exit pairing.** The edge is intraday (4–6h); rung-0's trailing-stop / EMA exit may hold
-   into the negative multi-day zone. The **exit-override discretion** must learn to take the intraday
-   pop and get out — pairing this signal with a short-hold bias.
-3. **Selectivity + risk-parity caps** carry the convex tail: size up only the breakouts whose expected
-   pop clears ~1%; the per-token caps bound the loss on the ~50% that fail.
+### Concrete feature + exit spec (2026-06-10, owned by market-indicator-expert)
+
+The four questions below translate the signal characterization into an implementable, leakage-free spec
+for `rl-ml-trainer` to wire into the obs vector. They assume the current `EventRungEnv` obs layout
+(`OBS_DIM=13`, indices 0–12) and the discrete-action substrate from GATE-2.
+
+#### 1. Breakout-distance feature — exact causal definition
+
+**Compute at each bar, for the token under consideration, using only data available at that bar.**
+
+```
+bkout_dist_N(tok, bar) = px[bar, tok] / rolling_max(px[:bar], N) - 1.0
+```
+
+where `rolling_max(px[:bar], N)` is `px[bar-N+1 : bar].max()` — a standard right-anchored rolling
+maximum, **excluding the current bar from nothing** (the current bar's close is available at decision
+time; this is a snapshot of where price sits *relative to its recent high*, taken at the event trigger).
+
+The quantity is naturally **continuous and negative-or-small-positive**: deeply below the N-bar high
+it is e.g. −0.15; at a fresh breakout it is ≈0 or slightly positive; it cannot be positive by more
+than the current bar's intraday range from the prior high.
+
+**Why continuous rather than a Boolean flag.** The empirical finding is definition-fragile (3d-high
+works, 5d-high negative, 30d-high never fires in a downtrend). A continuous ratio lets the RL learn
+*how far* from the high matters without baking in a single threshold that may not generalize OOS. The
+Boolean "is a fresh 3d-high" is the signal's skeleton; the distance is the dial the agent can grade.
+
+**Which N to use.** Offer **two windows in the obs**, not one:
+
+| feature name | N | rationale |
+|---|---|---|
+| `bkout_dist_short` | 24 bars (24h at hourly data) | captures the intraday breakout characterization finds peaked at 4–6h; this is what the signal is |
+| `bkout_dist_med`   | 72 bars (3 days)           | the window where the Boolean "3d-high" confirmation was measured; continuous analog |
+
+Do not add the 5d or 30d windows — those were either negative or degenerate. Two features add 2 to
+`OBS_DIM` (13 → 15). Both are computed from the same `_px` array already precomputed in the env,
+so they are free to add: `rolling_max = np.max(self._px[max(bar-N+1,0):bar+1, j])`.
+
+**Leakage check.** `_px` is a cumulative-product forward-filled price index built from `returns` with
+no shift — it is the end-of-bar close at `bar`, which is the value available at decision time (the
+event fires on the bar's data). No future bar enters the computation. Causal: confirmed.
+
+**Orthogonality to `cush`.** `cush` (obs index 1) is `px / ema_72 − 1`, the distance above/below the
+72h *smoothed* trend. `bkout_dist_short` is distance from the *raw rolling max* over the last 24 bars.
+These are structurally different: a token can be above its EMA but well below its 24h high (recent
+pullback in an uptrend) or at a fresh high while below its EMA (early recovery). The validation bar
+below requires incremental IC over `cush` — both features must earn their obs slot.
+
+#### 2. Harvest + de-risk pair — how this composes with breadth in the obs
+
+The GATE-2 gap is precise: the agent learned to respond to *low* breadth (de-risk) but not to *high*
+breadth (harvest). The fix is not to hard-code "breadth-high + breakout → big size" — that bakes in
+a threshold and is exactly what the RL should *learn* from the obs signals. The fix is to make the
+relevant signals **simultaneously visible** in the obs so the interaction is learnable.
+
+**What the agent needs to see (additions to the obs vector):**
+
+In addition to `bkout_dist_short` and `bkout_dist_med`, add the following **multi-timeframe return
+context** features, computed causally from `_px` at event-trigger time for the token under consideration:
+
+```
+r_24h  = px[bar, tok] / px[bar-24, tok]  - 1.0   # already available via cush/surge; add as explicit scalar
+r_3d   = px[bar, tok] / px[bar-72, tok]  - 1.0   # 3-day return
+r_7d   = px[bar, tok] / px[bar-168, tok] - 1.0   # 7-day return
+r_30d  = px[bar, tok] / px[bar-720, tok] - 1.0   # 30-day return (720 hourly bars)
+```
+
+Clip all return features to `[-RET_CLIP, RET_CLIP]` (already the env convention). These four features,
+combined with the existing `breadth` (obs index 12) and the two `bkout_dist_*` features, give the agent
+the full conditional structure the signal characterization describes:
+
+- **breadth high (0.7+) + bkout_dist_short near 0 + r_24h > 0 + r_3d > 0**: the harvest condition — an
+  upside breakout in a bullish basket. The RL can learn to size UP here.
+- **breadth low (0.3−) + r_7d < 0 + r_30d < 0**: the dead-cat condition — even if r_24h > 0, these
+  contradict. The RL can learn to stay SMALL here.
+- The interaction is NOT hard-coded. Both signals are in the obs; PPO's MLP can represent the joint
+  conditioning. The discrete action space (4 size levels) means the output is bucketed, which is exactly
+  right for "size small / skip / medium / max" decisions.
+
+**Total new obs features:** `bkout_dist_short`, `bkout_dist_med`, `r_24h`, `r_3d`, `r_7d`, `r_30d` — 6
+features, `OBS_DIM` 13 → 19. This is moderate and preserves sample efficiency; a 19-dim obs is still
+fully tractable for an MLP at 1M–4M timesteps.
+
+**One important note on the GATE-2 crash-survival.** The 3-of-4 seeds that de-risked well in GATE-2 saw
+breadth collapse and responded. Adding bull-harvest signals must not destroy that. The test is: after
+adding these features, retrain with the same crash injection and check that crash-regime behavior
+degrades no more than ~1 seed. The reward-rebalance (lower `dd_lambda`) is the separate lever for the
+defensiveness problem — do not conflate them.
+
+#### 3. Short-hold exit pairing — how to bias the exit-override decision
+
+**The problem.** The edge peaks at 4–6h and goes negative by 48–72h. Rung-0's trailing-stop/EMA exit
+fires at a 25% peak-drawdown or EMA cross, which on a volatile alt can mean holding for many bars after
+the intraday pop has faded. The RL's exit-override action (obs is-exit=1, action = keep-fraction) is
+the lever, but GATE-1 and GATE-2 showed the exit-override path has at most 39 decisions per episode —
+sparse — and `corr(giveback, post-exit fwd-24h) = −0.058` (flat IC).
+
+**The fix is two-pronged, not just an obs feature:**
+
+First, add **`held_hours`** as a direct, easily-readable scalar in the obs when `is_exit=1`:
+
+```
+held_hours = (bar - pos[tok]["entry_bar"])   # in hourly bars, already available as held_frac scaled
+```
+
+`held_frac` (obs index 4) already encodes this as a fraction of `episode_bars`. At 168-bar episodes,
+`held_frac=0.03` means ~5 hours held. The agent *can* already read this. The gap is that the signal
+characterization data (edge peaks 4–6h, goes negative 48–72h) has not been in the training signal — the
+agent hasn't been rewarded for the timing of exits, only for the portfolio-level outcome.
+
+**Second and more important**: the `bkout_dist_short` and multi-timeframe return features are observed
+at *exit time* too (the obs is constructed at the decision bar regardless of event type). At exit time
+after a breakout-reversal entry:
+- If `held_frac` is low (4–6h), `bkout_dist_short` may have moved positive (the pop materialized), and
+  `r_24h` has turned up — take profit signal. The RL can learn: short hold + pop occurred → take profit
+  (action = 0, full exit).
+- If `held_frac` is high (>48h), `r_3d` may have turned negative — the dead cat thesis. The RL can
+  learn: long hold + multi-day fade → don't override the stop.
+
+**What this means for obs wiring at exit events.** The six new features (`bkout_dist_short`,
+`bkout_dist_med`, `r_24h`, `r_3d`, `r_7d`, `r_30d`) should be **computed for the exiting token** at
+exit time, exactly as for entry events. The obs construction in `_obs()` already takes `tok` and
+computes `cush`, `surge`, `unreal`, `held_frac`, `giveback` for that token; the new features slot in
+with the same logic. There is no architectural change required — just extend the obs vector.
+
+**No separate exit-timer hard-code.** Do not add a rule that forces an exit at 6h. That bakes in the
+fragile threshold. Instead, give the agent `held_frac`, `bkout_dist_short` at exit time, and
+`r_24h`/`r_3d` at exit time — it has all the information needed to learn the 4–6h pop-and-exit
+pattern *if the reward exists to teach it*. The reward is the portfolio-level return (net of cost),
+which will penalize holding into the 48–72h fade. The signal is there; training it requires adequate
+exit-event count. If the exit-IC remains flat after adding the new features (post-training diagnostic),
+escalate to `rl-ml-trainer` for the recurrence lever.
+
+#### 4. Selectivity to clear the cost wall — ranking within the breakout bucket
+
+**The problem.** Gross peak +0.77%, cost ~1.0% → full-bucket average is net-negative. The profit is in
+the convex tail: the subset of breakout entries that rip several percent within 4–6h. To select into
+that tail the agent needs a *rank* within the breakout bucket, not just a Boolean trigger.
+
+**The ranking signal: a composite of `cush`, `surge`, and `bkout_dist_short`.**
+
+From the existing probe data (`probe_obs_alpha.py`, `probe_subset_ic.py`):
+- `cush` has robust negative IC at ignition time: **stretched** ignitions (price pushed far above EMA)
+  revert; **tight** ignitions (just reclaimed EMA, low cush) continue. Inverse cush = a size-up signal.
+- `surge` is the volume-ignition strength: high surge = conviction in the move. Positive IC for
+  continuation.
+- `bkout_dist_short` (new): near-zero = fresh breakout (price just crossed the 24h high, momentum
+  is live); deeply negative = price broke out a long time ago and has since pulled back (momentum stale).
+
+The three signals together form a **composite rank**: the highest-quality breakout entry is one with
+**low cush (tight, just reclaimed EMA), high surge (volume backing), and near-zero bkout_dist_short
+(fresh, not stale)**. Formally:
+
+```
+rank_score(tok) = -cush[tok] + alpha_s * surge[tok] + alpha_b * (1 - abs(bkout_dist_short[tok]))
+```
+
+where `alpha_s` and `alpha_b` are learned implicitly by the RL policy (they should not be hand-tuned).
+The RL sees all three in the obs and — given the `entry_forward` reward landscape that's already been
+shown to produce a correct-discriminator argmax at γ=0.10 — will learn the combination that predicts
+forward returns within the breakout bucket.
+
+**Why the `entry_forward` reward + `ungate=True` is already the right mechanism here.** The exp5
+landscape (preflight_selector, γ=0.10) passed the in-env gate with the `[cush, surge, btcT]` predictor
+achieving OOS coef `[−0.336, +0.008, +0.977]`. Adding `bkout_dist_short` to the OLS fit and to the obs
+is a direct extension — if `bkout_dist_short` has incremental IC over `cush` within the breakout bucket,
+the preflight will show it; if it doesn't, it won't improve the reward landscape and should be dropped.
+
+**The cost-wall mechanism in the discrete-action substrate.** The discrete action (4 levels: 0 = skip,
+1/3 = small, 2/3 = medium, 1 = max) with risk-parity per-token caps means:
+- Skip (level 0): pays zero cost, zero return. The baseline.
+- Max (level 3) × token cap (e.g. 5% for a high-vol token): a $500 bet on a $10k portfolio. Break-even
+  requires a +1% net move just to cover cost. Only makes sense on the tail entries that are expected to
+  rip 3–5%+.
+- The RL learns to size level-3 only when the composite rank is highest — exactly the selectivity needed.
+
+**The honest gate for this mechanism.** After obs extension + retraining:
+1. Run `diag_deviation_alpha.py` on the trained policy. Require `corr(dev, fwd_ret) > +0.10` (the gate
+   exp5 set but didn't achieve with only `cush/surge/btcT`).
+2. Verify that the avg entry-level chosen on breakout-bucket events (where `r_3d > 0 and r_7d < 0`)
+   is higher than on non-breakout ignitions in the same regime. If not, the composite rank isn't being
+   used — re-examine the obs normalization or the forward-horizon window.
+3. The net-of-cost OOS gate on frozen test: seed-mean return > rung-0 (+18%), worst-seed DD < 25%,
+   **in the bull regime specifically** (the GATE-2 gap), while crash-survival degrades by at most 1 seed.
+
+#### Sequencing: before or after the reward-rebalance/recurrence levers?
+
+**Verdict: add the obs features FIRST, before the reward-rebalance or recurrence sweeps.**
+
+Reasoning:
+1. The GATE-2 defensiveness has two separable causes: (a) `dd_lambda` too high → trains blanket caution;
+   (b) no harvest signal in the obs → nothing to ramp up on even if the reward permitted it. These are
+   *complementary*, not redundant. If you fix (a) without (b), the agent becomes less cautious but still
+   has no selective harvest trigger — it will just take *more* mediocre entries. Fix (b) first so that
+   when the reward rebalance opens up sizing, the agent has signals to discriminate on.
+2. Adding 6 obs features (OBS_DIM 13→19) is cheap: a 3-day training run on the desktop, no architectural
+   change. The reward-rebalance (`dd_lambda` 1.0→0.5) and recurrence (RecurrentPPO) are larger levers
+   with larger risk surfaces — they should be gated on a stable obs foundation.
+3. The in-env landscape check (`preflight_selector.py`) must be re-run with the new obs before any sweep.
+   If `bkout_dist_short` + the MTF returns improve the correct-discriminator's in-env score, the gate
+   passes and the sweep is green-lit. If not, the features don't help at this leverage point — stop.
+
+**Concrete handoff to `rl-ml-trainer`:**
+- Extend `EventRungEnv._obs()` to add the 6 features; update `OBS_DIM = 19`.
+- Precompute `_bkout_short[bar, j]` and `_bkout_med[bar, j]` alongside `_px`, `_cush`, `_surge` in
+  `__init__` (rolling max over N=24 and N=72 bars respectively, shifted by 1 to be causal).
+- Precompute `_r24[bar,j]`, `_r3d[bar,j]`, `_r7d[bar,j]`, `_r30d[bar,j]` from `_px` (ratio at
+  `bar` to `bar-N`, shifted to be causal at bars < N).
+- Re-run `preflight_selector.py` with the new obs; confirm in-env gate PASS before sweeping.
+- Keep the same `entry_forward` + `ungate=True` + `γ=0.10` reward config from exp5.
+- After sweep: run `diag_deviation_alpha.py` and the three-point honest gate above.
+
+#### Single biggest risk
+
+**The exit-IC wall.** The breakout-reversal edge is an *intraday* phenomenon (4–6h). The env's event
+engine fires exit prompts only when rung-0's trailing-stop or EMA-cross fires — which on a volatile alt
+can be hours or days after entry, well into the negative multi-day zone. Even with the new obs features,
+if the exit-prompt count stays at ~39/episode and the post-entry multi-bar drift swamps the 4–6h pop
+in the reward signal, the agent will be trained on the full-hold outcome (which the characterization
+says is negative) and will learn to skip the breakout bucket entirely rather than size up for a
+short-hold harvest.
+
+**Mitigation:** add an explicit **time-based exit prompt** — at 6h (6 bars) after a breakout-reversal
+entry (identified by `r_3d > 0 and r_7d < 0 and bkout_dist_short > -0.02` at entry time), force an
+exit event prompt regardless of whether the trailing stop has fired. This is NOT a hard-coded exit rule;
+it is an additional decision point that gives the agent the *opportunity* to take profit at the 4–6h
+mark. The agent still chooses the action (keep 0% / 33% / 67% / 100%); the forced prompt just ensures
+the gradient sees a decision at the right time. This is the minimum architectural support needed to
+teach the intraday-pop-and-exit pattern.
 
 **Validation bar (before it enters the obs):** must hold **OOS (frozen test)**, survive **transaction
 costs**, and be **incremental over `cush`** (already in the obs vector). Owned by `market-indicator-expert`
