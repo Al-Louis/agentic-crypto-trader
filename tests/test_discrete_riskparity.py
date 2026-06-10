@@ -123,3 +123,40 @@ def test_default_is_continuous_voltopk_flatcap_unchanged():
     env.reset(start=40)
     assert env.action_mode == "continuous" and env.universe_mode == "voltopk"
     assert all(c == env.max_entry_frac for c in env._tok_cap.values())
+
+
+# -- lever-2 harvest obs ------------------------------------------------------
+
+def test_harvest_obs_appends_three_bounded_slots():
+    from trader.train.event_env import OBS_DIM
+    assert _env().obs_dim == OBS_DIM                       # default off
+    env = _env(harvest_obs=True, k=5)
+    o = env.reset(start=40)
+    assert env.obs_dim == OBS_DIM + 3 and len(o) == OBS_DIM + 3
+    assert np.all(np.abs(o[-3:]) <= 1.0)                  # r24/r3d/r7d are tanh-squashed into [-1,1]
+
+
+def test_harvest_gym_adapter_obs_space_matches():
+    from trader.train.gym_env import GymEventRungEnv
+    from trader.train.event_env import OBS_DIM
+    returns, btc, vol, liq = _panel()
+    g = GymEventRungEnv(returns, btc, liq, volume=vol, k=5, ema_span=10, warmup=30,
+                        episode_bars=260, vol_mult=2.5, vol_spk=4, vol_base=20, vol_fast=4,
+                        stop_k=0.1, cooldown=8, harvest_obs=True, seed=0)
+    assert g.observation_space.shape == (OBS_DIM + 3,)
+
+
+def test_harvest_slots_are_causal_no_future_leak():
+    """The momentum slots read self._px[bar-N : bar+1] only — a FUTURE return change must not move
+    _px up to bar (cumprod is causal), so the obs at bar cannot leak the future."""
+    returns, btc, vol, liq = _panel()
+    base = dict(volume=vol, k=5, ema_span=10, warmup=30, episode_bars=260, vol_mult=2.5,
+                vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, harvest_obs=True, seed=0)
+    env = EventRungEnv(returns, btc, liq, **base)
+    env.reset(start=40)
+    bar = env.bar
+    r2 = returns.copy()
+    r2.iloc[bar + 3, 0] = r2.iloc[bar + 3, 0] + 0.5        # perturb a FUTURE bar
+    env2 = EventRungEnv(r2, btc, liq, **base)
+    env2.reset(start=40)
+    assert np.allclose(env._px[:bar + 1], env2._px[:bar + 1])   # past/current px unchanged → no leak

@@ -204,6 +204,8 @@ def main() -> None:
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
+    p.add_argument("--harvest-obs", action="store_true", help="lever-2: append the event token's r24/r3d/r7d "
+                   "momentum slots (OBS_DIM 13->16) so the policy can size UP on bull-harvest setups")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
     p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
@@ -256,7 +258,7 @@ def main() -> None:
                       fwd_horizon=args.fwd_horizon, ungate=args.ungate,
                       action_mode=args.action_mode, n_action_levels=args.n_action_levels,
                       universe_mode=args.universe_mode, vol_target=args.vol_target,
-                      cap_floor=args.cap_floor, seed=args.seed)
+                      cap_floor=args.cap_floor, harvest_obs=args.harvest_obs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -343,6 +345,7 @@ def main() -> None:
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
+                             "harvest_obs": args.harvest_obs,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,

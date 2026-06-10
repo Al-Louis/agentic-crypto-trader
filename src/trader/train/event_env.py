@@ -47,6 +47,7 @@ class EventRungEnv:
                  fwd_horizon: int = 24, ungate: bool = False,
                  action_mode: str = "continuous", n_action_levels: int = 4,
                  universe_mode: str = "voltopk", vol_target: float = 0.0, cap_floor: float = 0.02,
+                 harvest_obs: bool = False,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -68,9 +69,11 @@ class EventRungEnv:
         self.universe_mode = universe_mode                  # voltopk | broad (vol-stratified) | lowvol (calm)
         self.vol_target = float(vol_target)                 # >0: per-token weight cap proportional to vol_target/vol
         self.cap_floor = float(cap_floor)                   # risk-parity: min per-token weight cap (keep upside)
+        self.harvest_obs = bool(harvest_obs)                # lever-2: append r24/r3d/r7d momentum slots (13->16)
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
-        self.obs_dim, self.action_dim = OBS_DIM, 1
+        self.obs_dim = OBS_DIM + (3 if self.harvest_obs else 0)   # +r24/r3d/r7d when harvest_obs
+        self.action_dim = 1
         self.n_bars = len(self.returns)
         self.cols = list(self.returns.columns)
         self.col_ix = {t: j for j, t in enumerate(self.cols)}
@@ -490,6 +493,15 @@ class EventRungEnv:
         breadth = float(np.mean(self._cush[self.bar, self._uni_ix] > 0.0)) if len(self._uni_ix) else 0.0
         obs = [is_exit, cush, surge, unreal, held_frac, giveback,
                self.cash / eq, exposure, len(self.pos) / self.k, dd, btc_trend, rule_expo, breadth]
+        if self.harvest_obs:                                   # lever-2 HARVEST: the event token's short-horizon
+            harv = [0.0, 0.0, 0.0]                             # momentum (r24/r3d/r7d), causal (past px only),
+            if tok is not None:                                # tanh-squashed so fat alt tails land in [-1,1]
+                j = self.col_ix[tok]
+                for i, n in enumerate((24, 72, 168)):
+                    p0 = self._px[self.bar - n, j] if self.bar - n >= 0 else 0.0
+                    r = (self._px[self.bar, j] / p0 - 1.0) if p0 > 0 else 0.0
+                    harv[i] = float(np.tanh(3.0 * np.clip(r, -RET_CLIP, RET_CLIP)))
+            obs += harv
         return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
 
     def _info(self) -> dict:
