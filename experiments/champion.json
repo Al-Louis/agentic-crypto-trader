@@ -1,232 +1,136 @@
 {
   "champion": null,
   "configs": {
-    "ppo-giveback": {
-      "n": 3,
+    "ppo-event-rd-df943bf": {
+      "n": 4,
       "seeds": [
         0,
         1,
-        2
+        2,
+        3
       ],
-      "mean_return": 1.0308068336241278,
-      "mean_maxdd": 0.287402753875654,
-      "mean_sharpe": 3.8521704760296736,
-      "mean_pf": 1.208342140575566,
-      "worst_maxdd": 0.4048402827657488,
-      "timesteps": 100000,
-      "git": null,
+      "mean_return": -0.07611222633573125,
+      "mean_maxdd": 0.13886390197997267,
+      "mean_sharpe": -3.5080650549673917,
+      "mean_pf": 0.40462272071213384,
+      "worst_maxdd": 0.21580620121465363,
+      "timesteps": 1000000,
+      "git": "df943bf",
       "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-giveback-s<seed>",
+      "baseline": -0.046457194663900525,
+      "buyhold": 0.274780701372191,
+      "random": -0.0706383389595062,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.5 --seed <0|1|2>",
       "legal_mean": true
     },
-    "ppo-oos-real": {
-      "n": 3,
+    "ppo-event-rd8-a4132cc": {
+      "n": 4,
       "seeds": [
         0,
         1,
-        2
+        2,
+        3
       ],
-      "mean_return": 0.11095917703534093,
-      "mean_maxdd": 0.3334126567832829,
-      "mean_sharpe": 1.5894888075811355,
-      "mean_pf": 1.3401674192723798,
-      "worst_maxdd": 0.34356422364824185,
+      "mean_return": -0.05893136403963608,
+      "mean_maxdd": 0.14662649592609067,
+      "mean_sharpe": -0.7567072230625933,
+      "mean_pf": 0.4460528987346224,
+      "worst_maxdd": 0.23913294489832004,
       "timesteps": 1000000,
-      "git": "9cc9e97",
-      "split": "test",
-      "baseline": 0.2568826058396241,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split test --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
-      "legal_mean": false
-    },
-    "ppo-oos-real-give": {
-      "n": 3,
-      "seeds": [
-        0,
-        1,
-        2
-      ],
-      "mean_return": -0.017511273594224868,
-      "mean_maxdd": 0.4287178317959032,
-      "mean_sharpe": 0.4743212588556413,
-      "mean_pf": 0.8432290744334981,
-      "worst_maxdd": 0.49515623399866426,
-      "timesteps": 1000000,
-      "git": "9cc9e97",
-      "split": "test",
-      "baseline": 0.2568826058396241,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split test --timesteps 1000000 --n-envs 6 --gb-lambda 15.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
-      "legal_mean": false
-    },
-    "ppo-realized": {
-      "n": 3,
-      "seeds": [
-        0,
-        1,
-        2
-      ],
-      "mean_return": 1.9823394652307282,
-      "mean_maxdd": 0.3462015050977511,
-      "mean_sharpe": 4.750466843913596,
-      "mean_pf": 1.7312955420255458,
-      "worst_maxdd": 0.414553970296206,
-      "timesteps": 100000,
-      "git": null,
+      "git": "a4132cc",
       "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-realized-s<seed>",
-      "legal_mean": false
-    },
-    "ppo-sharpe": {
-      "n": 3,
-      "seeds": [
-        0,
-        1,
-        2
-      ],
-      "mean_return": 1.516497837831647,
-      "mean_maxdd": 0.3176065134398865,
-      "mean_sharpe": 4.386458386715307,
-      "mean_pf": 1.699080949857504,
-      "worst_maxdd": 0.4282831911761509,
-      "timesteps": 100000,
-      "git": null,
-      "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-sharpe-s<seed>",
-      "legal_mean": false
-    },
-    "ppo-turnover": {
-      "n": 3,
-      "seeds": [
-        0,
-        1,
-        2
-      ],
-      "mean_return": 1.2652973749924328,
-      "mean_maxdd": 0.2964128938050633,
-      "mean_sharpe": 4.236758919408252,
-      "mean_pf": 1.564120499101216,
-      "worst_maxdd": 0.41091233319072334,
-      "timesteps": 100000,
-      "git": null,
-      "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "(pre-provenance) re-run with run-id pattern ppo-turnover-s<seed>",
+      "baseline": -0.046457194663900525,
+      "buyhold": 0.08707583039006006,
+      "random": -0.0036712015950653718,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.5 --seed <0|1|2>",
       "legal_mean": true
     },
-    "ppo2-real": {
-      "n": 3,
+    "ppo-event-rd8h-53409b4": {
+      "n": 4,
       "seeds": [
         0,
         1,
-        2
+        2,
+        3
       ],
-      "mean_return": 0.8309028928297888,
-      "mean_maxdd": 0.2533396544776087,
-      "mean_sharpe": 5.122008026907619,
-      "mean_pf": 1.5426446132887934,
-      "worst_maxdd": 0.2661472557319371,
+      "mean_return": -0.06099414459148789,
+      "mean_maxdd": 0.14129292397486104,
+      "mean_sharpe": -1.0959585983750861,
+      "mean_pf": 0.5981137013587621,
+      "worst_maxdd": 0.2068125243838825,
       "timesteps": 1000000,
-      "git": "2c92a2f",
+      "git": "53409b4",
       "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
+      "baseline": -0.00576669244277439,
+      "buyhold": 0.17066161060014418,
+      "random": 0.014343130091767195,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.5 --seed <0|1|2>",
       "legal_mean": true
     },
-    "ppo2-real-combo": {
-      "n": 3,
+    "ppo-event-rd8h0-a12ba18": {
+      "n": 4,
       "seeds": [
         0,
         1,
-        2
+        2,
+        3
       ],
-      "mean_return": 0.8344215880631927,
-      "mean_maxdd": 0.2653802355840705,
-      "mean_sharpe": 5.153728797651625,
-      "mean_pf": 1.4532050697746894,
-      "worst_maxdd": 0.3214559284549532,
+      "mean_return": -0.08711959878808645,
+      "mean_maxdd": 0.2152830952383203,
+      "mean_sharpe": -1.3018836596777812,
+      "mean_pf": 0.3565910929690639,
+      "worst_maxdd": 0.26874140711832073,
       "timesteps": 1000000,
-      "git": "2c92a2f",
+      "git": "a12ba18",
       "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 10.0 --turn-lambda 1.5 --realized-lambda 10.0 --dd-lambda 4.0 --seed <0|1|2>",
+      "baseline": -0.00576669244277439,
+      "buyhold": 0.17066161060014418,
+      "random": 0.014343130091767195,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.0 --seed <0|1|2>",
       "legal_mean": true
     },
-    "ppo2-real-dd5": {
-      "n": 3,
+    "ppo-event-rd8h0c1-d4b155e": {
+      "n": 4,
       "seeds": [
         0,
         1,
-        2
+        2,
+        3
       ],
-      "mean_return": 0.9409105643081034,
-      "mean_maxdd": 0.2645729362823503,
-      "mean_sharpe": 5.168524518762359,
-      "mean_pf": 1.5453596073611695,
-      "worst_maxdd": 0.3005811036391158,
+      "mean_return": 0.04655645643369921,
+      "mean_maxdd": 0.09706569408179791,
+      "mean_sharpe": 1.1043518261408247,
+      "mean_pf": 1.499503200214037,
+      "worst_maxdd": 0.12714933624906416,
       "timesteps": 1000000,
-      "git": "2c92a2f",
+      "git": "d4b155e",
       "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 5.0 --seed <0|1|2>",
+      "baseline": -0.00576669244277439,
+      "buyhold": 0.17066161060014418,
+      "random": -0.09310605303695989,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.0 --seed <0|1|2>",
       "legal_mean": true
     },
-    "ppo2-real-give": {
-      "n": 3,
+    "ppo-event-rd8tp-a4132cc": {
+      "n": 4,
       "seeds": [
         0,
         1,
-        2
+        2,
+        3
       ],
-      "mean_return": 1.5647601503740722,
-      "mean_maxdd": 0.2787422142167724,
-      "mean_sharpe": 4.7855461397356125,
-      "mean_pf": 2.4285678247478812,
-      "worst_maxdd": 0.3783978260964977,
+      "mean_return": -0.05047331261485233,
+      "mean_maxdd": 0.17116122780991225,
+      "mean_sharpe": -0.4219187638715741,
+      "mean_pf": 0.5537207803865447,
+      "worst_maxdd": 0.22223453038582885,
       "timesteps": 1000000,
-      "git": "2c92a2f",
+      "git": "53409b4",
       "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 15.0 --turn-lambda 0.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
-      "legal_mean": true
-    },
-    "ppo2-real-turn1": {
-      "n": 3,
-      "seeds": [
-        0,
-        1,
-        2
-      ],
-      "mean_return": 0.6604602607666816,
-      "mean_maxdd": 0.2552099969795221,
-      "mean_sharpe": 4.7363582667727435,
-      "mean_pf": 2.410499231743665,
-      "worst_maxdd": 0.2552099969795221,
-      "timesteps": 1000000,
-      "git": "2c92a2f",
-      "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 1.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
-      "legal_mean": true
-    },
-    "ppo2-real-turn3": {
-      "n": 3,
-      "seeds": [
-        0,
-        1,
-        2
-      ],
-      "mean_return": 0.6611897653043513,
-      "mean_maxdd": 0.2561077947420345,
-      "mean_sharpe": 4.737017982799178,
-      "mean_pf": 2.4288141845949687,
-      "worst_maxdd": 0.2579033902670593,
-      "timesteps": 1000000,
-      "git": "2c92a2f",
-      "split": "val",
-      "baseline": 0.78700746676523,
-      "reproduce": "python scripts/train_rl.py --action-mode weights --reward-mode composite --rich-obs --eval-split val --timesteps 1000000 --n-envs 6 --gb-lambda 0.0 --turn-lambda 3.0 --realized-lambda 10.0 --dd-lambda 2.0 --seed <0|1|2>",
+      "baseline": -0.046457194663900525,
+      "buyhold": 0.08707583039006006,
+      "random": 0.04090876668121305,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.5 --seed <0|1|2>",
       "legal_mean": true
     }
   },

@@ -28,6 +28,10 @@ DEFAULT_HOST = "https://data.alexlouis.dev"
 DEFAULT_OUT = Path("experiments")
 DD_GATE = 0.30
 SEEDED = re.compile(r"^(.*)-s(\d+)$")   # any seeded run: <config-label>-s<seed>
+# the sha naming convention (ec1e487): run-ids carry the git short-hash so a re-run on different
+# code can never overwrite/alias an old name. Everything published BEFORE it is the invalid era
+# (broken env / ambiguous vintage) — `sha_only` keeps the board to runs that carry the stamp.
+SHA_NAMED = re.compile(r"-[0-9a-f]{7}(-test)?-s\d+$")
 
 Fetch = Callable[[str], Any]
 
@@ -144,11 +148,13 @@ def pick_champion(summary: dict, dd_gate: float = DD_GATE) -> dict | None:
 
 
 def rebuild_ledger(*, host: str = DEFAULT_HOST, dd_gate: float = DD_GATE,
-                   fetch: Fetch = _http_fetch, generated: str | None = None) -> dict:
+                   fetch: Fetch = _http_fetch, generated: str | None = None,
+                   sha_only: bool = False) -> dict:
     """Re-derive ledger rows + per-config summary + champion + leaderboard from published bundles.
 
     Network reads are injected via `fetch` (tests pass fixtures). `generated` is the leaderboard
-    timestamp, injected to keep this pure (callers stamp `datetime.now(...)`).
+    timestamp, injected to keep this pure (callers stamp `datetime.now(...)`). `sha_only` keeps
+    only sha-stamped run-ids (the post-ec1e487 valid era).
     """
     man = fetch(f"{host.rstrip('/')}/manifest.json")
     rows: list[dict] = []
@@ -156,6 +162,8 @@ def rebuild_ledger(*, host: str = DEFAULT_HOST, dd_gate: float = DD_GATE,
         if e.get("kind") != "portfolio":
             continue
         rid = e["id"]
+        if sha_only and not SHA_NAMED.search(rid):
+            continue
         try:
             m = fetch(f"{host.rstrip('/')}/{rid}/metrics.json")
         except Exception:  # noqa: BLE001

@@ -33,6 +33,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--host", default=HOST)
     p.add_argument("--dd-gate", type=float, default=0.30)
+    p.add_argument("--all", action="store_true",
+                   help="include pre-sha-convention runs (default: sha-stamped run-ids only — "
+                        "everything before ec1e487 is the invalid era)")
     p.add_argument("--publish", action="store_true",
                    help="publish leaderboard.json to the Apentic data host for the frontend overview")
     p.add_argument("--publish-target", default=None, help=f"default: env or {DEFAULT_TARGET}")
@@ -40,7 +43,8 @@ def main():
     args = p.parse_args()
 
     res = rebuild_ledger(host=args.host, dd_gate=args.dd_gate,
-                         generated=datetime.now(timezone.utc).isoformat())
+                         generated=datetime.now(timezone.utc).isoformat(),
+                         sha_only=not args.all)
     write_ledger(res, DEFAULT_OUT)
     rows, summary, champion, leaderboard = (res["rows"], res["summary"],
                                             res["champion"], res["leaderboard"])
