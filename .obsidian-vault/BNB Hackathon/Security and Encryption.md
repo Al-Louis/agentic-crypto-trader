@@ -165,15 +165,22 @@ registered trading address and the ERC-8004 identity to be the **same address**,
 mnemonic/private key must back both stores** — i.e. import the TWAK-derived EVM private key into
 `EVMWalletProvider` (via `PRIVATE_KEY`, encrypted on first run), or derive both from one seed.
 
-**Likely resolution found (2026-06-11): TWAK CLI v0.19.0 ships native `twak erc8004`**
+**RESOLVED — probed on `bsctestnet` 2026-06-11.** TWAK CLI v0.19.0 ships native `twak erc8004`
 (`register` / `set-uri` / `set-metadata` / `show`, default `--chain bsc`, `bsctestnet` also a
-known deployment). Both `compete register` and `erc8004 register` sign with the **same TWAK
-wallet** — so the ERC-8004 identity, the competition registration, and the trading wallet can
-all resolve to one address with **one key store (`~/.twak`) and zero key export**. The BNB SDK
-then only *reads* the identity at runtime and never holds keys — custodially the cleanest
-shape. **Open question (narrowed):** probe `twak erc8004 register`/`show` on `bsctestnet` or
-the spike wallet to confirm the minted identity's address == `wallet address --chain bsc`,
-before June 22. Until probed, treat unification as designed-but-unproven.
+known deployment), and the probe proved unification end-to-end with the spike wallet:
+
+- `twak wallet address --chain bsctestnet` == `--chain bsc` == the trading address
+  (`0x2C19…D32E`) — one BIP-44 EVM derivation across chains, as designed.
+- `twak erc8004 register --chain bsctestnet --uri data:…` (keychain-resolved, faucet tBNB for
+  gas) minted **agentId 1369**, tx
+  `0xb03cdd129a86b880b53da89fe9eb4b07ce51b86023342316da646a340c248db7`.
+- On-chain read-back `erc8004 show 1369`: **`owner` AND `agentWallet` == the wallet's own
+  address.** Identity, competition registration, and trading all sign from the one `~/.twak`
+  store — **zero key export**; the BNB SDK only *reads* the identity and never holds keys.
+
+Gotcha for the real mint: `--uri` is **required** on `register` (the help reads as optional;
+it is not) — have the competition agent-card URI ready (e.g. hosted on data.alexlouis.dev)
+before minting the identity on mainnet.
 
 ## Always-on host design — the live-week key story (design, not yet stood up)
 
@@ -227,10 +234,6 @@ exactly the key-on-remote-box question owned by [[Remote Capabilities]].
 
 *(updated 2026-06-11 after the keyless CLI verification — see [[TWAK Spike Runbook]])*
 
-- **Wallet unification (gating, narrowed).** Design found: TWAK v0.19.0's native `erc8004`
-  commands let identity + competition registration + trading all sign from the one `~/.twak`
-  wallet (§wallet unification above). Remaining probe: mint/show on `bsctestnet` and confirm
-  the identity address == `wallet address --chain bsc`, before June 22.
 - **Live-week host pick.** Design done (§always-on host design): Linux VPS env-file pattern
   vs. always-on laptop with Credential Manager. Decide after the spike proves the loop;
   provisioning in [[Remote Capabilities]].
@@ -241,6 +244,9 @@ exactly the key-on-remote-box question owned by [[Remote Capabilities]].
   should make re-unlock transparent from keychain/env; confirm in runbook step 8.
 
 **Resolved 2026-06-11:**
+- ~~**Wallet unification (was gating)**~~ → **proven on `bsctestnet`**: ERC-8004 agentId 1369
+  minted from the spike wallet; `owner`/`agentWallet` == the trading address; one `~/.twak`
+  store, zero key export (§wallet unification above).
 - ~~`twak serve --watch` vs. our own loop~~ → **our own loop wrapping the `twak` CLI
   (`--json`)**; TWAK's watcher only runs its DCA/limit automations, not a custom decision core
   (§always-on host design; mirrors the [[MCP Server]] open item).

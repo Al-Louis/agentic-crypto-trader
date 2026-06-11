@@ -186,6 +186,13 @@ the registered address must be the final, unified competition wallet
 captured, `register --help` surface confirmed (done — only `--password`/`--json`), and the
 unification probe (`twak erc8004 show/register` path) scheduled before June 22.
 
+**Unification probe DONE 2026-06-11** ([[Security and Encryption]] §wallet unification):
+ERC-8004 **agentId 1369** minted on `bsctestnet` from this wallet (faucet tBNB, keychain
+signing, tx `0xb03cdd…48db7`); `erc8004 show` confirms `owner`/`agentWallet` == the trading
+address. One `~/.twak` store covers trading + registration + identity, zero key export.
+Gotcha: `--uri` is **required** on `erc8004 register` — prepare the agent-card URI before the
+mainnet mint on the competition wallet.
+
 ### Step 8 — `--auto-lock` empirical check (agent, free)
 With the wallet idle-locked (`twak serve --auto-lock 1` for a couple of minutes, or just a
 later session), run `twak wallet sign-message …` again: confirm re-unlock is transparent via
