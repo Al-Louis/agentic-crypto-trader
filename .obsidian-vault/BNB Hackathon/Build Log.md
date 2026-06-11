@@ -671,11 +671,54 @@ cooldown/dead-zone only — ignition is ALWAYS required), exit-override/partial-
 `universe_mode` (the agent's basket ≠ the canonical rung-0 baseline's vol-top-8), risk-parity caps
 (scale entry sizes), `crash_train` (training data only).
 
+## 2026-06-10 (late) → 06-11 — the rung-1b "rd ladder": forensics-driven substrate + 8 sweeps
+
+The fastest build-measure cycle of the project (a sweep ≈ 20 min at 1M steps): the user's per-token
+chart forensics drove probes, probes drove substrate changes, each change swept same-day. Standings
+for every rung: [[Experiment Log]]; design detail: [[AI Training]]. In order:
+
+- **Published-data repair** — `scripts/repair_manifest.py`: retro-fit self-describing model_names
+  from provenance, tag then **de-list** the pre-`8ccad69` invalid era; `ec1e487` sha-stamped run-ids
+  pushed and in force (`ppo-event-<family>-<sha>-s<seed>`). Leaderboard rebuilt **sha-only**
+  (`build_ledger.py` default; `champion.json` stays honestly null — a PREVIEW crown is published
+  for frontend styling, clearly labeled).
+- **Rung-1b `rule_default`** (@ `df943bf`) — action idx 0 EXECUTES rung-0 (forensics showed the old
+  discretion vetoed the rule for free); no stop re-anchor (the ratchet), `exit_commit`, `dust_usd`,
+  `--rule-prior` init bias. Gated A (oracle ceiling val +74.6% — exits carry it) / B (parity) / C
+  (in-env landscape) before compute.
+- **Take-profit prompts** (`tp_rungs`, @ `a4132cc`) — the env could not SELL INTO STRENGTH (exit
+  prompts fire on weakness only); profit rungs at +25/50/100/200% unrealized, default = let-run.
+  Raised the oracle ceiling to **+95.5% val at 7.1% DD**. + **voltop8** (user: the calm half of
+  broad-12 bleeds; cut it).
+- **`--eval-prepad`** (@ `edb1af2`) — eval warmup served from the prior split's tail; the published
+  window is tradeable from bar 0 (no dead first week on the charts; mirrors live).
+- **Lever sweeps** — rd8h (+harvest obs), rd8h0 (`dd_lambda 0` — named + half-confirmed the
+  **diet-rule equilibrium**: the dd penalty double-counts risk the substrate already bounds; worst
+  seed 26.9% with NO reward brake), rd8h0c1 (`crash_train 4→1` + **loss-floor 0.2**, the Q disaster
+  guardrail — **first positive val in the project, +4.7%**).
+- **Q probes** — `probe_false_flag.py` REFUTED the low-rising entry filter (population data:
+  extended movers are the poison); `probe_detonation.py` CONFIRMED the post-detonation blacklist
+  (fwd48 −8/−24% train/val, expires ~4wk) → `det_blacklist` built into the ignite precompute.
+- **rd9 @ 5M** — regression everywhere (converged to rule-hugging flat); the scale lever failed →
+  the gap is memory, not steps.
+- **RecurrentPPO (rdL, @ `a27e469`, sweeping)** — `--recurrent --lstm-size 256` + stateful eval:
+  the user's failure classes (re-buying post-pump bleed, not holding winners, "no learned
+  experience") are SEQUENCE skills a stateless MLP cannot express. Verdict is behavioral, not just
+  returns.
+- **MCP 4A modernized** (@ `a27e469`+) — `rl_train` full rd-era whitelist + on-box sha-stamping +
+  discrete-aware smoke gate (latent parser break fixed); new `rl_verdict` (per-regime table,
+  validated == the manual verdicts) + `rl_forensics`; `experiment_record(sha_only, publish)`.
+  The manual day is now one tool-complete loop iteration → [[MCP Server]] §As-built.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
-- 🔄 **Phase 3/4** — Decision logic + offline validation: data layer + universe done; honest
-  broker, features, and backtest are the active work.
+- 🔄 **Phase 3/4** — Decision logic + offline validation: the rung-1b rd substrate is built and
+  structurally DQ-safe (caps, loss floor, blacklist, no-ratchet — worst seed 26.9% DD with zero
+  reward brake); honest per-regime gates in code; **RL tuning is the active work** (RecurrentPPO
+  rdL sweeping; best learned config rd8h0c1 val +4.7%, rung-0 still the bar).
+- ✅ **Phase 4A** — the MCP RL experiment loop tier (probe → guarded launch → poll → per-regime
+  verdict → forensics → ledger), tool-complete; the loop driver is the remaining piece.
 - ⬜ **Phase 2** — Stack spike / live on-chain loop: **deferred** under the training-first
   plan; a focused execution+custody spike (TWAK dust trade, registration dry-run) is still
   required before June 22.

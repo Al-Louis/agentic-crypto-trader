@@ -665,6 +665,33 @@ teach the intraday-pop-and-exit pattern.
 costs**, and be **incremental over `cush`** (already in the obs vector). Owned by `market-indicator-expert`
 (signal + exit pairing) with `rl-ml-trainer` (obs integration + training).
 
+## Signal-level findings from the rung-1b forensics arc (2026-06-10/11)
+
+Probe-validated rules and refutations from the user's per-token chart reviews — each measured
+against the panel before touching the rule:
+
+1. **Take-profit rungs are a real missing degree of freedom.** rung-0 (and the event env) only
+   sells on WEAKNESS (trailing stop / EMA-break) — selling into strength was inexpressible. Adding
+   profit-take prompts at +25/50/100/200% unrealized (default = let-winners-run, so rung-0 is
+   preserved) raised the hindsight ceiling from +74.8% to **+95.5% val while halving its drawdown
+   (12.1%→7.1%)**. Selling high is worth more than the discipline of never trimming.
+2. **The detonation blacklist (the Q pattern) is real and expires.** A massive volume surge WHILE
+   price collapses (surge ≥8×, rising ≤−15%) marks a token: its subsequent ignitions are poison
+   (fwd48 **−8.4% train / −24.3% val**, win 8–21%, n=121) until ~4 weeks out, where they revert to
+   baseline. Built as `det_blacklist` (672 bars) in the ignite precompute — applies to the agent
+   AND the rule mirror. Probe: `scripts/probe_detonation.py`.
+3. **The low-rising "false flag" entry filter is REFUTED.** The intuition (huge surge + weak price
+   progress = distribution → filter it) fails at the population level: the kept bucket (rising
+   ≥15%) has *worse* forward returns than the killed one, and the explicit surge≥8×/rising<15%
+   corner is *positive* on both splits. Extended movers are the statistical poison — the same
+   mean-reversion (`cush`-negative) finding every probe has produced. Q's Mar 28 disaster was real
+   but its damage came from the EXIT OVERRIDE (riding −45% at 2× size), not the entry; the fix was
+   the **loss floor** (no override below entry−20%), a behavioral guardrail, not a signal. Probe:
+   `scripts/probe_false_flag.py`.
+4. **The calm half of a vol-stratified universe is pure bleed.** broad-12's XRP/LINK/LTC/BabyDoge
+   tier lost in every regime across seeds; reverted to **voltop8** (risk-parity caps stay ON —
+   concentration is what DQ'd GATE-1).
+
 ## Open questions
 
 - **Hourly `cmc_history` availability:** does the active CMC plan support hourly OHLCV for all

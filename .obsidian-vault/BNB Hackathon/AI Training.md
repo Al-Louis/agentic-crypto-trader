@@ -488,6 +488,31 @@ All new flags default OFF (prior behavior byte-identical; regression suite must 
 unique argmax (+0.744/+0.405 margins), oracle-through-rd-env +77.3%/+44.4% at ~12% DD. Results +
 the launch command: [[Experiment Log]] §"Decided next — rung-1b". Awaiting desktop go.
 
+## As-built (2026-06-11) — the rd ladder: 8 sweeps, the named equilibria, → RecurrentPPO
+
+The rung-1b substrate swept through 8 configs in ~24h (standings: [[Experiment Log]]). What each
+lever taught, in the order it was learned:
+
+| lever | sweep | the read |
+|-------|-------|----------|
+| rule-default actions | rd | veto pathology fixed (takes the rule's trades); s1 first-ever full regime-gate passes (test AND crash) |
+| voltop8 + tp_rungs | rd8/rd8tp | calm tokens cut; **sell-into-strength added** (the env structurally lacked it; oracle ceiling → +95.5% val @ 7.1% DD) |
+| harvest obs | rd8h | 3rd obs lever with no discrimination effect — the obs-hypothesis family is exhausted on this arch |
+| `dd_lambda 0` | rd8h0 | the **diet-rule equilibrium** named + half-confirmed: a dd penalty on top of a relative reward pays a non-discriminating agent to under-size the rule; and the substrate alone held worst-seed DD to 26.9% with NO reward brake — **structural DQ-safety proven** |
+| `crash_train 4→1` + loss-floor 0.2 | rd8h0c1 | the inflated crash prior was real; the Q disaster path (override down a crash) closed; **first positive val of the project (+4.7% mean, all seeds beat the rule)** |
+| det-blacklist 672 | rd9 | probe-confirmed (post-detonation ignitions fwd48 −8/−24%, expiring ~4wk) — the Q pump/dump class deleted for agent AND rule mirror |
+| **5M steps** | rd9 | REGRESSION — converged to rule-hugging flat (val −0.7/test +2.0/crash −7.7). The exploration anneal collapses at scale; more steps ≠ discrimination |
+| **RecurrentPPO LSTM-256** | rdL (running) | the user's failure classes — re-buying post-pump bleed, not holding winners to the top, "no sign of learned experience," seed incoherence — are **sequence skills a stateless MLP cannot represent**. The deferred-until-earned condition (a demonstrated feedforward ceiling) is met |
+
+**Where the honest gate stands:** best learned config = rd8h0c1 (val +4.7%, 11/12 cells positive,
+worst DD 15%); the rung-0 rule on the prepad windows is the towering bar (test +89.3%, crash +62%
+surviving). The residual gap is **per-decision discrimination + cross-time coherence** — the LSTM
+is the first lever aimed at the second half. rdL verdict is judged on a behavioral checklist
+(bleed re-entries down? winners held longer? SIREN Mar 22 taken? seed coherence up?), not returns
+alone. Trainer support: `--recurrent --lstm-size N` (sb3-contrib MlpLstmPolicy), stateful eval
+threading (fresh LSTM state per split episode), recurrent-aware smoke timeout in the MCP launch
+tier ([[MCP Server]]).
+
 ## Is RL worth it here? (candid)
 
 A single 7-day live ranking is a hostile setting for a learned policy. Both sides honestly:
