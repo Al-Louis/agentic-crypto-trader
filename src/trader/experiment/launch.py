@@ -123,8 +123,13 @@ def build_sweep_command(*, python: str, workdir: str, reward_config: dict, seeds
     loop = ("SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit); "
             f"for s in {seed_str}; do "
             f"{_per_seed_cmd(python, reward_config, split, timesteps, n_envs, prefix, logdir)}; done")
+    # `setsid` detaches the sweep into its OWN session/process group: tailscaled's session handler
+    # waits on the whole process group, so without it the ssh client hangs until the SWEEP ends
+    # (the rdLq launch timeout). Bonus: the sweep no longer shares the ssh session's pgroup, so
+    # the historical kill-PGID-takes-tailscaled-down hazard can't recur by construction.
     return (f"cd {shlex.quote(workdir)} && mkdir -p runs-rl {logdir} && "
-            f"nohup bash -c {shlex.quote(loop)} > runs-rl/{prefix}.log 2>&1 < /dev/null & echo $!")
+            f"setsid nohup bash -c {shlex.quote(loop)} > runs-rl/{prefix}.log 2>&1 < /dev/null & "
+            f"echo $!")
 
 
 def build_smoke_command(*, python: str, workdir: str, reward_config: dict, split: str,

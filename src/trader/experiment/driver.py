@@ -164,7 +164,14 @@ def step(state_dir: Path | str = EXPERIMENTS, *, deps: dict | None = None) -> di
 
     if st["queue"]:
         item = st["queue"].pop(0)
-        launch = deps["launch"](item)
+        try:
+            launch = deps["launch"](item)
+        except Exception as e:  # noqa: BLE001 — ssh/transport faults must HALT, not crash unsaved
+            st["queue"].insert(0, item)
+            st["halted"] = (f"launch transport error: {str(e)[:200]} — CHECK THE BOX (the command "
+                            f"may have executed despite the client error) before reset+re-step")
+            save_state(st, state_dir)
+            return {"phase": "halted", "reason": st["halted"]}
         if not launch.get("launched"):
             st["queue"].insert(0, item)                      # keep it queued for the retry
             st["halted"] = (f"launch refused: {launch.get('refused') or launch.get('reason')}"
