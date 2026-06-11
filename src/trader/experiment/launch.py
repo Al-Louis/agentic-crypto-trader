@@ -140,8 +140,11 @@ def build_smoke_command(*, python: str, workdir: str, reward_config: dict, split
            "--eval-split", split, *build_reward_args(reward_config),
            "--seed", "0", "--run-id", f"{prefix}-smoke"]
     inner = " ".join(shlex.quote(a) for a in cmd)
+    # grep exactly the two gate lines — `tail -6` broke when the per-regime verdict grew the output
+    # past the window, and a wider tail would blow the ssh reply-size guard (MTU).
     return (f"cd {shlex.quote(workdir)} && mkdir -p runs-rl && "
-            f"APENTIC_PUBLISH_TARGET= {inner} 2>&1 | tail -6")
+            f"APENTIC_PUBLISH_TARGET= {inner} 2>&1 "
+            f"| grep -E '^\\[(eval|train_event)\\]' | tail -4")
 
 
 _EVAL_RE = re.compile(   # the trainer's line gained `primary=<split>` with the per-regime gate
