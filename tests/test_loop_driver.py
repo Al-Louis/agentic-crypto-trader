@@ -93,7 +93,18 @@ def test_dead_sweep_halts(tmp_path):
     driver.step(tmp_path, deps=deps)
     deps["poll"] = lambda s, seeds: {"n_published": 0, "running": False}
     r = driver.step(tmp_path, deps=deps)
-    assert r["phase"] == "halted" and "died" in r["reason"]
+    assert r["phase"] == "halted" and "dead at 0/4" in r["reason"]
+
+
+def test_partial_sweep_death_halts_but_unreachable_box_waits(tmp_path):
+    deps = _deps([])
+    driver.propose({"reward_mode": "relative"}, state_dir=tmp_path)
+    driver.step(tmp_path, deps=deps)
+    deps["poll"] = lambda s, seeds: {"n_published": 1, "running": None}    # box unreachable
+    assert driver.step(tmp_path, deps=deps)["phase"] == "running"          # wait on CDN, don't kill
+    deps["poll"] = lambda s, seeds: {"n_published": 1, "running": False}   # box answers, no trainer
+    r = driver.step(tmp_path, deps=deps)
+    assert r["phase"] == "halted" and "dead at 1/4" in r["reason"]         # the WSL-close case
 
 
 def test_result_from_verdict_worst_regime_margin():
