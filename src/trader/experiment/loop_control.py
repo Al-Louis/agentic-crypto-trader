@@ -85,3 +85,23 @@ def result_from_diagnose(exp_id: str, split: str, diag: dict) -> ExperimentResul
     return ExperimentResult(exp_id=exp_id, split=split,
                             honest_gate_pass=bool(hg.get("gate_pass")),
                             margin_vs_buyhold=margin, binding=hg.get("binding"))
+
+
+def result_from_verdict(exp_id: str, split: str, verdict: dict) -> ExperimentResult:
+    """Distill a per-regime `rl_verdict` table into an `ExperimentResult` (the modern bridge).
+
+    The north star is the WORST regime's margin-vs-Buy&Hold (the gate demands every regime pass,
+    so the binding regime is the one that measures progress); `binding` carries which regime and
+    which baseline failed (e.g. ``val:Buy&Hold``)."""
+    margins = []
+    binding = None
+    for name, t in (verdict.get("regimes") or {}).items():
+        mean, bh = t.get("mean_return"), (t.get("bars") or {}).get("buyhold")
+        if mean is not None and bh is not None:
+            margins.append(mean - bh)
+        if binding is None and not t.get("mean_gate_pass"):
+            binding = f"{name}:{t.get('binding')}"
+    return ExperimentResult(exp_id=exp_id, split=split,
+                            honest_gate_pass=bool(verdict.get("overall_pass")),
+                            margin_vs_buyhold=(min(margins) if margins else None),
+                            binding=binding)

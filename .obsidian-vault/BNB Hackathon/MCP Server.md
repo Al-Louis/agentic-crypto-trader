@@ -184,6 +184,30 @@ actually runs (one manual-day = one loop-iteration parity):
 Tests: `tests/test_mcp_loop.py` (the full rdL config dict accepted; sha-stamping + sequencing
 asserted; discrete smoke pass/fail; regime-verdict means/binding/DQ on fixtures).
 
+## As-built — the loop DRIVER (4B/4C, 2026-06-11)
+
+The piece that strings the 4A tools into the autonomous iterate loop:
+
+- **`trader.experiment.driver`** — the stateful state machine (`experiments/loop_state.json`):
+  `idle+queue → launched → running → verdict → record → decide → idle/halted`. Mechanical steps in
+  code (launch rides the guarded `rl_train` flow; poll = published-count + one tiny ssh; verdict =
+  the per-regime `regime_verdict`; record = sha-only ledger; decide = `loop_control.decide` with
+  the drift alarm + iteration budget). **The judgment step is deliberately absent**: a tick that
+  returns `needs_proposal=True` is the driving agent's cue to analyze + queue ONE config. The
+  north star is the WORST regime's margin-vs-Buy&Hold (`result_from_verdict`); a refused/dead
+  launch or drift alarm HALTS for human review. The loop never spends the frozen test (val only;
+  `promote` fires only from a human `final_verdict` run).
+- **Surfaces:** CLI `scripts/rl_loop.py {status,step,propose,reset}`; MCP tools `rl_loop_status` /
+  `rl_loop_step` / `rl_loop_propose` / `rl_loop_reset`.
+- **The driving agent:** the `/rl-loop` project skill — one wake = one tick; on `verdict` it logs
+  standings to [[Experiment Log]], runs `rl_forensics` when behavior looks wrong, consults the
+  refuted-levers record so nothing dead is re-proposed, and proposes one single-variable config.
+  Driven by `/loop` (self-paced wakes ≈ sweep duration) or a cron; a `halted` tick stops the loop
+  and notifies the human. Hard rules restated in the skill: val-only, one variable per config,
+  never launch around the driver, the desktop is shared.
+- Tests: `tests/test_loop_driver.py` (full offline cycle, drift-alarm halt + soft reset,
+  refused-launch requeue, dead-sweep halt, worst-regime margin distillation).
+
 > **Open items:** confirm the CMC Agent Hub MCP vs the `cmc` CLI as the data backend (x402
 > lives in the Agent Hub MCP — see [[Tech Stack]]); confirm the exact `twak compete register`
 > surface; decide whether `execute_trade` wraps the `twak` CLI or the TWAK MCP directly.

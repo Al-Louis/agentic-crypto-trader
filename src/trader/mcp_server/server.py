@@ -385,6 +385,54 @@ def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
                         else None)}
 
 
+# ---- RL loop driver (the 4B/4C iterate loop — vault "MCP Server" §driver) -------------------
+# The stateful state machine in trader.experiment.driver: launch -> poll -> verdict -> record ->
+# decide (loop_control: continue / drift-alarm escalate / promote). The judgment step (designing
+# the next config) stays with the driving agent: a step that returns needs_proposal=True is the
+# cue to analyze the verdict (+ rl_forensics on flagged tokens) and rl_loop_propose ONE config.
+
+
+@mcp.tool()
+def rl_loop_status() -> dict:
+    """The RL loop's persisted state: iteration, active sweep, queue, history, halt reason."""
+    from trader.experiment import driver
+    return driver.load_state()
+
+
+@mcp.tool()
+def rl_loop_step() -> dict:
+    """Advance the RL loop ONE tick (launch from queue / poll the active sweep / verdict+decide).
+
+    Phases: `launched` (a queued config went out, guarded), `running` (re-step later),
+    `verdict` (per-regime table + the loop_control decision; `needs_proposal=True` means the
+    driving agent must analyze and propose the next config), `idle`, `halted` (drift alarm,
+    budget, refused launch, or a dead sweep — human review, then rl_loop_reset).
+    """
+    from trader.experiment import driver
+    return driver.step()
+
+
+@mcp.tool()
+def rl_loop_propose(reward_config: dict, note: str = "", timesteps: int = 1_000_000,
+                    seeds: str = "0 1 2 3", prefix: str | None = None,
+                    sha: str | None = None) -> dict:
+    """Queue the NEXT experiment (the judgment step's output). One config, one variable, one note.
+
+    `note` must state the hypothesis the config tests (the Experiment Log discipline). The loop
+    launches it on the next step — always on val; the frozen test stays human-triggered.
+    """
+    from trader.experiment import driver
+    return driver.propose(reward_config, note=note, timesteps=timesteps, seeds=seeds,
+                          prefix=prefix, sha=sha)
+
+
+@mcp.tool()
+def rl_loop_reset(hard: bool = False) -> dict:
+    """Clear a loop halt after acting on its reason (keep history); `hard=True` wipes the state."""
+    from trader.experiment import driver
+    return driver.reset(hard=hard)
+
+
 @mcp.tool()
 def rl_kill() -> dict:
     """Stop a running sweep by SPECIFIC PID (driver bash + train main) — never the process group.
