@@ -165,6 +165,44 @@ def rl_diagnose(prefix: str, seeds: str = "0 1 2 3") -> dict:
 
 
 @mcp.tool()
+def rl_verdict(prefix: str, seeds: str = "0 1 2 3") -> dict:
+    """The PER-REGIME verdict table (val / test / crash) — the modern honest gate, per sweep.
+
+    `prefix` is the full sha-stamped run-id stem (e.g. ``ppo-event-rdL-a27e469``). Reads each
+    seed bundle's `regimes` block: per-seed rows, seed-mean return, worst-seed maxDD, and the
+    mean-level gate per regime; `overall_pass` = every regime passes. This is the exact table
+    every manual sweep verdict used — the loop's primary read after rl_status says published.
+    """
+    from trader.experiment.diagnostics import regime_verdict
+    return regime_verdict(prefix, _seeds(seeds), host=DATA_CDN)
+
+
+@mcp.tool()
+def rl_forensics(run_id: str, token: str, times: str = "") -> dict:
+    """Trade-level forensics for one token of a published run (the diag_token_events probe).
+
+    Rebuilds the env's ignition/cushion signals locally from the bundle's provenance and
+    cross-checks the published trade markers: every entry prompt (BUY / skip / cooldown), the
+    component breakdown at each timestamp in `times` (space-separated ISO, e.g.
+    "2026-03-22T06:00"), and what the rung-0 rule did with the token. The behavioral
+    truth-teller behind every false-flag/veto finding — run it on suspicious tokens before
+    proposing rule changes.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]
+    cmd = [sys.executable, str(root / "scripts" / "diag_token_events.py"),
+           "--run-id", run_id, "--token", token]
+    if times:
+        cmd += ["--times", *times.split()]
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=root, timeout=600)  # noqa: S603
+    out = proc.stdout[-8000:]
+    return {"run_id": run_id, "token": token, "ok": proc.returncode == 0,
+            "report": out or proc.stderr[-2000:]}
+
+
+@mcp.tool()
 def rl_obs_probe(split: str = "train", horizon: int = 24) -> dict:
     """Cheap reward-bound vs capacity-bound check — no training (runs probe_obs_alpha on the desktop).
 
@@ -192,20 +230,35 @@ def rl_obs_probe(split: str = "train", horizon: int = 24) -> dict:
 
 
 @mcp.tool()
-def experiment_record() -> dict:
+def experiment_record(sha_only: bool = True, publish: bool = False) -> dict:
     """Rebuild the committed ledger/champion/leaderboard from the published bundles (honest gate).
 
     Re-derives `experiments/{ledger.jsonl,champion.json,leaderboard.json}` from the CDN manifest —
-    the permanent, version-controlled performance trail the loop appends to after each sweep. The
-    champion is recomputed on the honest gate (beat rung-0 AND Buy&Hold AND Random on frozen test).
+    the permanent, version-controlled performance trail the loop appends to after each sweep.
+    `sha_only` (default) keeps the board to sha-stamped run-ids (the post-ec1e487 valid era).
+    `publish=True` also pushes leaderboard.json to the data host (frontend) + CloudFront
+    invalidation — laptop-side creds required. The champion stays the honest gate (frozen test).
     """
     from datetime import datetime, timezone
     from trader.experiment.champion import rebuild_ledger, write_ledger
-    res = rebuild_ledger(host=DATA_CDN, generated=datetime.now(timezone.utc).isoformat())
+    res = rebuild_ledger(host=DATA_CDN, generated=datetime.now(timezone.utc).isoformat(),
+                         sha_only=sha_only)
     write_ledger(res, EXPERIMENTS)
     champ = res["champion"]
-    return {"champion": (champ or {}).get("config_label") if champ else None,
-            "n_runs": len(res["rows"]), "n_configs": len(res["summary"])}
+    out = {"champion": (champ or {}).get("config_label") if champ else None,
+           "n_runs": len(res["rows"]), "n_configs": len(res["summary"]), "sha_only": sha_only}
+    if publish:
+        import json as _json
+        from remote_train.publish import invalidate_cloudfront, put_bytes
+        from trader import config as _cfg
+        _cfg.load_dotenv()
+        target = _cfg.get("APENTIC_PUBLISH_TARGET") or "s3://alexlouis-apentic-data"
+        dist = _cfg.get("APENTIC_CLOUDFRONT_DIST_ID") or "E14F268NIY6WLZ"
+        put_bytes(f"{target}/leaderboard.json", _json.dumps(res["leaderboard"], indent=2).encode(),
+                  "application/json", "no-cache, max-age=0")
+        out["published"] = target
+        out["invalidation"] = invalidate_cloudfront(dist, ["/leaderboard.json"])
+    return out
 
 
 @mcp.tool()
@@ -276,9 +329,11 @@ def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
     smoke_cmd = L.build_smoke_command(**common)
     sweep_cmd = L.build_sweep_command(**common, seeds=seed_list, timesteps=timesteps)
     preflight_cmd = L.build_preflight_command(workdir=REMOTE_WORKDIR, sha=sha)
-    run_ids = [f"{prefix}-s{s}" for s in seed_list]
-    plan = {"prefix": prefix, "run_ids": run_ids, "split": split, "timesteps": timesteps,
-            "n_envs": n_envs, "reward_config": reward_config}
+    # run-ids are sha-stamped ON the box (`{prefix}-${SHA}-s<seed>`, the ec1e487 convention);
+    # the concrete ids are reported after preflight resolves HEAD.
+    plan = {"prefix": prefix, "run_id_pattern": f"{prefix}-<sha>-s<seed>", "split": split,
+            "timesteps": timesteps, "n_envs": n_envs, "reward_config": reward_config}
+    discrete = reward_config.get("action_mode") == "discrete"
 
     if dry_run:
         return {"dry_run": True, "plan": plan, "launched": False,
@@ -302,11 +357,15 @@ def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
     if not pf.get("data_files"):
         return {"refused": "no market data on desktop (data/ohlcv/hour_1 empty)", "preflight": pf,
                 "launched": False}
+    stamped = f"{prefix}-{pf.get('head', 'nogit')}"        # the on-box sha stamp, resolved
+    plan["run_ids"] = [f"{stamped}-s{s}" for s in seed_list]
 
-    # 3) smoke-gate: a dead/pinned policy never gets a 4-seed sweep.
+    # 3) smoke-gate: a dead/pinned policy never gets a 4-seed sweep. (Discrete policies are judged
+    # by levels-used, not the continuous mean-cap; recurrent smokes train slower — longer timeout.)
     smoke_result = None
     if smoke:
-        smoke_result = L.parse_smoke(run_ssh(smoke_cmd, timeout=900.0))
+        smoke_timeout = 1800.0 if reward_config.get("recurrent") else 900.0
+        smoke_result = L.parse_smoke(run_ssh(smoke_cmd, timeout=smoke_timeout), discrete=discrete)
         if not smoke_result.get("passed"):
             return {"launched": False, "reason": "smoke gate failed", "smoke": smoke_result,
                     "preflight": pf, "plan": plan}
@@ -318,7 +377,7 @@ def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
     # A short sweep can self-complete before the check — count published seeds so a COMPLETION
     # isn't misread as a death (a real 1M sweep publishes none in 90 s, so this only helps shorts).
     from trader.experiment.diagnostics import compare_seeds
-    published = sum(1 for p in compare_seeds(prefix, seed_list).get("per_seed", []) if "skip" not in p)
+    published = sum(1 for p in compare_seeds(stamped, seed_list).get("per_seed", []) if "skip" not in p)
     verify = L.verify_launch(sweep_status(), n_envs, published=published, expected=len(seed_list))
     return {"launched": True, "driver_pid": driver_pid, "verify": verify,
             "smoke": smoke_result, "preflight": pf, "plan": plan,

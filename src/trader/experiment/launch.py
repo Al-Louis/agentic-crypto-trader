@@ -43,6 +43,28 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "max_entry_frac": ("--max-entry-frac", float),
     "stop_k": ("--stop-k", float),
     "cooldown": ("--cooldown", int),
+    # --- substrate / curriculum / architecture (the rd-era flags, 2026-06-10/11) ---
+    "action_mode": ("--action-mode", str),          # continuous | discrete
+    "n_action_levels": ("--n-action-levels", int),
+    "universe_mode": ("--universe-mode", str),      # voltopk | broad | lowvol
+    "k": ("--k", int),
+    "vol_target": ("--vol-target", float),          # risk-parity per-token caps
+    "cap_floor": ("--cap-floor", float),
+    "harvest_obs": ("--harvest-obs", bool),         # r24/r3d/r7d momentum slots
+    "crash_train": ("--crash-train", int),          # synthetic alt-crashes in TRAIN
+    "crash_eval": ("--crash-eval", bool),           # held-out crash regime
+    "crash_depth": ("--crash-depth", float),
+    "crash_beta": ("--crash-beta", float),
+    "rule_default": ("--rule-default", bool),       # idx0 EXECUTES rung-0 (rung-1b)
+    "exit_commit": ("--exit-commit", int),
+    "dust_usd": ("--dust-usd", float),
+    "rule_prior": ("--rule-prior", float),          # init logit bias on the rule action
+    "tp_rungs": ("--tp-rungs", str),                # profit-take prompts, e.g. "0.25,0.5,1,2"
+    "eval_prepad": ("--eval-prepad", bool),         # warmup from the prior split's tail
+    "loss_floor": ("--loss-floor", float),          # disaster floor (no override below entry-X%)
+    "det_blacklist": ("--det-blacklist", int),      # detonation blacklist horizon (bars)
+    "recurrent": ("--recurrent", bool),             # RecurrentPPO MlpLstmPolicy (memory)
+    "lstm_size": ("--lstm-size", int),
 }
 
 DEFAULT_TIMESTEPS = 1_000_000
@@ -73,11 +95,16 @@ def auto_prefix(reward_config: dict[str, Any], split: str) -> str:
 
 def _per_seed_cmd(python: str, reward_config: dict, split: str, timesteps: int, n_envs: int,
                   prefix: str, logdir: str) -> str:
-    """One seed's command with `$s` left as a shell var the sweep loop substitutes."""
+    """One seed's command with `$s` / `${SHA}` left as shell vars the sweep loop substitutes.
+
+    The run-id carries the git short-hash (the ec1e487 convention): a re-run on different code can
+    NEVER overwrite/alias an old name, and the sha-only leaderboard includes it. `prefix` is
+    validated by the caller (`_PREFIX_OK`), so the unquoted `$`-bearing args are safe."""
+    rid = f"{prefix}-${{SHA}}-s$s"
     base = [python, "scripts/train_event.py", "--timesteps", str(timesteps),
             "--n-envs", str(n_envs), "--eval-split", split, *build_reward_args(reward_config),
-            "--seed", "$s", "--run-id", f"{prefix}-s$s"]
-    inner = " ".join(shlex.quote(a) if a != "$s" and not a.endswith("-s$s") else a for a in base)
+            "--seed", "$s", "--run-id", rid]
+    inner = " ".join(a if "$" in a else shlex.quote(a) for a in base)
     return f"{inner} > {logdir}/{prefix}-s$s.log 2>&1"
 
 
@@ -86,12 +113,13 @@ def build_sweep_command(*, python: str, workdir: str, reward_config: dict, seeds
                         prefix: str) -> str:
     """The detached remote bash that **sequences** seeds (never parallel) and echoes the driver PID.
 
-    Mirrors scripts/run_eventrung_sweep.sh's structure (mkdir logs, per-seed run-id, own log) but
-    argv-direct from `reward_config`. `nohup … < /dev/null & echo $!` returns the driver bash PID.
+    Mirrors scripts/run_eventrung_sweep.sh's structure (sha-stamped run-ids, mkdir logs, per-seed
+    log) but argv-direct from `reward_config`. `nohup … < /dev/null & echo $!` returns the PID.
     """
     logdir = f"runs-rl/{prefix}-logs"
     seed_str = " ".join(str(s) for s in seeds)
-    loop = (f"for s in {seed_str}; do "
+    loop = ("SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit); "
+            f"for s in {seed_str}; do "
             f"{_per_seed_cmd(python, reward_config, split, timesteps, n_envs, prefix, logdir)}; done")
     return (f"cd {shlex.quote(workdir)} && mkdir -p runs-rl {logdir} && "
             f"nohup bash -c {shlex.quote(loop)} > runs-rl/{prefix}.log 2>&1 < /dev/null & echo $!")
@@ -114,17 +142,21 @@ def build_smoke_command(*, python: str, workdir: str, reward_config: dict, split
             f"APENTIC_PUBLISH_TARGET= {inner} 2>&1 | tail -6")
 
 
-_EVAL_RE = re.compile(r"\[eval\] events=(\d+) action mean=(-?[\d.]+) min=(-?[\d.]+) max=(-?[\d.]+)")
+_EVAL_RE = re.compile(   # the trainer's line gained `primary=<split>` with the per-regime gate
+    r"\[eval\](?: primary=\S+)? events=(\d+) action mean=(-?[\d.]+) min=(-?[\d.]+) max=(-?[\d.]+)")
 _DONE_RE = re.compile(r"\[train_event\][^:]*: return ([-+][\d.]+)%.*?trades (\d+)", re.DOTALL)
 
 
-def parse_smoke(stdout: str, *, span_min: float = 0.5, mean_cap: float = 0.95) -> dict:
+def parse_smoke(stdout: str, *, span_min: float = 0.5, mean_cap: float = 0.95,
+                discrete: bool = False) -> dict:
     """Smoke-gate: parse the smoke's tail and judge ALIVE (trades>0) + STRADDLE (action not pinned).
 
-    `straddle` guards the [-1,1] boundary collapse that produced 0-trade duds: the action range must
-    span (`max−min > span_min`) and its mean must sit inside the boundary (`|mean| < mean_cap`).
-    Returns the parsed fields + `alive` / `straddle` / `passed`. A run that games reward but is dead
-    or pinned does NOT pass — we won't burn a 4-seed sweep on a dud.
+    Continuous: `straddle` guards the [-1,1] boundary collapse that produced 0-trade duds — the
+    action range must span (`max−min > span_min`) and its mean must sit inside the boundary
+    (`|mean| < mean_cap`). Discrete (`discrete=True`): actions are LEVEL INDICES (0..n-1), so the
+    mean-cap is meaningless (a healthy policy averages ~1.5) — straddle = more than one level used
+    (`max > min`). A run that games reward but is dead or pinned does NOT pass — we won't burn a
+    4-seed sweep on a dud.
     """
     out: dict[str, Any] = {"alive": False, "straddle": False, "passed": False}
     ev = _EVAL_RE.search(stdout)
@@ -136,8 +168,11 @@ def parse_smoke(stdout: str, *, span_min: float = 0.5, mean_cap: float = 0.95) -
         out.update(return_pct=float(dn.group(1)) / 100.0, trades=int(dn.group(2)))
     if "trades" in out and "action_mean" in out:
         out["alive"] = out["trades"] > 0
-        out["straddle"] = ((out["action_max"] - out["action_min"]) > span_min
-                           and abs(out["action_mean"]) < mean_cap)
+        if discrete:
+            out["straddle"] = out["action_max"] > out["action_min"]
+        else:
+            out["straddle"] = ((out["action_max"] - out["action_min"]) > span_min
+                               and abs(out["action_mean"]) < mean_cap)
         out["passed"] = out["alive"] and out["straddle"]
     else:
         out["error"] = "could not parse smoke output (no [eval]/[train_event] lines)"

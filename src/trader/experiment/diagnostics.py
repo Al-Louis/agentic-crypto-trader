@@ -187,3 +187,60 @@ def deviation_alpha(prefix: str, seeds: list[int] | list[str], *, host: str = DA
                     else "inverse (over-sizes losers)"),
     })
     return out
+
+
+def regime_verdict(prefix: str, seeds: list[int] | list[str], *, host: str = DATA_CDN,
+                   fetch: Fetch = _http_fetch, dd_gate: float = 0.30) -> dict:
+    """The PER-REGIME verdict table (val / test / crash) for a sweep - the modern honest gate.
+
+    Reads each seed bundle's `regimes` block (post-GATE-2 bundles carry per-regime
+    return/baselines/maxdd/gate verdicts; older bundles fall back to the primary split only).
+    Per regime: per-seed rows, the seed-MEAN return / worst-seed maxDD, and the mean-level gate
+    (seed-mean beats Buy&Hold AND Random-mean AND rung-0, worst-seed DD under `dd_gate`).
+    `overall_pass` = every regime's mean gate passes - the exact table the manual verdicts used.
+    """
+    regs: dict[str, list[dict]] = {}
+    missing: list[str] = []
+    for s in seeds:
+        rid = f"{prefix}-s{s}"
+        try:
+            m = fetch(f"{host.rstrip('/')}/{rid}/metrics.json")
+        except Exception as e:  # noqa: BLE001 - not yet published
+            missing.append(f"{rid}: {str(e)[:80]}")
+            continue
+        blocks = m.get("regimes") or {m.get("provenance", {}).get("eval_split", "val"): {
+            "return": m.get("total_return_pct"), "maxdd": m.get("max_drawdown_pct"),
+            "baseline_return": m.get("baseline_return"), "buyhold_return": m.get("buyhold_return"),
+            "random_return": m.get("random_return"), "gate_pass": m.get("gate_pass"),
+            "gate_binding": m.get("gate_binding")}}
+        for name, g in blocks.items():
+            regs.setdefault(name, []).append({"seed": s, **{k: g.get(k) for k in (
+                "return", "maxdd", "baseline_return", "buyhold_return", "random_return",
+                "gate_pass", "gate_binding")}})
+
+    table: dict[str, dict] = {}
+    for name, rows in regs.items():
+        rets = [r["return"] for r in rows if r["return"] is not None]
+        dds = [r["maxdd"] for r in rows if r["maxdd"] is not None]
+        rnds = [r["random_return"] for r in rows if r["random_return"] is not None]
+        mean = sum(rets) / len(rets) if rets else None
+        worst_dd = max(dds) if dds else None
+        bh = next((r["buyhold_return"] for r in rows if r["buyhold_return"] is not None), None)
+        rule = next((r["baseline_return"] for r in rows if r["baseline_return"] is not None), None)
+        rnd = sum(rnds) / len(rnds) if rnds else None
+        checks = {"drawdown": worst_dd is not None and worst_dd < dd_gate,
+                  "Buy&Hold": bh is not None and mean is not None and mean > bh,
+                  "Random": rnd is None or (mean is not None and mean > rnd),
+                  "rung-0": rule is None or (mean is not None and mean > rule)}
+        table[name] = {
+            "per_seed": rows, "mean_return": mean, "worst_maxdd": worst_dd,
+            "bars": {"rung0": rule, "buyhold": bh, "random": rnd},
+            "mean_gate_pass": all(checks.values()),
+            "binding": None if all(checks.values()) else next(k for k, ok in checks.items()
+                                                              if not ok),
+        }
+    return {"prefix": prefix, "n_seeds": len(seeds), "missing": missing, "regimes": table,
+            "overall_pass": bool(table) and all(v["mean_gate_pass"] for v in table.values()),
+            "note": ("overall_pass = every regime's seed-mean beats Buy&Hold AND Random AND "
+                     "rung-0 with worst-seed maxDD under the DQ gate (Agent Communication "
+                     "Contract). Older pre-regime bundles judge the primary split only.")}

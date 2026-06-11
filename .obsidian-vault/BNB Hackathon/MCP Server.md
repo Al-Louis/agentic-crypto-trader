@@ -158,6 +158,32 @@ gate (mean > rule, corr > 0, gate-safe, CI-validated). A `/loop` drives this acr
 a compute budget, promoting a champion and ending when one beats the rung-0 rule on the **frozen
 test** (`final_verdict=True`) — the one place the test split is spent.
 
+## As-built — 4A modernized to the rd-era (2026-06-11, during the rdL sweep)
+
+The 4A tier as first built predated the whole rung-1b arc; brought up to the pipeline that
+actually runs (one manual-day = one loop-iteration parity):
+
+- **`rl_train`** — `reward_config` whitelist extended to every rd-era knob (substrate:
+  `rule_default`/`exit_commit`/`dust_usd`/`tp_rungs`/`loss_floor`/`det_blacklist`; curriculum:
+  `crash_train`/`crash_eval`/`universe_mode`/`k`/`vol_target`; obs: `harvest_obs`/`eval_prepad`;
+  arch: `recurrent`/`lstm_size` + the rest). Run-ids are **sha-stamped on the box**
+  (`{prefix}-${SHA}-s<seed>`, the ec1e487 convention) so an automated launch can never recreate
+  the overwrite bug, and the sha-only leaderboard includes its runs. Smoke gate is now
+  **discrete-aware** (levels-used, not the continuous mean-cap that would have refused every
+  healthy rd policy) and its `[eval]`-line parser was fixed for the `primary=<split>` format (a
+  latent break — the old regex matched nothing current). Recurrent smokes get a longer timeout.
+- **`rl_verdict`** *(new)* — the per-regime (val/test/crash) table from each bundle's `regimes`
+  block: per-seed rows, seed-means, worst-seed DD, per-regime mean gate + `overall_pass`. The
+  exact table every manual sweep verdict used; the loop's primary read.
+- **`rl_forensics`** *(new)* — `diag_token_events` as a tool (prompt-by-prompt entry/skip/cool
+  labels, component breakdown at given timestamps, the rule's own trades) — the truth-teller
+  behind the veto/false-flag/detonation findings, now agent-callable before any rule change.
+- **`experiment_record`** — `sha_only` (default: the post-ec1e487 valid era only) +
+  `publish=True` (push leaderboard.json to the data host + CloudFront invalidation).
+
+Tests: `tests/test_mcp_loop.py` (the full rdL config dict accepted; sha-stamping + sequencing
+asserted; discrete smoke pass/fail; regime-verdict means/binding/DQ on fixtures).
+
 > **Open items:** confirm the CMC Agent Hub MCP vs the `cmc` CLI as the data backend (x402
 > lives in the Agent Hub MCP — see [[Tech Stack]]); confirm the exact `twak compete register`
 > surface; decide whether `execute_trade` wraps the `twak` CLI or the TWAK MCP directly.
