@@ -328,7 +328,9 @@ def test_smoke_command_suppresses_publish():
     cmd = launch.build_smoke_command(python="py", workdir="/w", reward_config={"reward_mode": "absolute"},
                                      split="val", prefix="pfx")
     assert "APENTIC_PUBLISH_TARGET=" in cmd          # empty env ⇒ train_event skips publishing
-    assert "pfx-smoke" in cmd and "tail -6" in cmd
+    assert "pfx-smoke" in cmd
+    assert "grep -E" in cmd and "eval|train_event" in cmd   # gate lines extracted by grep — a
+    #                          fixed tail window scrolled past [eval] as the verdict output grew
 
 
 SMOKE_OK = ("[eval] events=1683 action mean=0.385 min=-1.000 max=1.000\n"
