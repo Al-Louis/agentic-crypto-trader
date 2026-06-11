@@ -239,6 +239,24 @@ def test_above_floor_override_still_works():
     assert t in env.pos                                  # winner can still be ridden
 
 
+def test_detonation_blacklist_kills_later_ignitions():
+    """A detonation (huge surge while price collapses) must zero the token's ignitions for the
+    blacklist window; ignitions BEFORE the detonation and on other tokens are untouched."""
+    returns, btc, vol, liq = _panel()
+    vol.loc[vol.index[100:104], "RUN"] = 5000.0          # huge volume ON the crash (bars 92-120 fall)
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5,
+                vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0)
+    on = EventRungEnv(returns, btc, liq, det_blacklist=80, det_surge=8.0, det_drop=-0.15, **base)
+    off = EventRungEnv(returns, btc, liq, **base)
+    j = on.col_ix["RUN"]
+    pre_det = on._ignite[:100, j]
+    assert (pre_det == off._ignite[:100, j]).all()        # before the detonation: identical
+    det_zone = slice(104, 184)                            # 80-bar blacklist after the det bars
+    assert not on._ignite[det_zone, j].any()              # blacklisted
+    other = on.col_ix["C1"]
+    assert (on._ignite[:, other] == off._ignite[:, other]).all()   # other tokens untouched
+
+
 def test_all_default_policy_tracks_the_rule_mirror():
     """Parity (gate B, unit-scale): a policy answering idx0 at EVERY prompt through the env should
     track the rule mirror's equity on the synthetic panel (flat caps -> sizing matches ef=0.20)."""

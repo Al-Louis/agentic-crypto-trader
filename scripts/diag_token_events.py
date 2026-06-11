@@ -56,6 +56,10 @@ def main():
     returns, btc, anchor, liq = load_data()
     train_r, val_r, test_r = time_split(returns)
     eval_r = test_r if prov["eval_split"] == "test" else val_r
+    if prov.get("eval_prepad"):                       # warmup served from the prior split's tail
+        import pandas as _pd
+        prev = train_r if prov["eval_split"] == "val" else val_r
+        eval_r = _pd.concat([prev.tail(WARMUP), eval_r])
     vol = build_volume_panel(list(returns.columns), returns.index)
     env = EventRungEnv(
         eval_r, btc, liq, volume=vol, episode_bars=len(eval_r) - WARMUP - 1,

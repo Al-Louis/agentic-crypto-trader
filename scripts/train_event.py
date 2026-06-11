@@ -220,6 +220,9 @@ def main() -> None:
                    "init so the untrained policy ~= the rule and PPO must learn to deviate")
     p.add_argument("--tp-rungs", default="", help="profit-take prompts at these unrealized-gain levels "
                    "(comma list, e.g. 0.25,0.5,1,2) — lets the agent SELL INTO STRENGTH; '' = off")
+    p.add_argument("--det-blacklist", type=int, default=0, help="detonation blacklist: after a massive "
+                   "surge WHILE price collapses (the Q pattern), zero the token's ignitions for N bars "
+                   "(probe-calibrated 672 = 4wk; post-det ignitions are poison); 0 = off")
     p.add_argument("--loss-floor", type=float, default=0.0, help="disaster floor: a position below "
                    "entry*(1-floor) cannot be overridden/trimmed — forced full cut, punctures the "
                    "exit-commit window (closes the override-down-a-crash loss path); 0 = off")
@@ -283,7 +286,7 @@ def main() -> None:
                       rule_default=args.rule_default, exit_commit=args.exit_commit,
                       dust_usd=args.dust_usd,
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
-                      loss_floor=args.loss_floor, seed=args.seed)
+                      loss_floor=args.loss_floor, det_blacklist=args.det_blacklist, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -383,6 +386,7 @@ def main() -> None:
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
+                             "det_blacklist": args.det_blacklist,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,

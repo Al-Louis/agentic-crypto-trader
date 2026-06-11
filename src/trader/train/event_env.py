@@ -59,6 +59,7 @@ class EventRungEnv:
                  harvest_obs: bool = False,
                  rule_default: bool = False, exit_commit: int = 0, dust_usd: float = 0.0,
                  tp_rungs: tuple | list = (), loss_floor: float = 0.0,
+                 det_blacklist: int = 0, det_surge: float = 8.0, det_drop: float = -0.15,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -112,10 +113,22 @@ class EventRungEnv:
         rising = px / px.shift(vol_spk) - 1.0
         ema_up = ema >= ema.shift(vol_fast)
         ignite = ((surge >= vol_mult) & (rising > 0) & (cushion > 0) & ema_up)
+        self.det_blacklist = int(det_blacklist)
+        if self.det_blacklist > 0:
+            # DETONATION blacklist (the Q pattern, probe-gated by scripts/probe_detonation.py):
+            # a massive surge WHILE price collapses marks the token untradeable — its later
+            # ignitions are poison (fwd48 −8%/−24% train/val, win 8–21%) until ~4wk out, where
+            # they revert to baseline. Zero the ignite signal for `det_blacklist` bars after.
+            det = ((surge >= det_surge) & (rising <= det_drop)).to_numpy()
+            ig_np = ignite.to_numpy().copy()
+            for j in range(det.shape[1]):
+                for b in np.where(det[:, j])[0]:
+                    ig_np[b: b + self.det_blacklist, j] = False
+            ignite = ig_np
         self._px = px.to_numpy()
         self._cush = cushion.to_numpy()
         self._surge = surge.clip(0.0, SURGE_CLIP).to_numpy()
-        self._ignite = ignite.to_numpy()
+        self._ignite = ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()
         self._std = self.returns.rolling(warmup, min_periods=8).std().to_numpy()  # for causal universe
         # entry_forward: the TYPICAL-ignition forward return (the demean null). A single scalar over
         # this panel's ignitions -> the preflight computes it identically, so the reward landscapes match.
