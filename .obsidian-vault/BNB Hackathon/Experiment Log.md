@@ -914,6 +914,31 @@ stronger entropy than the MLP to escape the prior and learn that memory-conditio
 (take Mar 22, walk away from bleeds) pay; safety is now substrate-borne (the brakes are
 structural), so wider exploration cannot blow the gate.
 
+## Standings — rdLe4 (`ppo-event-rdLe4-c07bda0`, rdLq + **ent_coef 0.4**, loop iter 3 + WSL-crash recovery)
+
+| seed | val | test | crash |
+|------|-----|------|-------|
+| s0 | **+35.3% (DD 7%) — REGIME GATE PASS** | +0.8% (DD 4%) | +1.1% (DD 4%) |
+| s1 | +6.7% (DD 6%) | +27.1% (DD 8%) | +22.2% (DD 11%) |
+| s2 | +1.7% (DD 10%) | −0.9% (DD 7%) | −1.0% (DD 8%) |
+| s3 | +10.7% (DD 10%) | **+31.9% (DD 8%)** | **+30.6% (DD 9%)** |
+| **mean** | **+13.6%** | **+14.7%** | **+13.2%, 4/4 survive** |
+| bars | rule −0.6% / B&H +17.1% | rule +89.3% / B&H +58.6% | rule +62% / B&H −72% | 
+
+### Verdict — the ENTROPY hypothesis confirmed, dramatically; the best sweep of the project
+One variable (`ent_coef 0.2→0.4`) took the LSTM from muted to the **best seed-means in the arc**:
+val −1.3%→+13.6% (prior best ever: +4.7%), test −0.3%→+14.7%, crash −0.0%→+13.2% — with the
+**lowest risk profile yet (worst DD anywhere 10.5%)**. **s0 val +35.3% at 7% DD is the first
+individual regime-gate PASS on val — double Buy&Hold.** The recurrent policy needed exploration
+pressure to leave the rule-prior basin; once pushed, memory-conditioned deviation pays everywhere.
+Still FAIL on the means (val 13.6 < B&H 17.1 binds; crash grazes Random) and **seed variance is
+now the gap** (val 1.7..35.3). Behavioral note (honest): s0 made +35.3% with ZERO SIREN trades —
+the policy wins by its own route (memory-driven selection elsewhere), not the discretionary ideal;
+the SIREN Mar 22 litmus remains unmet. The WSL crash mid-sweep cost ~3h (recovered seeds 1–3,
+s0's bundle survived; driver gained partial-death detection). **Proposed next (iter 4, ONE
+variable): `ent_coef 0.4→0.6`** — dose-response probe: if the gradient continues, ride it; if it
+regresses, 0.4 is the plateau and the next lever is steps-at-0.4.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
