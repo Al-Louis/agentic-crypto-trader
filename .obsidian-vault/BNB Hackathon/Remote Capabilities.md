@@ -54,21 +54,33 @@ No option removes the core tension — an unattended host must be able to *unloc
 which is precisely the threat model in [[Security and Encryption]]. Region matters for both
 RPC latency and any data-residency constraints.
 
+> **DECIDED 2026-06-11: AWS EC2** (small Linux instance — this workload is I/O-bound, not
+> compute). Rationale: (a) the training desktop's WSL VM died silently mid-sweep — the
+> residential-host failure mode demonstrated, not hypothetical; (b) the AWS account already
+> runs the frontend data plane (`data.alexlouis.dev`), so the bot publishes its own
+> monitoring JSON via a **put-only instance role** on a `trading/` prefix (no laptop in the
+> publish path, consistent with the no-delete publisher posture — [[Apentic Data Contract]]);
+> (c) the systemd + hardened env-file key story is already designed
+> ([[Security and Encryption]] §always-on host design). The **competition wallet is created
+> on the box**; the laptop is the fallback host if provisioning threatens the timeline.
+> Target sequence: provision in parallel with the loop build (→ June 16), paper-mode
+> forward-run June 16–21, registered and live-ready before June 22.
+
 ## Deploying the runtime
 
-Three processes run on the trading host:
+Processes on the trading host (updated 2026-06-11 — the trade path was resolved to **our own
+loop shelling the `twak` CLI per call**, not `serve --watch`; see [[Security and Encryption]]):
 
-1. **`twak serve --watch`** — the background runner. `serve` exposes the TWAK MCP (stdio) or
-   a local REST API (`--rest --port <n>`, Bearer-auth with the HMAC secret). `--watch` is
-   what actually executes saved `automate` automations and signing in the background;
-   `--watch-interval <dur>` tunes the poll cadence (default 60s), and `--auto-lock <minutes>`
-   re-locks the wallet after inactivity. Without `--watch`, automations are saved but never
-   fire. The runner uses the **local agent wallet**; a WalletConnect session stays idle since
-   it needs manual approval — so unattended operation requires the local-key path.
-2. **The agent loop** (`trader.agent`) — read → decide → sign → confirm, calling TWAK to sign
-   and the data surfaces to read.
-3. **The `trader` MCP server** — `.venv\Scripts\python.exe -m trader.mcp_server` (stdio),
-   exposing the project tools so workflows and the loop drive operations deterministically.
+1. **The agent loop** (`trader.agent`, systemd unit) — read → decide → sign → confirm,
+   shelling `twak … --json` to sign (each invocation unlocks from the env-file password —
+   re-unlock proven transparent, [[TWAK Spike Runbook]] step 8) and calling the data
+   surfaces to read. Also publishes the `trading/` monitoring JSON + heartbeat to S3
+   ([[Real-time Monitoring]]).
+2. **The `trader` MCP server** (optional on the host) — `python -m trader.mcp_server`
+   (stdio), exposing the project tools so workflows drive operations deterministically.
+3. **`twak serve --watch`** *(only if TWAK-native alerts/automations are used)* — executes
+   saved `automate` automations in the background (`--watch-interval`, `--auto-lock`). Not
+   in the trade path; the loop does not depend on it.
 
 ### Keeping it alive
 

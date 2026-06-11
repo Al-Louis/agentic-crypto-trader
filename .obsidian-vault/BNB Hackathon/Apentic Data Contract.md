@@ -110,3 +110,17 @@ plus per-token behaviour. Per `<run_id>/`:
 - Portfolio: `trader.report.export_portfolio_run`; `scripts/train_rl.py` records per-step
   weights + per-token trades (env `step` info) and loads per-token OHLCV for the candles.
 - Both publish via `trader.report.publish_run` → S3 + CloudFront invalidate.
+
+## `trading/` prefix — live-trading telemetry (planned 2026-06-11, schema TBD)
+
+A third top-level surface for the **live agent loop** (consumer: the planned
+`/apentic/trading` page — design in [[Real-time Monitoring]] §public monitoring surface).
+Differs from the run bundles above in producer and cadence:
+
+- **Producer is the EC2 trading host itself** (put-only instance role scoped to `trading/*`
+  — the laptop-credential publish path is not involved; the no-delete posture carries over).
+- **Continuously updated** (per loop tick / hourly), not a one-shot bundle: equity +
+  drawdown series, trade log (tx hashes + guardrail refusals), daily trade count, and a
+  `generated` **heartbeat** the frontend ages for the dead-man indicator.
+- A `mode: "paper" | "live"` field distinguishes the June 16–21 forward-run from the scored
+  window. Exact file shapes land here when the loop's publisher is built.

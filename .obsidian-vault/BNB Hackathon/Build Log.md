@@ -710,17 +710,67 @@ for every rung: [[Experiment Log]]; design detail: [[AI Training]]. In order:
   validated == the manual verdicts) + `rl_forensics`; `experiment_record(sha_only, publish)`.
   The manual day is now one tool-complete loop iteration → [[MCP Server]] §As-built.
 
+## 2026-06-11 — Phase 2 custody spike: a guardrailed dust trade CONFIRMED on BSC
+
+The TWAK execution/custody spike ran start-to-finish in one day — full evidence in
+[[TWAK Spike Runbook]] (steps 0–8 all done) and [[Security and Encryption]]:
+
+- **The June-16 gate artifact, 5 days early:** a $1 BNB→USDT swap signed via TWAK
+  (password from Windows Credential Manager, unattended) through the new guardrail path and
+  confirmed on BSC — tx `0x739bb1…7c96`. Negative proof: a $5 intent refuses
+  `PER_TRADE_CAP`; the ledger persists real spend across processes.
+- **`src/trader/risk/` + `src/trader/execution/` built** (frozen `SPIKE_POLICY`, 8 refusal
+  codes, append-only ledger, two-phase intent→quote re-check, `--password`-free CLI
+  wrapper); 325 tests passing. Live run caught + fixed the `tx --json` boolean-status shape.
+- **Wallet unification PROVEN on `bsctestnet`:** ERC-8004 agentId 1369 minted from the spike
+  wallet via native `twak erc8004`; `owner`/`agentWallet` == the trading address. One
+  `~/.twak` store covers trading + registration + identity, zero key export.
+- **Registration recon:** `compete status` reads the on-chain deadline as **June 25** (later
+  than the assumed June 22; June 22 stays the working deadline). `--uri` is *required* on
+  the identity mint — the agent card must be hosted before the mainnet mint.
+- **`--auto-lock` re-unlock confirmed transparent** (keychain re-resolution, no human step).
+
+Custody-slice blockers all closed: autonomous self-custody signing ✅, registration
+mechanics ✅, unification ✅. Remaining Phase-2 half: CMC Agent Hub reads + BNB SDK runtime
+probe (`principal-engineer`).
+
+## 2026-06-11 — Plan forward agreed: AWS live host, paper→dust ladder, /apentic/trading
+
+Discussed and locked the path to the live window (user decision; rationale in
+[[Remote Capabilities]] and [[Security and Encryption]]):
+
+- **Live-week host = AWS EC2** (small Linux instance, systemd, hardened env-file). Decided
+  after the training desktop's WSL VM silently died mid-sweep — the residential-host failure
+  mode in person. The **competition wallet is created ON the EC2 box** (keys born where
+  signing happens); the spike wallet stays a laptop throwaway.
+- **Validation ladder: paper → mainnet dust — testnet trading ruled out** (no real DEX
+  liquidity; TWAK quotes route through mainnet aggregators, so testnet fills would validate
+  nothing about slippage/PnL). Testnet remains the rung for tx *mechanics* (as used for the
+  ERC-8004 probe).
+- **Monitoring page `/apentic/trading`:** the bot publishes its own trading JSON from EC2
+  straight to the `data.alexlouis.dev` bucket (put-only IAM role, `trading/` prefix) — no
+  laptop in the publish path — plus a **heartbeat** the frontend renders stale if the loop
+  goes quiet (the dead-man switch the host design called for). → [[Real-time Monitoring]],
+  [[Apentic Data Contract]].
+- **Sequence:** (1) now→Jun 16: build the agent loop (data reads → `decide()` → 
+  `execute_trade`) + paper-run locally; EC2 provisioning in parallel. (2) Jun 16–21: deploy
+  paper mode to AWS, wire publish + frontend, create/register the competition wallet (agent
+  card hosted first), one dust trade from the production host. (3) Jun 22–28: live window.
+  (4) post-stability: sponsor-tool expansion for special-prize coverage (CMC reads are NOT
+  deferred — they're the loop's data feed and the other half of the Phase-2 gate).
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
+- ✅ **Phase 2 (custody half)** — TWAK spike complete: guardrailed dust trade confirmed
+  on BSC (tx `0x739bb1…7c96`), unification proven, registration recon done
+  ([[TWAK Spike Runbook]]). **Remaining half:** CMC Agent Hub reads + BNB SDK runtime probe.
 - 🔄 **Phase 3/4** — Decision logic + offline validation: the rung-1b rd substrate is built and
   structurally DQ-safe (caps, loss floor, blacklist, no-ratchet — worst seed 26.9% DD with zero
   reward brake); honest per-regime gates in code; **RL tuning is the active work** (RecurrentPPO
   rdL sweeping; best learned config rd8h0c1 val +4.7%, rung-0 still the bar).
 - ✅ **Phase 4A** — the MCP RL experiment loop tier (probe → guarded launch → poll → per-regime
   verdict → forensics → ledger), tool-complete; the loop driver is the remaining piece.
-- ⬜ **Phase 2** — Stack spike / live on-chain loop: **deferred** under the training-first
-  plan; a focused execution+custody spike (TWAK dust trade, registration dry-run) is still
-  required before June 22.
-- ⬜ **June 16 PoC gate** — reframed internally to "trained agent"; the live-loop gate itself
-  is not yet met (no on-chain trade landed).
+- 🔄 **June 16 PoC gate** — the on-chain half is **met** (real guarded trade landed via TWAK);
+  the autonomous loop (read→decide→sign→confirm, continuous) is the active build, with AWS
+  deployment + paper forward-run to follow (see the plan-forward entry above).

@@ -82,13 +82,16 @@ the artifact the **June 16 Track 1 PoC gate** requires (a real, guarded, dust-si
 signed and landed on BSC). This is the unfamiliar, blocking layer; it is built before any
 strategy logic. Owner: `principal-engineer` with `onchain-custody-engineer`.
 
-> **Custody slice — checkpointed procedure: [[TWAK Spike Runbook]]** (2026-06-11). The CLI
-> (`@trustwallet/cli` v0.19.0) is installed and keylessly verified on the dev laptop: `compete`
-> + native `erc8004` commands exist, BSC chain key `bsc`, the OS keychain works on **Windows**
-> (Credential Manager via `@napi-rs/keyring`), and the credential env names are
-> `TWAK_ACCESS_ID`/`TWAK_HMAC_SECRET` (`.env.example` corrected). All secret-bearing steps are
-> USER-ACTION checkpoints in the runbook; guardrail skeleton spec (`risk/` + `execution/`) is
-> in the runbook too.
+> **Status 2026-06-11 — custody half DONE** ([[TWAK Spike Runbook]], steps 0–8 complete):
+> steps 1, 2, 5, 6, 7 below are ✅ — a live guardrail-checked dust trade landed on BSC
+> (tx `0x739bb1…7c96`), `risk/` + `execution/` built (325 tests), registration dry-run done
+> (on-chain deadline reads **June 25**; June 22 stays the working deadline), wallet
+> unification proven on `bsctestnet`, auto-lock re-unlock confirmed. **Remaining:** steps
+> 3–4 (CMC Agent Hub reads incl. x402; BNB SDK runtime probe) — `principal-engineer`.
+> **Plan forward (agreed 2026-06-11):** build the autonomous loop now with EC2 provisioning
+> in parallel; paper-mode forward-run on AWS June 16–21; competition wallet created **on the
+> EC2 box** and registered before June 22; validation ladder paper → mainnet dust
+> ([[Build Log]] plan-forward entry, [[Remote Capabilities]]).
 
 ### Steps
 
@@ -116,12 +119,14 @@ strategy logic. Owner: `principal-engineer` with `onchain-custody-engineer`.
 
 ### Blockers to resolve in Phase 2 (gating)
 
-- **Autonomous self-custody signing** — can the agent sign unattended while custody stays
-  local? ([[Security and Encryption]])
-- **Hosting & keys** — the live week needs an always-on host; design how signing keys live
-  there safely. ([[Remote Capabilities]], [[Security and Encryption]])
-- **On-chain data reach** — is BscScan's funding/transfer/holder data fast and cheap enough
-  for whatever on-chain logic the strategy needs? ([[Real-time Monitoring]])
+- ~~**Autonomous self-custody signing**~~ — **RESOLVED 2026-06-11**: proven live (keychain
+  resolution, guarded dust trade confirmed on BSC). ([[Security and Encryption]])
+- **Hosting & keys** — **DECIDED 2026-06-11**: AWS EC2, systemd + hardened env-file,
+  competition wallet created on the box; build pending. ([[Remote Capabilities]],
+  [[Security and Encryption]])
+- **On-chain data reach** — is the GoPlus + public-RPC + CMC route fast and cheap enough for
+  whatever on-chain logic the strategy needs? (BscScan free tier is ETH-only — see the data
+  caveat above.) ([[Real-time Monitoring]])
 
 ### Done / go-no-go
 
@@ -134,3 +139,8 @@ and CMC + BscScan reads succeed
 
 If this isn't real by **June 16**, switch to Track 2 per the [[Index]] timeline. Backtest
 numbers do **not** satisfy this gate — only the live on-chain loop does.
+
+**2026-06-11: the trade half is met** — tx
+`0x739bb1516c99e56237c7585a449455d90a7f0b027ef9f252a5275b67e4757c96` confirmed on BSC
+through the guardrails. The data-reads half (CMC Agent Hub; on-chain reads via the GoPlus/RPC
+route) is the remaining go/no-go input.

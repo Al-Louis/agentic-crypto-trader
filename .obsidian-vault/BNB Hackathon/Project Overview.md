@@ -85,46 +85,54 @@ of them — which is why strategy choice can stay open while the execution loop 
 
 The genuine unknowns to resolve early — several gate everything downstream:
 
-1. **Autonomous signing while self-custodial (blocker).** Can the agent sign unattended for
-   a full week with custody staying local? Gates the whole hands-off premise. See
-   [[Security and Encryption]].
-2. **Hosting & key management (blocker).** A trade-a-day-for-a-week requirement means the
-   agent must run on a reliable always-on host — which puts self-custody signing keys on a
-   remote box. How are they stored and unlocked there safely? See [[Remote Capabilities]]
-   and [[Security and Encryption]].
+1. ~~**Autonomous signing while self-custodial (blocker).**~~ **RESOLVED 2026-06-11:** proven
+   live — a guardrailed dust trade signed unattended via TWAK (keychain password resolution)
+   and confirmed on BSC. See [[Security and Encryption]] / [[TWAK Spike Runbook]].
+2. **Hosting & key management (decided, build pending).** Live-week host = **AWS EC2** (small
+   Linux instance, systemd, hardened env-file); the competition wallet is created *on the
+   box* so keys never transit. Decided 2026-06-11 after a desktop WSL stall demonstrated the
+   residential-host failure mode. See [[Remote Capabilities]] and [[Security and Encryption]].
 3. **On-chain data reach.** How much wallet/transfer/holder detail is cheaply and quickly
    available via BscScan (and CMC chain stats) for whatever on-chain logic the strategy
-   needs? See [[Real-time Monitoring]].
+   needs? See [[Real-time Monitoring]]. (BscScan free tier is ETH-only — BSC reads route via
+   GoPlus + public RPC; see [[Tech Stack]].)
 4. **x402 path.** What's the minimal genuine pay-per-request use in the loop (data or
    inference) via the Agent Hub MCP?
-5. **Registration mechanics + deadline.** On-chain registration must land before June 22;
-   confirm the exact `twak compete register` flow. Worth probing whether the BNB SDK's
-   ERC-8004 agent identity aligns with the competition's agent-address registration.
+5. ~~**Registration mechanics + deadline.**~~ **RESOLVED 2026-06-11:** `twak compete
+   register/status` confirmed (on-chain deadline reads **June 25**; June 22 stays the working
+   deadline since the scored window starts then). ERC-8004 identity alignment proven on
+   `bsctestnet` — identity, registration, and trading all sign from one TWAK wallet, zero key
+   export. The mainnet mint requires a hosted agent-card `--uri` first.
 6. **Liquidity & slippage.** Many eligible tokens are thin; execution cost assumptions must
-   match real BSC pool depth, not centralized-exchange volume.
+   match real BSC pool depth, not centralized-exchange volume. Note: **BSC testnet has no
+   real DEX liquidity**, so testnet "trading" validates nothing about fills — the validation
+   ladder is paper-on-live-data → mainnet *dust* trades through the guardrails.
 
 ## Build path
 
 A front-loaded sequence — stand up the unfamiliar execution/custody layer first; leave the
 familiar strategy logic for later. Aligned to the [[Index]] timeline:
 
-1. **Stack spike.** Stand up all four surfaces: a real (dust-sized) trade lands on BSC via
-   TWAK; the Agent Hub returns data; BscScan returns wallet/transfer data; the BNB SDK
-   agent runs.
-2. **Execution loop.** Wire read → decide (stub) → sign → execute → confirm in autonomous
-   mode, with the guardrail scaffold and drawdown tracking enforced in code.
-3. **Decision logic.** Implement and validate the chosen strategy against a simulated /
-   recorded-data environment (see [[Simulated Market]]).
-4. **June 16 — Track 1 proof of concept (go/no-go).** The PoC should demonstrate the **live
-   execution loop end to end on-chain** (a real trade signed and landed, guardrails active),
-   not just an offline backtest. If the live loop isn't real by this gate, **switch to
-   Track 2** per the [[Index]] timeline.
-5. **Harden + forward-run.** Enforce the drawdown gate, daily-trade scheduling, and
-   BSC-tuned slippage handling; run forward over live/paper ticks to observe real behavior.
-6. **Register + submit.** On-chain registration before June 22; public repo, demo video,
-   strategy writeup.
-7. **Live window (June 22–28).** Operate hands-off: ≥1 trade/day, stay under the drawdown
-   cap, keep capital deployed.
+1. **Stack spike.** ✅ *Custody half done 2026-06-11* — a real guardrail-checked dust trade
+   landed on BSC via TWAK ([[TWAK Spike Runbook]]). *Remaining:* the Agent Hub returns data;
+   the BNB SDK agent runs (identity already proven via TWAK's native `erc8004`).
+2. **Execution loop.** 🔄 *The active build* — wire read → decide (stub/champion) → sign →
+   execute → confirm in autonomous mode, with the guardrail scaffold (built) and drawdown
+   tracking enforced in code. Paper-run locally first; **EC2 provisioning in parallel**.
+3. **Decision logic.** 🔄 Implement and validate the chosen strategy against a simulated /
+   recorded-data environment (see [[Simulated Market]], [[AI Training]] — RL tuning active).
+4. **June 16 — Track 1 proof of concept (go/no-go).** The on-chain half is met (a real trade
+   signed and landed, guardrails active); the continuous loop is what remains by the gate.
+5. **Harden + forward-run (June 16–21).** Deploy the loop to **AWS EC2 in paper mode** on
+   live data; wire the `trading/` publish + `/apentic/trading` monitoring page with a
+   dead-man heartbeat; validation ladder is **paper → mainnet dust** (testnet trading ruled
+   out — no real liquidity); one dust trade from the production host as the end-to-end smoke.
+6. **Register + submit.** Create the competition wallet **on the EC2 box**, host the agent
+   card, mint the ERC-8004 identity, register **before June 22** (on-chain deadline reads
+   June 25 — don't lean on the slack); public repo, demo video, strategy writeup.
+7. **Live window (June 22–28).** Fund the live bankroll (user-sized); operate hands-off:
+   ≥1 trade/day, stay under the drawdown cap, keep capital deployed. Post-stability:
+   sponsor-tool expansion for special-prize coverage.
 
 ## Reusable prior work
 

@@ -88,10 +88,31 @@ Thresholds that turn the tracker into action; alarms are logged and can gate the
 | **Drawdown alarm** | Drawdown approaches the soft band below the ~30% gate | Warn early; at the stop threshold, `risk/` halts new trades |
 | **Daily-trade-count check** | No qualifying trade yet within the day's window | Flag so the loop schedules the mandatory ≥1/day trade |
 | **Abnormal-transfer alert** | Unexpected inbound/outbound transfer on the agent wallet | Raise immediately — possible key compromise ([[Security and Encryption]]) |
+| **Dead-man heartbeat** | The loop's published heartbeat timestamp goes stale | The frontend renders the bot **stale/offline** — a silent host death (the WSL-stall failure mode) is visible in minutes, not discovered days later |
 | **Price alert** *(optional)* | TWAK `alert` above/below a level on a held/watched token | Feed the decision core as a signal input |
 
 The drawdown alarm is the most important: it must fire with enough margin that the stop
 engages **before** the hard DQ line, not at it.
+
+## The public monitoring surface — `/apentic/trading` (planned 2026-06-11)
+
+The live observability page on the Apentic frontend (`alexlouis-site`), sibling to the
+training leaderboard. The publishing shape (per the agreed AWS plan — [[Remote Capabilities]]):
+
+- **Producer:** the agent loop on the EC2 host publishes its own JSON to the
+  `data.alexlouis.dev` bucket under a **`trading/` prefix**, via a **put-only EC2 instance
+  role** (no laptop in the path; consistent with the no-delete publisher posture —
+  [[Apentic Data Contract]]).
+- **Payloads:** the `portfolio_pnl` series (equity, hourly returns, running drawdown vs the
+  ~30% gate), the trade log (tx hashes, refusals — the guardrail audit trail from
+  `data/risk_ledger.jsonl`), daily trade count vs the ≥1/day floor, and a **heartbeat**
+  (`generated` timestamp the frontend ages against now — the dead-man switch).
+- **Consumer:** `/apentic/trading` renders live equity/drawdown, the trade feed with
+  BscScan links, paper-vs-live divergence once both modes run, and the staleness indicator.
+- **Modes:** the same contract serves paper mode (June 16–21 forward-run) and the live
+  window — a `mode` field distinguishes them so the page can show both.
+
+Exact schema lands in [[Apentic Data Contract]] when the loop's publisher is built.
 
 ## Closing the execution loop
 

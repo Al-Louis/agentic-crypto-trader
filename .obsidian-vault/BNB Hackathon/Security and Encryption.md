@@ -197,11 +197,22 @@ candidates and their key stories:
 
 Custody integrity is identical in all options — `wallet.json` + password on the box we
 control, keys never third-party. The decision axis is *password-at-rest vs. unattended-reboot
-recovery*, plus uptime. **Recommended shape:** a small Linux host running the loop as a
-systemd unit with the env-file pattern (hardened: dedicated user, `ProtectHome`, no
-world-readable paths), manual-unlock Secret Service as the stretch goal; the laptop is the
-fallback if VPS setup threatens the timeline. Decide after the spike proves the loop;
-provisioning steps live in [[Remote Capabilities]] when scheduled.
+recovery*, plus uptime.
+
+**DECIDED 2026-06-11: AWS EC2** (small Linux instance) — the recommended systemd + hardened
+env-file shape (dedicated user, `ProtectHome`, root-owned `0600` `EnvironmentFile`, no
+world-readable paths), chosen after the training desktop's WSL VM died silently mid-sweep
+(the residential-host failure mode in person) and because the AWS account already hosts the
+frontend data plane (`data.alexlouis.dev`), letting the bot publish its own monitoring JSON
+via a put-only instance role ([[Real-time Monitoring]]). Custody rules for the build:
+
+- **The competition wallet is created ON the EC2 box** (`twak setup --wallet` there) — keys
+  are born where signing happens and never transit. The spike wallet stays a laptop
+  throwaway.
+- Wallet holds only the live-week bankroll; the password lives only in the env-file (and the
+  user's password manager); the mnemonic backup is offline, never cloud-synced.
+- The laptop (Credential Manager, proven) remains the fallback host if EC2 setup threatens
+  the timeline. Provisioning steps live in [[Remote Capabilities]].
 
 **`twak serve --watch` vs. our own loop — resolved (design).** TWAK's watcher executes only
 its own DCA/limit *automations* — it cannot run our decision core. So the agent runs **our
@@ -234,9 +245,10 @@ exactly the key-on-remote-box question owned by [[Remote Capabilities]].
 
 *(updated 2026-06-11 after the keyless CLI verification — see [[TWAK Spike Runbook]])*
 
-- **Live-week host pick.** Design done (§always-on host design): Linux VPS env-file pattern
-  vs. always-on laptop with Credential Manager. Decide after the spike proves the loop;
-  provisioning in [[Remote Capabilities]].
+- **EC2 provisioning + key ceremony.** The host is decided (AWS EC2 — §always-on host
+  design); what remains is the build: instance hardening, the systemd env-file setup, the
+  on-box competition-wallet creation ceremony (user-run, secrets protocol as in
+  [[TWAK Spike Runbook]]), and the agent-card URI hosted before the mainnet identity mint.
 - **x402 on BSC.** Confirm the live BSC x402 routes (USDC/USDT) and whether our data/inference
   spend uses the TWAK native path or the BNB SDK `X402Signer`. (`twak x402 quote` is read-only
   and needs no wallet — cheap to probe once credentials exist.)
