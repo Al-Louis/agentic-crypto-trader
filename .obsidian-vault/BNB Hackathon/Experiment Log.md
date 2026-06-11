@@ -787,6 +787,36 @@ rising are both already in the agent's obs (surge slot + harvest r24). Decided: 
 the Q-class protection is a substrate guardrail on the override — a **disaster floor** (a position
 below entry−20% cannot be overridden; forced cut), closing the one remaining unbounded loss path.
 
+## Standings — rd8h0c1 (`ppo-event-rd8h0c1-d4b155e`, crash_train 1 + loss-floor 0.2, 4×1M)
+
+| seed | val | test | crash | trades |
+|------|-----|------|-------|--------|
+| s0 | +5.6% (DD 12.7%) | +30.9% (DD 7.9%) | +17.2% (DD 11.4%) | 40 |
+| s1 | −2.3% (DD 9.9%) | +4.8% (DD 9.1%) | +7.9% (DD 12.8%) | 42 |
+| s2 | **+15.2% (DD 6.7%)** | +8.2% (DD 15.0%) | +6.6% (DD 13.6%) | 28 |
+| s3 | +0.2% (DD 9.5%) | +2.0% (DD 14.8%) | +9.9% (DD 8.3%) | 34 |
+| **mean** | **+4.7%** | +11.5% | +10.4%, 4/4 survive | |
+| bars | rule −0.6% / B&H +17.1% | rule +89.3% / B&H +58.6% | rule +62–64% | |
+
+### Verdict — FIRST POSITIVE VAL in the project; the floor+crash-prior fix traded tails for safety
+- **val seed-mean +4.7% — positive for the first time across the entire arc** (every config since
+  GATE-1: −5..−9%). All 4 seeds beat the rule on val; s2 +15.2% at 6.7% DD came within 2pts of
+  Buy&Hold. The crash-prior cut (4→1) + the disaster floor removed the Q-class bleed (s1-style
+  −20% val is gone). The defensive-everywhere era appears OVER on val.
+- **But test/crash regressed** (test +27.9%→+11.5%, crash +24.8%→+10.4%): the loss floor force-cuts
+  −20% dips that V-recover in this universe (monster runners routinely draw down 20%+ mid-run), and
+  4-seed noise is large. The levers now trade one regime against another — the cheap single-flag
+  iteration space is showing diminishing returns.
+- **Risk profile is now exceptional:** worst DD anywhere across 12 seed-regimes = 15.0%; every cell
+  positive except one (s1 val −2.3%). As a DQ-gated competition profile this is genuinely strong.
+- **Still FAIL everywhere** vs the honest gate — on prepad windows the rung-0 rule is a monster
+  (test +89.3%, crash +62%), and 6 sweeps of substrate/reward/obs surgery have not produced the
+  per-decision discrimination needed to match it. **Deployment-leader fact (plainly): rung-0 + caps
+  + floor currently beats every learned policy on these windows — RL has not yet added value over
+  the rule it rides.** Remaining untried standard lever: **training scale** (all sweeps today were
+  1M steps; TradeSim's converged config was ~5M) — one 4×5M run (~100 min) is the last cheap test
+  before concluding the discrimination isn't learnable on this obs set.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
