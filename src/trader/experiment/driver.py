@@ -109,8 +109,12 @@ def real_deps() -> dict[str, Callable[..., Any]]:
         return regime_verdict(stamped, seeds)
 
     def record() -> dict:
+        # publish=True: every verdict pushes leaderboard.json to the data host (laptop-side
+        # creds), so the frontend never trails the loop. The caller treats record as
+        # best-effort — a publish failure (offline/creds) notes record_error, never blocks;
+        # the local ledger files are written before the publish step inside experiment_record.
         from trader.mcp_server.server import experiment_record
-        return experiment_record(sha_only=True)
+        return experiment_record(sha_only=True, publish=True)
 
     return {"launch": launch, "poll": poll, "verdict": verdict, "record": record}
 
