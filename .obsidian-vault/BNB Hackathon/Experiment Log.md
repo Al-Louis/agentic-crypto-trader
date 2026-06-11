@@ -817,6 +817,19 @@ below entry−20% cannot be overridden; forced cut), closing the one remaining u
   1M steps; TradeSim's converged config was ~5M) — one 4×5M run (~100 min) is the last cheap test
   before concluding the discrimination isn't learnable on this obs set.
 
+### The detonation blacklist (2026-06-11, `probe_detonation.py` → built @ `84ee6a0`) + rd9 overnight
+User 2nd Q observation: all 4 rd8h0c1 seeds skipped Q's spikes but ALL FOUR bought the Apr 22–23
+post-detonation chop (entries 0.0113–0.0115, exits 0.0086–0.0099, ~−$600–800 each ≈ 6–8% of equity
+per seed — s2's val would have been ~+21%). Proposal: after extreme untradeable volatility, ignore
+the token. **Probe (population, both splits): post-detonation ignitions are robustly toxic —
+det-2–4wk bucket fwd48 −8.4% train (win 10%) / −24.3% val (win 8%), n=121 — and the poison EXPIRES
+(>4wk ≈ clean baseline).** Built `det_blacklist`: detonation = surge≥8× while rising≤−15% → the
+token's ignitions zeroed for 672 bars (4wk, probe-calibrated). Applied in the env's ignite
+precompute, so agent prompts AND the rule mirror share it (parity); the canonical rung-0 gate bar
+stays unfiltered (honest). 265 tests. **rd9 = rd8h0c1 + det-blacklist, swept overnight at 5M steps**
+(the last standard lever — every prior sweep was 1M; TradeSim converged ~5M):
+`ppo-event-rd9-84ee6a0-s{0..3}`.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
