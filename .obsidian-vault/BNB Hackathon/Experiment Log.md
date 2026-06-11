@@ -869,6 +869,28 @@ per-token — no general-logic impact possible). **Verdict checklist (behavioral
 (1) bleed-churn re-entries down? (2) winners held longer / TP rungs used at tops? (3) SIREN Mar 22
 participation? (4) cross-seed coherence up?** Sweep: `ppo-event-rdL-a27e469-s{0..3}`, 4×1M, val.
 
+## Standings — rdL (`ppo-event-rdL-a27e469`, RecurrentPPO LSTM-256 on the rd9 config @1M, 4×~37min)
+*The first sweep verdicted BY THE LOOP DRIVER (loop iteration 1; auto-verdict + ledger + decision).*
+
+| seed | val | test | crash |
+|------|-----|------|-------|
+| s0 | −0.3% (DD 11%) | −11.3% (DD 16%) | −14.6% (DD 19%) |
+| s1 | −17.8% (DD 25%) | +2.1% (DD 9%) | +7.3% (DD 6%) |
+| s2 | +2.4% (DD 14%) | −3.0% (DD 13%) | +6.8% (DD 6%) |
+| s3 | −2.3% (DD 10%) | −2.5% (DD 10%) | +1.2% (DD 6%) |
+| **mean** | **−4.5%** | **−3.7%** | **+0.2%, 4/4 survive** |
+
+**Verdict: FAIL (binding val:Buy&Hold); the first LSTM run is MUTED, not broken.** Worse than
+rd8h0c1@1M (val +4.7%) on every mean — the classic first-recurrent-run profile (the rd9 lesson
+says our ent/lr anneal collapses exploration; an LSTM amplifies that). All seeds DQ-safe (worst
+24.9%); active (36–45 trades). s1's −17.8% val includes the known Q one-bar hole (bought Mar 28
+00:00 @0.0137, floor could only fire at the next close 0.0065 — the exact case that motivated the
+intrabar fix). **Loop decision: continue (no drift alarm — margin tracking from this baseline).
+Next iteration already queued: `rdLq` @ `c07bda0` = rdL + intrabar resting-stop floor +
+wick_reject 0.30 (the Q-tail bundle).** Behavioral checklist (bleed re-entries, hold duration,
+SIREN Mar 22, seed coherence) deferred to the rdLq forensics — judging memory on a sweep that
+includes the un-bounded Q hole would conflate the two.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
