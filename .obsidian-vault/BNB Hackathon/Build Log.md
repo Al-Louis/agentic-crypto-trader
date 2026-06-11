@@ -759,12 +759,67 @@ Discussed and locked the path to the live window (user decision; rationale in
   (4) post-stability: sponsor-tool expansion for special-prize coverage (CMC reads are NOT
   deferred — they're the loop's data feed and the other half of the Phase-2 gate).
 
+## 2026-06-11 (cont.) — Phase 2 data half + the autonomous loop in paper mode
+
+Owner: `principal-engineer`. The remaining half of the Phase-2 gate (CMC reads) **proven**, and
+the autonomous loop built end-to-end in paper mode. Tests 325 → **343** (full suite green).
+
+**CMC reads proven (step 3).** Live `quotes/latest` works on the project key: **all 147 ASCII
+eligible symbols resolve a USD price in one batched call at 1 credit**, 150k monthly credit
+budget (≈720 hourly calls/month — vast headroom). Tier is generous, no rate gate hit. New client
+`trader.data.cmc_market` (`fetch_quotes → {SYMBOL: Quote}`, stdlib urllib, no new deps).
+- **Bug found + fixed:** the symbol→records collision (`"BNB"` returns 4 records — real BNB rank-4
+  *plus* BNB AI / BNBTiger / an inactive null-price BeanBox). A blind `recs[0]` silently dropped
+  BNB's price. `parse_quotes` now picks the **canonical** record (active, best `cmc_rank`, valid
+  price) — mirrors `cmc.pick_canonical`. A symbol with no priced record is **omitted, never zeroed**
+  (the loop reads absence as "no observation").
+- **Agent Hub vs plain REST (recon):** same quote data via Pro REST (used), the CMC Go CLI (wraps
+  REST), or the Agent Hub MCP (adds **x402** pay-per-call). Loop uses **plain Pro REST** — lowest
+  dependency, no MCP runtime, key already covers the universe free. **x402 is recon-only** this
+  engagement; it's the fallback only if a future need exceeds the credit tier. **Fallback if CMC
+  ever tier-gates the loop:** the proven keyless GeckoTerminal/DexScreener route — a new `PriceFeed`,
+  nothing in the loop changes. The loop needs A feed, not a vendor.
+
+**The autonomous loop `src/trader/agent/` (paper mode, first-class).** read → decide → execute →
+confirm → monitor, as a long-running process (`python -m trader.agent`):
+- **`decide()` behind a clean interface** — `DecisionCore` protocol (`decide(Observation) ->
+  list[Intent]`, pure: no I/O, no signing, no clock). Shipped stub `HoldCore` (always holds) so the
+  loop runs *now*; the RL champion plugs in via the same two methods — `loop.py` unchanged. **No
+  strategy is baked into the loop.**
+- **Paper mode is a real simulator, not a mock** — every tick: real CMC read, `decide()`, fills via
+  the **same AMM cost model the backtest uses** (`sim.broker.amm_cost_usd`: LP fee + constant-product
+  impact + gas), equity/PnL/drawdown marked per tick (scoring mirror), rows persisted. Paper spend
+  **debits the same `risk/` caps** the live run will, so a forward-run respects the real budget.
+- **Live routes through `execute_trade` and nothing else** — wired but **double-gated**: `mode` must
+  be the exact string `"live"` *and* env `AGENT_ALLOW_LIVE=1`; anything else fails closed to paper.
+  The loop never signs anything itself. **No live trade executed this engagement.**
+- **Crash-safe** — on construction the loop re-derives its full portfolio (positions, peak, tick
+  pointer) from `agent_ledger.jsonl` via `store.derive_state`; nothing lives only in memory. A
+  malformed ledger **refuses to start** (fail closed). Verified: a fresh `Loop` recovers identical
+  state to a pre-crash snapshot.
+- **Heartbeat** row every tick (dead-man input for `/apentic/trading`). Clean SIGINT/SIGTERM
+  shutdown finishes the current tick then returns.
+- **Tests (18 new):** deterministic tick (fake feed + stub core), paper-fill accounting vs the cost
+  model, cap-debit, out-of-policy refusal (not obeyed), restart recovery, malformed-ledger refusal,
+  live-mode-requires-flag (config + `__main__`), live routes-only-through-`execute_trade`, dust mark.
+
+**Provisional / next:** (a) the `trading/` publisher (EC2 → `data.alexlouis.dev`) is **not** built —
+shapes drafted in [[Apentic Data Contract]] §trading/ but the put-only role + serializer is
+`onchain-custody-engineer`/infra + a follow-up here. (b) Paper-fill **liquidity is a conservative
+$250k default** (the read step has no per-token pool-depth feed yet) — wire DexScreener `liq_usd` per
+held token for honest impact when the strategy trades thin tokens. (c) **BNB SDK runtime probe (step
+4) skipped — still OPEN** (optional this engagement). (d) Equity valuation uses CMC prices; the
+TWAK-portfolio-vs-CMC pricing authority question ([[Real-time Monitoring]] open Qs) stays open until
+live.
+
 ## Phase status (vs [[Project Overview]] build path)
 
 - ✅ **Phase 1** — Foundation.
-- ✅ **Phase 2 (custody half)** — TWAK spike complete: guardrailed dust trade confirmed
-  on BSC (tx `0x739bb1…7c96`), unification proven, registration recon done
-  ([[TWAK Spike Runbook]]). **Remaining half:** CMC Agent Hub reads + BNB SDK runtime probe.
+- ✅ **Phase 2** — TWAK spike (custody half) + **data half DONE**: guardrailed dust trade confirmed
+  on BSC (tx `0x739bb1…7c96`), unification proven, registration recon done ([[TWAK Spike Runbook]]);
+  **CMC live reads proven** (full eligible universe, 1 credit/tick) and the **autonomous loop built
+  in paper mode** (read→decide→execute→confirm→monitor, crash-safe, live double-gated). **Only open
+  item:** BNB SDK runtime probe (step 4, optional).
 - 🔄 **Phase 3/4** — Decision logic + offline validation: the rung-1b rd substrate is built and
   structurally DQ-safe (caps, loss floor, blacklist, no-ratchet — worst seed 26.9% DD with zero
   reward brake); honest per-regime gates in code; **RL tuning is the active work** (RecurrentPPO

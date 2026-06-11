@@ -124,3 +124,29 @@ Differs from the run bundles above in producer and cadence:
   `generated` **heartbeat** the frontend ages for the dead-man indicator.
 - A `mode: "paper" | "live"` field distinguishes the June 16–21 forward-run from the scored
   window. Exact file shapes land here when the loop's publisher is built.
+- **Freshness: a CloudFront cache behavior on `trading/*` (managed CachingDisabled), NOT
+  invalidations** — `CreateInvalidation` can't be path-scoped and would bloat the put-only
+  instance role; the run-bundle invalidate-on-publish pattern does not apply to this prefix
+  ([[EC2 Trading Host Runbook]] Phase F).
+
+### As-built source rows (2026-06-11) — the loop's ledger the publisher will project
+
+The loop (`trader.agent`) already emits the raw telemetry; the EC2 publisher (NOT yet built)
+projects these append-only rows from `data/agent_ledger.jsonl` (`trader.agent.store`) into the
+static `trading/` JSON. Row kinds (every row carries a UTC `ts` and `mode`):
+
+```
+{ kind:"fill",      mode, from, to, usd_in, usd_out, cost_usd,
+                    units_from, units_to, price_from, price_to, reason, tx_hash? }  // tx_hash live only
+{ kind:"equity",    mode, tick, equity_usd, peak_usd, drawdown_pct, below_dust }    // hourly PnL mark
+{ kind:"heartbeat", mode, tick, equity_usd }                                        // dead-man input
+{ kind:"refusal",   mode, intent:{from,to,usd}, refusals:[CODE,…] }                 // guardrail audit
+```
+
+Provisional projection into the published shapes (refine when the publisher lands):
+- **equity/drawdown series** ← `equity` rows; **trade feed** ← `fill` rows (tx → BscScan in live)
+  + `refusal` rows; **daily trade count** ← `fill` rows per UTC day vs the ≥1/day floor;
+  **heartbeat** ← newest `heartbeat`/`equity` `ts`.
+- **Convention note:** the loop emits `drawdown_pct` as a **percent** (e.g. `4.2` = 4.2%), unlike
+  the run-bundle `*_pct` **fractions** — the publisher normalizes to the contract's fraction
+  convention before writing `trading/` JSON.

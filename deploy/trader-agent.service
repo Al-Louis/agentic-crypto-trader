@@ -1,0 +1,59 @@
+# trader-agent.service — the live agent loop on the EC2 trading host.
+# Install: sudo install -m 0644 deploy/trader-agent.service /etc/systemd/system/trader-agent.service
+# Then:    sudo systemctl daemon-reload && sudo systemctl enable --now trader-agent
+#
+# Design notes (vault: "Security and Encryption" / "EC2 Trading Host Runbook"):
+# - EnvironmentFile is root:root 0600; pid 1 injects it. The trader user cannot read
+#   the file at rest; the secret exists only in the service process's environment.
+# - Restart=always is SAFE: the risk ledger (data/risk_ledger.jsonl) persists caps and
+#   the loop re-reads on-chain state as truth on boot — a restart cannot double-spend.
+# - The execution wrapper (trader.execution.twak_cli) never logs argv/env, so journald
+#   stays secret-free by construction. The unit itself contains no secrets.
+
+[Unit]
+Description=Apentic trading agent loop (read -> decide -> sign -> confirm)
+After=network-online.target
+Wants=network-online.target
+# Don't crash-loop forever; a held-down service is caught by the dead-man heartbeat.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/srv/trader/agentic-crypto-trader
+EnvironmentFile=/etc/trader/trader.env
+Environment=HOME=/srv/trader
+# Entry point owned by principal-engineer (the loop build) — adjust if the module moves.
+ExecStart=/srv/trader/venv/bin/python -m trader.agent
+Restart=always
+RestartSec=15
+# Let an in-flight sign/confirm finish; the loop should trap SIGTERM and exit cleanly.
+TimeoutStopSec=90
+
+# --- sandbox / hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+# trader's home is /srv/trader (NOT under /home), so ProtectHome=yes still allows it.
+ProtectHome=yes
+ReadWritePaths=/srv/trader
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+# Node's JIT (the twak CLI subprocess) needs W+X pages — must stay off.
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target

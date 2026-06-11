@@ -212,7 +212,9 @@ via a put-only instance role ([[Real-time Monitoring]]). Custody rules for the b
 - Wallet holds only the live-week bankroll; the password lives only in the env-file (and the
   user's password manager); the mnemonic backup is offline, never cloud-synced.
 - The laptop (Credential Manager, proven) remains the fallback host if EC2 setup threatens
-  the timeline. Provisioning steps live in [[Remote Capabilities]].
+  the timeline. **The checkpointed provisioning + key-ceremony procedure is
+  [[EC2 Trading Host Runbook]]** (templates in `deploy/`); the hosting decision rationale
+  stays in [[Remote Capabilities]].
 
 **`twak serve --watch` vs. our own loop — resolved (design).** TWAK's watcher executes only
 its own DCA/limit *automations* — it cannot run our decision core. So the agent runs **our
@@ -245,10 +247,14 @@ exactly the key-on-remote-box question owned by [[Remote Capabilities]].
 
 *(updated 2026-06-11 after the keyless CLI verification — see [[TWAK Spike Runbook]])*
 
-- **EC2 provisioning + key ceremony.** The host is decided (AWS EC2 — §always-on host
-  design); what remains is the build: instance hardening, the systemd env-file setup, the
-  on-box competition-wallet creation ceremony (user-run, secrets protocol as in
-  [[TWAK Spike Runbook]]), and the agent-card URI hosted before the mainnet identity mint.
+- **EC2 provisioning + key ceremony — runbook WRITTEN 2026-06-11, execution pending.**
+  The full checkpointed procedure (instance + hardening + systemd env-file + on-box wallet
+  ceremony + agent-card/identity/registration ordering + teardown) is
+  [[EC2 Trading Host Runbook]] with templates in `deploy/`. Headless-keychain question
+  answered there: no Secret Service on a server, so the root-owned `0600` env-file IS the
+  unlock path (option (b) above); the flagged residual is that the AWS control plane joins
+  the trust base (snapshots read the volume; guardrails don't protect *stolen* keys — only
+  bankroll sizing does). Remaining: the user executes it.
 - **x402 on BSC.** Confirm the live BSC x402 routes (USDC/USDT) and whether our data/inference
   spend uses the TWAK native path or the BNB SDK `X402Signer`. (`twak x402 quote` is read-only
   and needs no wallet — cheap to probe once credentials exist.)

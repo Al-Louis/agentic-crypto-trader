@@ -65,6 +65,9 @@ RPC latency and any data-residency constraints.
 > on the box**; the laptop is the fallback host if provisioning threatens the timeline.
 > Target sequence: provision in parallel with the loop build (→ June 16), paper-mode
 > forward-run June 16–21, registered and live-ready before June 22.
+> **The checkpointed build procedure is [[EC2 Trading Host Runbook]]** (instance spec,
+> hardening, systemd, key ceremony, registration ordering, live-week ops, teardown —
+> templates in `deploy/`).
 
 ## Deploying the runtime
 

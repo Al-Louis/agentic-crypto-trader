@@ -1,0 +1,36 @@
+{
+  "name": "Apentic Trader",
+  "description": "Autonomous self-custody trading agent on BNB Chain (BNB AI Hackathon, AI Trading Agent Edition, Track 1). Reads market and on-chain data, decides, and signs its own transactions locally via Trust Wallet Agent Kit inside hard code-level guardrails (token allowlist, per-trade/daily caps, slippage bound, drawdown stop).",
+  "version": "1.0.0",
+  "url": "https://data.alexlouis.dev/trading/agent-card.json",
+  "homepage": "https://alexlouis.dev/apentic/trading",
+  "address": "<AGENT_WALLET_ADDRESS>",
+  "chain": "bsc",
+  "chainId": 56,
+  "endpoints": [
+    {
+      "name": "monitoring",
+      "protocol": "web",
+      "endpoint": "https://alexlouis.dev/apentic/trading"
+    },
+    {
+      "name": "telemetry",
+      "protocol": "web",
+      "endpoint": "https://data.alexlouis.dev/trading/"
+    }
+  ],
+  "registrations": [
+    {
+      "agentId": "<ERC8004_AGENT_ID_FILL_AFTER_MINT>",
+      "agentAddress": "<AGENT_WALLET_ADDRESS>",
+      "registry": "erc-8004",
+      "chainId": 56
+    }
+  ],
+  "skills": [
+    "autonomous-trading",
+    "self-custody-signing",
+    "onchain-monitoring",
+    "risk-guardrails"
+  ]
+}

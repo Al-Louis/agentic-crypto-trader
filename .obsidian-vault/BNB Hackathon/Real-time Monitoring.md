@@ -114,6 +114,28 @@ training leaderboard. The publishing shape (per the agreed AWS plan — [[Remote
 
 Exact schema lands in [[Apentic Data Contract]] when the loop's publisher is built.
 
+## As built — the loop's monitoring (2026-06-11, paper mode)
+
+The autonomous loop (`trader.agent`, [[Build Log]] 2026-06-11) implements the
+monitor stage against an **append-only agent ledger** (`data/agent_ledger.jsonl`, sibling to
+the `risk/` ledger — `trader.agent.store`). Every tick writes, in order:
+
+- a **`fill`** row per executed trade (paper: AMM-cost fill against the live read; live: the
+  `execute_trade` outcome + tx hash) — the portfolio book replays from these on restart;
+- an **`equity`** row — `equity_usd`, running `peak_usd`, `drawdown_pct = (peak−equity)/peak`,
+  and a `below_dust` flag when equity ≤ $1 (the scoring 0%-hour mechanic, surfaced not
+  averaged). This row also writes the equity mark to the **risk ledger** so the `risk/`
+  drawdown stop reads the **same figure** the monitor computes — one drawdown number, two
+  consumers;
+- a **`heartbeat`** row — the dead-man timestamp the `/apentic/trading` page ages.
+
+**Pricing authority (as built):** equity is valued from **CMC live prices** (the loop's read
+feed), not yet TWAK `wallet portfolio`. The "which pricing is authoritative" open question
+below stays open — paper mode has no wallet to read; it resolves when live runs and the two
+can be cross-checked. **Crash-safety:** positions, peak and the tick pointer all re-derive from
+disk (`store.derive_state`); a malformed ledger refuses to start (fail closed). Paper spend
+debits the **same daily/lifetime caps** the live run will, so the forward-run is budget-honest.
+
 ## Closing the execution loop
 
 Monitoring is the final stage of the [[Project Overview|event-driven loop]]

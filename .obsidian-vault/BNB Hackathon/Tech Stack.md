@@ -25,14 +25,16 @@ agentic-crypto-trader/
 ├── src/trader/
 │   ├── config.py        # ✅ .env loader (CMC key, etc.)
 │   ├── data/            # ✅ universe + OHLCV: dexscreener · geckoterminal (OHLCV) ·
-│   │                    #    cmc (contract resolution) · goplus (rug gate) · eligible ·
-│   │                    #    select · downloader (resumable Parquet) · anchor (ccxt BTC/BNB)
+│   │                    #    cmc (contract resolution) · cmc_market (LIVE quotes — loop read) ·
+│   │                    #    goplus (rug gate) · eligible · select · downloader · anchor
 │   ├── features/        # ✅ indicators (71-col + leakage guard) · factor (BTC/BNB residual)
 │   ├── sim/             # ✅ metrics · broker (AMM cost) · backtest · strategies · resample · ic
 │   ├── execution/       # ⬜ stub — TWAK self-custody signing + BSC submission (Phase 2)
 │   ├── strategy/        # ⬜ stub — the validated candidate lands here (vol-tilt + regime overlay)
 │   ├── risk/            # ⬜ stub — guardrails: allowlist, caps, slippage, drawdown stop
-│   ├── agent/           # ⬜ stub — read→decide→sign→confirm loop
+│   ├── agent/           # ✅ autonomous loop: loop · decide (DecisionCore+HoldCore) ·
+│   │                    #    feed (CmcPriceFeed/FakeFeed) · paper (AMM-cost fills) · store
+│   │                    #    (crash-safe ledger) · __main__ (paper default, live double-gated)
 │   ├── monitoring/      # ⬜ stub — wallet/tx watching + PnL
 │   └── mcp_server/      # 🟡 skeleton — health + eligible_tokens stub (catalog in [[MCP Server]])
 ├── scripts/             # research CLIs: screen · resolve · select · forensics ·
@@ -82,12 +84,17 @@ the artifact the **June 16 Track 1 PoC gate** requires (a real, guarded, dust-si
 signed and landed on BSC). This is the unfamiliar, blocking layer; it is built before any
 strategy logic. Owner: `principal-engineer` with `onchain-custody-engineer`.
 
-> **Status 2026-06-11 — custody half DONE** ([[TWAK Spike Runbook]], steps 0–8 complete):
-> steps 1, 2, 5, 6, 7 below are ✅ — a live guardrail-checked dust trade landed on BSC
-> (tx `0x739bb1…7c96`), `risk/` + `execution/` built (325 tests), registration dry-run done
+> **Status 2026-06-11 — custody half + data half DONE** ([[TWAK Spike Runbook]], steps 0–8;
+> [[Build Log]] 2026-06-11 loop entry): steps 1, 2, 3, 5, 6, 7 below are ✅. A live
+> guardrail-checked dust trade landed on BSC (tx `0x739bb1…7c96`), `risk/` + `execution/` +
+> **`agent/` (the autonomous loop)** built (**343 tests**), registration dry-run done
 > (on-chain deadline reads **June 25**; June 22 stays the working deadline), wallet
-> unification proven on `bsctestnet`, auto-lock re-unlock confirmed. **Remaining:** steps
-> 3–4 (CMC Agent Hub reads incl. x402; BNB SDK runtime probe) — `principal-engineer`.
+> unification proven on `bsctestnet`, auto-lock re-unlock confirmed, and **CMC live reads
+> proven** (full 147-symbol eligible universe in one batched `quotes/latest` call, 1 credit,
+> 150k/mo budget — `trader.data.cmc_market`). **Remaining:** step 4 only (BNB SDK runtime
+> probe — OPTIONAL). The autonomous loop runs end-to-end in **paper mode** (read→decide(stub)
+> →paper-fill→persisted PnL/heartbeat), with live double-gated behind `mode="live"` +
+> `AGENT_ALLOW_LIVE=1`.
 > **Plan forward (agreed 2026-06-11):** build the autonomous loop now with EC2 provisioning
 > in parallel; paper-mode forward-run on AWS June 16–21; competition wallet created **on the
 > EC2 box** and registered before June 22; validation ladder paper → mainnet dust
@@ -100,11 +107,16 @@ strategy logic. Owner: `principal-engineer` with `onchain-custody-engineer`.
    create/import the agent wallet (custody local).
 2. **TWAK signs.** Confirm `twak` CLI/MCP can sign and submit a trivial BSC transaction with
    local self-custody keys. *(Resolves blocker: autonomous self-custody signing.)*
-3. **Data reads.** CMC Agent Hub MCP returns market data (with an x402 pay-per-request in the
-   path); BscScan returns wallet/transfer data for an address. *(Resolves blocker: on-chain
-   data reach.)*
-4. **BNB SDK runs.** A minimal BNB AI Agent SDK agent initializes; probe whether its ERC-8004
-   identity aligns with the competition's agent-address registration.
+3. ✅ **Data reads.** **DONE 2026-06-11** — CMC `quotes/latest` returns live USD prices for the
+   **whole eligible universe in one batched call (1 credit)**; the loop's read step uses **plain
+   CMC Pro REST** (`trader.data.cmc_market`), not the Agent Hub MCP. **x402 is recon-only** — the
+   same data is reachable via the Agent Hub MCP with x402 pay-per-call, kept as the fallback only
+   if a future need exceeds the credit tier; no payment path is wired. Keyless GeckoTerminal/
+   DexScreener stays the vendor-independent fallback feed. BscScan wallet/transfer reads remain
+   for monitoring (Phase 3). *(Resolves blocker: on-chain data reach.)*
+4. ⬜ **BNB SDK runs (OPEN, optional).** A minimal BNB AI Agent SDK agent initializes; probe whether
+   its ERC-8004 identity aligns with the competition's agent-address registration. **Not yet done** —
+   identity ≠ execution, so it doesn't gate the loop; deferred.
 5. **Guardrails first.** Implement the `risk/` limits (allowlist, per-trade/daily caps,
    slippage, drawdown stop) and wire them around the signing call **before** any live trade.
 6. **Dust trade.** `execute_trade` signs via TWAK and lands a real, tiny, guardrail-checked
