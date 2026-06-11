@@ -132,6 +132,28 @@
       "random": 0.04090876668121305,
       "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 1000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.5 --seed <0|1|2>",
       "legal_mean": true
+    },
+    "ppo-event-rd9-84ee6a0": {
+      "n": 4,
+      "seeds": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "mean_return": -0.0073061361458786915,
+      "mean_maxdd": 0.06524435574199516,
+      "mean_sharpe": -0.12193291538199366,
+      "mean_pf": 0.4980586380987842,
+      "worst_maxdd": 0.07730407086286498,
+      "timesteps": 5000000,
+      "git": "84ee6a0",
+      "split": "val",
+      "baseline": -0.00576669244277439,
+      "buyhold": 0.17066161060014418,
+      "random": -0.029642234486692936,
+      "reproduce": "python scripts/train_rl.py --action-mode discrete --reward-mode relative --eval-split val --timesteps 5000000 --n-envs 8 --gb-lambda None --turn-lambda None --realized-lambda None --dd-lambda 0.0 --seed <0|1|2>",
+      "legal_mean": true
     }
   },
   "dd_gate": 0.3

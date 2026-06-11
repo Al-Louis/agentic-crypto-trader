@@ -830,6 +830,28 @@ stays unfiltered (honest). 265 tests. **rd9 = rd8h0c1 + det-blacklist, swept ove
 (the last standard lever — every prior sweep was 1M; TradeSim converged ~5M):
 `ppo-event-rd9-84ee6a0-s{0..3}`.
 
+## Standings — rd9 (`ppo-event-rd9-84ee6a0`, rd8h0c1 + det-blacklist, **5M steps**, overnight 2026-06-11)
+
+| seed | val | test | crash | trades |
+|------|-----|------|-------|--------|
+| s0 | +2.9% (DD 5.8%) | +10.4% (DD 11.9%) | −14.4% (DD 28.6%) | 34 |
+| s1 | +0.6% (DD 5.4%) | −1.3% (DD 18.9%) | −3.4% (DD 20.6%) | 40 |
+| s2 | −5.5% (DD 7.7%) | −1.3% (DD 11.4%) | −3.7% (DD 13.6%) | 39 |
+| s3 | −0.9% (DD 7.2%) | +0.2% (DD 14.1%) | −9.1% (DD 22.1%) | 36 |
+| **mean** | **−0.7%** | **+2.0%** | **−7.7%** | |
+
+### Verdict — REGRESSION vs rd8h0c1@1M (val +4.7→−0.7, test +11.5→+2.0, crash +10.4→−7.7)
+5× training + the det-blacklist made everything worse, despite the blacklist removing the Q chop
+that cost rd8h0c1 ~6–8pp/seed — so the 5M convergence itself is strongly implicated: low-variance,
+low-return, near-flat policies (val DDs 5–8%, returns ±3%) — converged to rule-hugging mediocrity,
+not discrimination. (Two variables confounded — blacklist alone at 1M was not run — but neither
+direction rescued it.) **The scale lever was the last standard one; it failed. Conclusion of the
+phase: rd8h0c1@1M stands as the best learned config (val +4.7%, all-positive ex one seed, worst DD
+15%); the DEPLOYMENT LEADER remains rung-0 on this substrate (caps + floor + blacklist); the
+stable-baseline goal for the automation loop is met. Next: the MCP iteration loop + Phase 2 (June
+16 live TWAK trade) — further RL levers (discrimination obs, recurrence) run through the automated
+loop, not hand-driven sessions.**
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
