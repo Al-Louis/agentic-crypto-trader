@@ -193,7 +193,17 @@ address. One `~/.twak` store covers trading + registration + identity, zero key 
 Gotcha: `--uri` is **required** on `erc8004 register` — prepare the agent-card URI before the
 mainnet mint on the competition wallet.
 
-### Step 8 — `--auto-lock` empirical check (agent, free)
+### Step 8 — `--auto-lock` empirical check (agent, free) — **DONE 2026-06-11**
+
+**Done:** ran `twak serve --auto-lock 1` for >2 minutes (idle, no signing), then
+`twak wallet sign-message` from a fresh process → signature returned with **no human step**
+(password re-resolved from Windows Credential Manager). Honest scope of the proof: each
+`twak` CLI invocation is its own process that starts *locked* and unlocks from the keychain —
+so our trade path (own loop shelling the CLI per call, per [[Security and Encryption]])
+re-unlocks transparently on **every** call, demonstrated repeatedly today (dust trade,
+erc8004 mint, this check). The serve process's *internal* relock→re-unlock wasn't observable
+from outside (it logs nothing on lock), but `serve` is not in the trade path, and its
+auto-lock did not interfere with other processes' signing.
 With the wallet idle-locked (`twak serve --auto-lock 1` for a couple of minutes, or just a
 later session), run `twak wallet sign-message …` again: confirm re-unlock is transparent via
 keychain resolution with no human step. Feeds the open question in

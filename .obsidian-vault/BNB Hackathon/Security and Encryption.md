@@ -240,10 +240,12 @@ exactly the key-on-remote-box question owned by [[Remote Capabilities]].
 - **x402 on BSC.** Confirm the live BSC x402 routes (USDC/USDT) and whether our data/inference
   spend uses the TWAK native path or the BNB SDK `X402Signer`. (`twak x402 quote` is read-only
   and needs no wallet — cheap to probe once credentials exist.)
-- **`--auto-lock` re-unlock (mechanism understood, empirically unconfirmed).** Resolution
-  should make re-unlock transparent from keychain/env; confirm in runbook step 8.
 
 **Resolved 2026-06-11:**
+- ~~**`--auto-lock` re-unlock**~~ → **transparent, empirically confirmed** (runbook step 8):
+  after a >2-minute idle `serve --auto-lock 1`, a fresh `sign-message` succeeded with no
+  human step. Every CLI invocation starts locked and unlocks from Credential Manager, so the
+  CLI-per-call trade loop re-proves this on every signing op.
 - ~~**Wallet unification (was gating)**~~ → **proven on `bsctestnet`**: ERC-8004 agentId 1369
   minted from the spike wallet; `owner`/`agentWallet` == the trading address; one `~/.twak`
   store, zero key export (§wallet unification above).
