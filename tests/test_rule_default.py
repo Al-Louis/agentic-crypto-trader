@@ -190,6 +190,55 @@ def test_no_tp_rungs_means_no_profit_events():
     assert not _advance_to(env, "profit", max_steps=400, filler=0)
 
 
+def test_loss_floor_forces_cut_despite_override():
+    """A position below entry*(1-floor) cannot be overridden — idx3 (hold) still force-cuts."""
+    env = _rd_env(loss_floor=0.2)
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0, "tp_i": 0}
+    px_entry = env._px[bar, j]
+    later = bar + 1
+    env._px[later, j] = px_entry * 0.75                  # 25% below entry: under the floor
+    env.bar = later
+    env._do_exit(t, RULE_DEFAULT_EXIT_KEEP[3])           # idx3 = hold/override
+    assert t not in env.pos                              # forced cut anyway
+    assert env.cool[t] == later
+
+
+def test_loss_floor_punctures_the_commit_window():
+    env = _rd_env(loss_floor=0.2, exit_commit=12)
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, j],
+                  "origin": 1.0, "tp_i": 0}
+    env._exit_decided[t] = bar                           # freshly committed (e.g. an override)
+    env._cush[bar + 3, j] = 0.1                          # above EMA: only the floor can prompt
+    env._px[bar + 3, j] = env._px[bar, j] * 0.9          # -10%: above floor -> commit holds
+    assert ("exit", t) not in env._scan_bar(bar + 3)
+    env._px[bar + 5, j] = env._px[bar, j] * 0.7          # -30%: below floor -> punctures commit
+    env._cush[bar + 5, j] = 0.1
+    assert ("exit", t) in env._scan_bar(bar + 5)
+
+
+def test_above_floor_override_still_works():
+    env = _rd_env(loss_floor=0.2)
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "tp_i": 0}
+    env._px[bar, j] = env._px[bar, j] * 1.4              # well above entry (a winner in retrace)
+    env._do_exit(t, RULE_DEFAULT_EXIT_KEEP[3])           # override allowed
+    assert t in env.pos                                  # winner can still be ridden
+
+
 def test_all_default_policy_tracks_the_rule_mirror():
     """Parity (gate B, unit-scale): a policy answering idx0 at EVERY prompt through the env should
     track the rule mirror's equity on the synthetic panel (flat caps -> sizing matches ef=0.20)."""

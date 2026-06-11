@@ -58,7 +58,7 @@ class EventRungEnv:
                  universe_mode: str = "voltopk", vol_target: float = 0.0, cap_floor: float = 0.02,
                  harvest_obs: bool = False,
                  rule_default: bool = False, exit_commit: int = 0, dust_usd: float = 0.0,
-                 tp_rungs: tuple | list = (),
+                 tp_rungs: tuple | list = (), loss_floor: float = 0.0,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -84,6 +84,10 @@ class EventRungEnv:
         self.rule_default = bool(rule_default)              # rung-1b: action idx 0 EXECUTES rung-0's decision
         self.exit_commit = int(exit_commit)                 # bars an exit decision (non-cut) commits for
         self.dust_usd = float(dust_usd)                     # partial keeps below this force a full close
+        self.loss_floor = float(loss_floor)                 # disaster floor: a position below
+        #   entry*(1-loss_floor) CANNOT be overridden — forced full cut, and the floor punctures the
+        #   exit-commit window. Closes the one unbounded loss path (the Q ride: override down -45%).
+        #   Winners (above entry) keep the full override; only deep losers lose the right to be ridden.
         self.tp_rungs = tuple(sorted(float(x) for x in tp_rungs))   # profit-take prompts at these
         #   unrealized-gain levels (e.g. 0.25,0.5,1,2): the only way to SELL INTO STRENGTH — exit
         #   prompts fire on weakness only. Each rung prompts once per position; default = let it run.
@@ -249,8 +253,15 @@ class EventRungEnv:
         for t, p in self.pos.items():                            # update peaks, test exit triggers
             j = self.col_ix[t]
             p["peak_px"] = max(p["peak_px"], self._px[bar, j])   # peak tracks highs even while committed
-            if self.exit_commit > 0 and (bar - self._exit_decided.get(t, -10 ** 9)) < self.exit_commit:
+            floored = (self.loss_floor > 0.0
+                       and self._px[bar, j] < self._px[p["entry_bar"], j] * (1.0 - self.loss_floor))
+            if (not floored and self.exit_commit > 0
+                    and (bar - self._exit_decided.get(t, -10 ** 9)) < self.exit_commit):
                 continue                                         # committed exit decision: not re-prompted
+            #                                  (the disaster floor PUNCTURES the commit window)
+            if floored:
+                ev.append(("exit", t))
+                continue
             stop_hit = self._px[bar, j] < p["peak_px"] * (1.0 - self.stop_k)   # TRAILING stop off the
             #                              peak (matches canonical rung0.py:121 + _rule_equity_curve:400)
             ema_hit = self._cush[bar, j] < 0.0
@@ -309,6 +320,10 @@ class EventRungEnv:
         p = self.pos.get(tok)
         if p is None:
             return
+        if (self.loss_floor > 0.0 and self._px[self.bar, self.col_ix[tok]]
+                < self._px[p["entry_bar"], self.col_ix[tok]] * (1.0 - self.loss_floor)):
+            self._sell_down(tok, 0.0)                            # disaster floor: deep losers cannot be
+            return                                               # overridden or trimmed — forced cut
         if a >= HOLD_EPS:                                        # override: hold through
             if self.rule_default:                                # rung-1b: COMMIT the hold (no re-prompt
                 self._exit_decided[tok] = self.bar               # for exit_commit bars) and do NOT

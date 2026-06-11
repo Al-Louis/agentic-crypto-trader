@@ -772,6 +772,21 @@ gate where it belongs, and watch worst-seed DD for the regression signal.
   rule on val/test; the regression signals are crash-split worst-seed DD (does survival skill
   survive a thinner curriculum, with breadth obs still present?) and worst-seed DD anywhere.
 
+### The Q false-flag probe (2026-06-10, `scripts/probe_false_flag.py`) — hypothesis REFUTED at the population level
+Q on Mar 28 00:00: ignition fired on surge 15× with rising only +11.5% (vs SIREN's 7.6×/+55.9%) and
+collapsed −27% within 13h; rd8h0-s1 bought 2×-rule size, overrode the exits, bled ~−$1.1k (its val
+−20.3%). Hypothesis: low-rising-on-high-surge = distribution → filter with `rising ≥ 15%`. **The
+probe says the filter would cut the WRONG bucket.** On 960 train / 359 val in-universe ignitions:
+the KEPT bucket (rising ≥15%) has *worse* forward returns (train fwd48 −5.83% vs −2.16% killed; val
+Q4-rising fwd48 **−22.4%**), and the explicit false-flag corner (surge≥8× & rising<15%, n=61/54) is
+*positive* on both splits (val +2.05% fwd24, 63% win). The universe mean-reverts — extended movers
+are the poison, exactly the standing `cush`-negative finding; Q was a real disaster but an outlier
+inside a healthy bucket. **The damage mechanism wasn't the entry — the rule exited Q in 2h with a
+small loss; the agent's EXIT OVERRIDE riding −45% down at 2× size did the damage.** Surge and
+rising are both already in the agent's obs (surge slot + harvest r24). Decided: no entry filter;
+the Q-class protection is a substrate guardrail on the override — a **disaster floor** (a position
+below entry−20% cannot be overridden; forced cut), closing the one remaining unbounded loss path.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is

@@ -220,6 +220,9 @@ def main() -> None:
                    "init so the untrained policy ~= the rule and PPO must learn to deviate")
     p.add_argument("--tp-rungs", default="", help="profit-take prompts at these unrealized-gain levels "
                    "(comma list, e.g. 0.25,0.5,1,2) — lets the agent SELL INTO STRENGTH; '' = off")
+    p.add_argument("--loss-floor", type=float, default=0.0, help="disaster floor: a position below "
+                   "entry*(1-floor) cannot be overridden/trimmed — forced full cut, punctures the "
+                   "exit-commit window (closes the override-down-a-crash loss path); 0 = off")
     p.add_argument("--eval-prepad", action="store_true", help="serve each eval window's 168-bar signal "
                    "warmup from the TAIL OF THE PRIOR SPLIT (contiguous time), so the published window "
                    "is tradeable from bar 0 — no dead first week on the charts; mirrors live trading, "
@@ -279,7 +282,8 @@ def main() -> None:
                       cap_floor=args.cap_floor, harvest_obs=args.harvest_obs,
                       rule_default=args.rule_default, exit_commit=args.exit_commit,
                       dust_usd=args.dust_usd,
-                      tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x], seed=args.seed)
+                      tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
+                      loss_floor=args.loss_floor, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -378,7 +382,7 @@ def main() -> None:
                              "harvest_obs": args.harvest_obs, "rule_default": args.rule_default,
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
-                             "eval_prepad": args.eval_prepad,
+                             "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
