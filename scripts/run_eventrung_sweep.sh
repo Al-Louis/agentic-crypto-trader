@@ -19,7 +19,10 @@ SEEDS="${2:-0 1 2 3}"
 EVAL_SPLIT="${3:-val}"
 REWARD_MODE="${4:-absolute}"
 SFX=""; [ "$EVAL_SPLIT" = "test" ] && SFX="-test"
-if [ "$REWARD_MODE" = "rd9" ]; then                   # rd8h0c1 + detonation blacklist 672 (the Q kill-
+if [ "$REWARD_MODE" = "rdL" ]; then                   # RecurrentPPO: rd9 config at 1M + LSTM-256 memory —
+  PFX="ppo-event-rdL"                                  # the sequence skills (walk-away, hold-the-winner,
+  EXTRA="--reward-mode relative --recurrent --lstm-size 256 --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --harvest-obs --eval-prepad --loss-floor 0.2 --det-blacklist 672 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --crash-train 1 --crash-eval --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
+elif [ "$REWARD_MODE" = "rd9" ]; then                 # rd8h0c1 + detonation blacklist 672 (the Q kill-
   PFX="ppo-event-rd9"                                  # switch, probe-gated) — the 5M-scale candidate
   EXTRA="--reward-mode relative --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --harvest-obs --eval-prepad --loss-floor 0.2 --det-blacklist 672 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --crash-train 1 --crash-eval --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"
 elif [ "$REWARD_MODE" = "rd8h0c1" ]; then             # rd8h0 + crash_train 4->1 (fix the inflated crash

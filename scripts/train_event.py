@@ -220,6 +220,11 @@ def main() -> None:
                    "init so the untrained policy ~= the rule and PPO must learn to deviate")
     p.add_argument("--tp-rungs", default="", help="profit-take prompts at these unrealized-gain levels "
                    "(comma list, e.g. 0.25,0.5,1,2) — lets the agent SELL INTO STRENGTH; '' = off")
+    p.add_argument("--recurrent", action="store_true", help="RecurrentPPO (sb3-contrib MlpLstmPolicy): "
+                   "give the policy MEMORY across the episode's events — the sequence skills the "
+                   "forensics demand (trade-the-pump-then-walk-away, hold-the-winner, don't-rebuy-"
+                   "the-bleed) are inexpressible for a stateless MLP")
+    p.add_argument("--lstm-size", type=int, default=256, help="LSTM hidden size (TradeSim converged 256)")
     p.add_argument("--det-blacklist", type=int, default=0, help="detonation blacklist: after a massive "
                    "surge WHILE price collapses (the Q pattern), zero the token's ignitions for N bars "
                    "(probe-calibrated 672 = 4wk; post-det ignitions are poison); 0 = off")
@@ -314,8 +319,14 @@ def main() -> None:
     if args.lr_end is not None:                            # linear anneal lr -> lr_end (progress: 1->0)
         lr0, lr1 = args.lr, args.lr_end
         lr = lambda pr: lr1 + (lr0 - lr1) * pr  # noqa: E731
-    model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
-                ent_coef=args.ent_coef, learning_rate=lr)
+    if args.recurrent:                                     # memory across the episode's events
+        from sb3_contrib import RecurrentPPO
+        model = RecurrentPPO("MlpLstmPolicy", venv, verbose=0, seed=args.seed, n_steps=1024,
+                             batch_size=256, ent_coef=args.ent_coef, learning_rate=lr,
+                             policy_kwargs=dict(lstm_hidden_size=args.lstm_size))
+    else:
+        model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
+                    ent_coef=args.ent_coef, learning_rate=lr)
     if args.rule_default and args.rule_prior > 0:      # default-executes-the-rule prior: bias the
         import torch                                   # categorical head toward idx 0 at init, so the
         with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
@@ -324,10 +335,21 @@ def main() -> None:
 
     write_progress(out, state="running", phase="evaluate")
 
-    def predict_fn(obs):
-        norm = venv.normalize_obs(obs.reshape(1, -1))
-        a, _ = model.predict(norm, deterministic=True)
-        return np.asarray(a).reshape(-1)
+    def make_predict():
+        """Fresh per-episode predictor. Recurrent: thread the LSTM state across the episode's
+        events (one state per split eval — memory is the point); stateless MLP path unchanged."""
+        st = {"s": None, "start": np.ones(1, dtype=bool)}
+
+        def predict_fn(obs):
+            norm = venv.normalize_obs(obs.reshape(1, -1))
+            if args.recurrent:
+                a, st["s"] = model.predict(norm, state=st["s"], episode_start=st["start"],
+                                           deterministic=True)
+                st["start"] = np.zeros(1, dtype=bool)
+            else:
+                a, _ = model.predict(norm, deterministic=True)
+            return np.asarray(a).reshape(-1)
+        return predict_fn
 
     # Per-regime held-out eval: grade the policy on BOTH val and test (the reversal pocket AND the
     # BTC-bear/alt-flat window) so a pass can't hide in the friendlier regime. Overall gate = all pass.
@@ -339,7 +361,7 @@ def main() -> None:
     if args.eval_prepad:                                   # serve the warmup from the PRIOR split's tail
         prev = {"val": train_pre, "test": val_r, "crash": val_r}   # (contiguous time; pristine train)
         held = {nm: pd.concat([prev[nm].tail(WARMUP), r]) for nm, r in held.items()}
-    results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, predict_fn, args.seed)
+    results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, make_predict(), args.seed)
                for nm, r in held.items()}
     pr = results[args.eval_split]                          # primary split -> the published bundle
     print(f"[eval] primary={args.eval_split} events={len(pr['raw'])} action "
@@ -386,7 +408,8 @@ def main() -> None:
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
-                             "det_blacklist": args.det_blacklist,
+                             "det_blacklist": args.det_blacklist, "recurrent": args.recurrent,
+                             "lstm_size": args.lstm_size if args.recurrent else None,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
@@ -395,6 +418,7 @@ def main() -> None:
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows
     flags = (f"{args.reward_mode} k{args.k}/{args.universe_mode} dd{args.dd_lambda}"
+             + (f" +lstm{args.lstm_size}" if args.recurrent else "")
              + (" +rd" if args.rule_default else "") + (" +tp" if args.tp_rungs else "")
              + (" +harvest" if args.harvest_obs else "") + (" +crash" if args.crash_eval else ""))
     model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"
