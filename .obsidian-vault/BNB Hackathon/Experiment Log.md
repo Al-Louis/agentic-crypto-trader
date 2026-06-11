@@ -891,6 +891,29 @@ wick_reject 0.30 (the Q-tail bundle).** Behavioral checklist (bleed re-entries, 
 SIREN Mar 22, seed coherence) deferred to the rdLq forensics — judging memory on a sweep that
 includes the un-bounded Q hole would conflate the two.
 
+## Standings — rdLq (`ppo-event-rdLq-c07bda0`, rdL + intrabar floor + wick_reject 0.30, loop iter 2)
+
+| seed | val | test | crash |
+|------|-----|------|-------|
+| s0 | −0.1% (DD 5%) | +9.6% (DD 9%) | +10.3% (DD 8%) |
+| s1 | +1.3% (DD 5%) | −14.3% (DD 22%) | −15.4% (DD 23%) |
+| s2 | −10.7% (DD 18%) | +0.2% (DD 9%) | −1.5% (DD 9%) |
+| s3 | +4.5% (DD 8%) | +3.1% (DD 9%) | +6.4% (DD 9%) |
+| **mean** | **−1.3%** | **−0.3%** | **−0.0%, 4/4 survive** |
+
+**Verdict: FAIL (val:Buy&Hold binds) — but the Q-tail bundle DELIVERED its bound and the margin
+improved (loop: continue, new best, stall reset).** vs rdL: val −4.5%→−1.3% (+3.2pp — the intrabar
+floor + wick guard removed the one-bar disaster class; no seed shows an rdL-s1-style Q bleed), test
+−3.7%→−0.3%, worst DD anywhere 23.2%. The LSTM family is now SAFE but still MUTED: s3 val +4.5%
+(DD 8%) approaches rd8h0c1's best, yet the means sit at zero and the behavioral litmus still fails
+— s3's only SIREN trade was an early −16% probe; **Mar 22 skipped again**. Diagnosis unchanged
+from rdL: under-exploration — the rule-prior basin + ent_coef 0.2 leaves the recurrent policy
+converged near no-deviation (returns ≈ 0 = rule-parity minus costs in a rule-losing val).
+**Proposed next (loop iter 3, ONE variable): `ent_coef 0.2 → 0.4`** — hypothesis: the LSTM needs
+stronger entropy than the MLP to escape the prior and learn that memory-conditioned deviations
+(take Mar 22, walk away from bleeds) pay; safety is now substrate-borne (the brakes are
+structural), so wider exploration cannot blow the gate.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
