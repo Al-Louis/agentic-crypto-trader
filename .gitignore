@@ -30,6 +30,8 @@ data/anchor/
 data/features/
 data/*.json
 data/*.csv
+# Risk ledger: tx hashes + trade sizes (no secrets, but operational state — never committed)
+data/*.jsonl
 
 # TradeSim reference seed (large: models/data/frontend; lessons captured in the vault)
 /tradesim_handoff_seed/

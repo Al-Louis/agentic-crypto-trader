@@ -82,6 +82,14 @@ the artifact the **June 16 Track 1 PoC gate** requires (a real, guarded, dust-si
 signed and landed on BSC). This is the unfamiliar, blocking layer; it is built before any
 strategy logic. Owner: `principal-engineer` with `onchain-custody-engineer`.
 
+> **Custody slice — checkpointed procedure: [[TWAK Spike Runbook]]** (2026-06-11). The CLI
+> (`@trustwallet/cli` v0.19.0) is installed and keylessly verified on the dev laptop: `compete`
+> + native `erc8004` commands exist, BSC chain key `bsc`, the OS keychain works on **Windows**
+> (Credential Manager via `@napi-rs/keyring`), and the credential env names are
+> `TWAK_ACCESS_ID`/`TWAK_HMAC_SECRET` (`.env.example` corrected). All secret-bearing steps are
+> USER-ACTION checkpoints in the runbook; guardrail skeleton spec (`risk/` + `execution/`) is
+> in the runbook too.
+
 ### Steps
 
 1. **Environment up.** `python -m venv .venv`, activate, `pip install -e ".[dev]"`; copy

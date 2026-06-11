@@ -1,0 +1,157 @@
+"""`execute_trade` — the guardrail-wrapped trade path (the ONLY way a swap gets signed).
+
+Two-phase check (runbook §guardrail skeleton): the *intent* is checked first (refuse early,
+no network), then the read-only quote is fetched and **the same caps are re-applied to the
+quote's own numbers** — realized USD value, actual route symbols, implied slippage — because
+the quote is the truth and the intent is a wish. Out-of-policy ⇒ refused with coded reasons,
+never adjusted. Any failure to compute state (ledger unreadable/unwritable, quote missing
+fields, twak error) ⇒ refuse with STATE_UNAVAILABLE — fail closed.
+
+Ledger discipline: the attempt row lands on disk BEFORE the swap is signed (if it cannot be
+written, the trade is refused), so the daily/lifetime caps survive a crash mid-trade. TWAK's
+own `--slippage` is belt-and-suspenders *under* these checks, never instead of them.
+
+Return contract:
+  in-policy + landed   -> {"tx_hash", "status", "usd", "quote"}
+  out-of-policy        -> {"refused": [codes], "detail": [...], "phase": intent|quote|state}
+  passed checks, swap/confirm failed -> {"error": ..., "tx_hash": maybe} (spend stays counted)
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import asdict
+from pathlib import Path
+
+from trader.execution import twak_cli
+from trader.risk import SPIKE_POLICY, Policy, TradeIntent, check_trade, ledger
+from trader.risk.checks import STATE_UNAVAILABLE, Verdict
+
+POLL_ATTEMPTS = 24
+POLL_INTERVAL_S = 5.0
+
+_HASH_KEYS = ("txHash", "transactionHash", "hash", "txid", "tx_hash")
+
+
+def extract_tx_hash(d: dict) -> str | None:
+    """Find a 0x… tx hash in swap output (top level or one nested object deep)."""
+    for k in _HASH_KEYS:
+        v = d.get(k)
+        if isinstance(v, str) and v.startswith("0x"):
+            return v
+    for v in d.values():
+        if isinstance(v, dict):
+            h = extract_tx_hash(v)
+            if h:
+                return h
+    return None
+
+
+def parse_tx_status(d: dict) -> str:
+    """-> 'confirmed' | 'failed' | 'pending' from a `twak tx --json` payload (tolerant)."""
+    # twak v0.19.0 emits booleans ({"confirmed": true, "pending": false, "failed": false}),
+    # not a status string (observed live on the 2026-06-11 dust trade).
+    if d.get("failed") is True:
+        return "failed"
+    if d.get("confirmed") is True:
+        return "confirmed"
+    s = str(d.get("status", "")).strip().lower()
+    if s in {"success", "successful", "confirmed", "1", "0x1", "true"}:
+        return "confirmed"
+    if s in {"failed", "fail", "reverted", "error", "0", "0x0", "false"}:
+        return "failed"
+    return "pending"
+
+
+def _refusal(verdict: Verdict, phase: str, intent: TradeIntent, path: Path) -> dict:
+    """Record the refusal (audit trail; counts no spend) and build the refusal return."""
+    try:
+        ledger.append({"kind": "refusal", "phase": phase, "intent": asdict(intent),
+                       "refusals": list(verdict.refusals)}, path)
+    except Exception:  # noqa: BLE001,S110 — we are refusing anyway; never refuse-to-refuse
+        pass
+    return {"refused": verdict.codes, "detail": list(verdict.refusals), "phase": phase}
+
+
+def _unavailable(detail: str, phase: str, intent: TradeIntent, path: Path) -> dict:
+    v = Verdict(False, ({"code": STATE_UNAVAILABLE, "detail": detail[:300]},))
+    return _refusal(v, phase, intent, path)
+
+
+def execute_trade(intent: TradeIntent, policy: Policy = SPIKE_POLICY, *,
+                  ledger_path: Path = ledger.LEDGER_PATH, cli=twak_cli,
+                  poll_attempts: int = POLL_ATTEMPTS, poll_interval_s: float = POLL_INTERVAL_S,
+                  sleep=time.sleep) -> dict:
+    """Check → quote → re-check → record → swap → confirm. `cli` is injectable for tests."""
+    # 1) intent-phase check against persisted state (refuse early — no network on refusal).
+    state = ledger.state_from_ledger(ledger_path)
+    verdict = check_trade(policy, intent, state)
+    if not verdict.allowed:
+        return _refusal(verdict, "intent", intent, ledger_path)
+
+    # 2) read-only quote, then re-check the caps on the QUOTE's numbers.
+    try:
+        parsed = twak_cli.parse_quote(
+            cli.quote(intent.from_asset, intent.to_asset, intent.usd,
+                      chain=intent.chain, slippage_pct=intent.slippage_pct))
+    except Exception as e:  # noqa: BLE001 — quote failure/missing fields: fail closed
+        return _unavailable(f"quote unavailable: {type(e).__name__}: {e}", "quote",
+                            intent, ledger_path)
+    if parsed["usd_value"] is None:
+        return _unavailable("quote cannot be valued in USD (no price line, no stable leg)",
+                            "quote", intent, ledger_path)
+    quote_intent = TradeIntent(
+        from_asset=parsed["in_symbol"], to_asset=parsed["out_symbol"],
+        usd=parsed["usd_value"], chain=intent.chain,
+        slippage_pct=max(parsed["implied_slippage_pct"], parsed["price_impact_pct"]))
+    verdict = check_trade(policy, quote_intent, state)
+    if not verdict.allowed:
+        return _refusal(verdict, "quote", quote_intent, ledger_path)
+
+    # 3) the attempt row must be ON DISK before signing — no record, no trade.
+    try:
+        ledger.append({"kind": "attempt", "intent": asdict(intent), "quote": parsed,
+                       "usd": quote_intent.usd}, ledger_path)
+    except Exception as e:  # noqa: BLE001
+        return _unavailable(f"ledger unwritable: {type(e).__name__}: {e}", "state",
+                            intent, ledger_path)
+
+    # 4) sign + broadcast (password via keychain inside twak — never in our argv).
+    # Result rows are best-effort: the attempt row above already counted the spend, and once
+    # money may have moved a ledger hiccup must not destroy the outcome/tx-hash return.
+    try:
+        swap_out = cli.swap(intent.from_asset, intent.to_asset, intent.usd,
+                            chain=intent.chain, slippage_pct=intent.slippage_pct)
+    except Exception as e:  # noqa: BLE001 — outcome unknown; attempt spend stays counted
+        _append_result({"kind": "result", "tx_hash": None, "status": "swap_error",
+                        "error": f"{type(e).__name__}: {e}"[:300]}, ledger_path)
+        return {"error": f"swap failed: {type(e).__name__}: {e}"[:300], "tx_hash": None}
+    tx_hash = extract_tx_hash(swap_out)
+    if not tx_hash:
+        _append_result({"kind": "result", "tx_hash": None, "status": "unknown",
+                        "error": "no tx hash in swap output"}, ledger_path)
+        return {"error": "no tx hash in swap output — verify on bscscan before retrying",
+                "tx_hash": None}
+
+    # 5) poll confirmation; record the outcome either way.
+    status = "pending"
+    for i in range(max(1, poll_attempts)):
+        try:
+            status = parse_tx_status(cli.tx_status(tx_hash, chain=intent.chain))
+        except Exception:  # noqa: BLE001 — transient RPC trouble: keep polling
+            status = "pending"
+        if status in ("confirmed", "failed"):
+            break
+        if i < poll_attempts - 1:
+            sleep(poll_interval_s)
+    _append_result({"kind": "result", "tx_hash": tx_hash, "status": status,
+                    "usd": quote_intent.usd}, ledger_path)
+    return {"tx_hash": tx_hash, "status": status, "usd": quote_intent.usd, "quote": parsed}
+
+
+def _append_result(row: dict, path: Path) -> None:
+    """Best-effort result append (spend was already counted by the attempt row)."""
+    try:
+        ledger.append(row, path)
+    except Exception:  # noqa: BLE001,S110 — never mask a live trade outcome behind a disk error
+        pass
