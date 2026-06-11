@@ -129,8 +129,13 @@ def step(state_dir: Path | str = EXPERIMENTS, *, deps: dict | None = None) -> di
         seeds = a["seeds"].split()
         poll = deps["poll"](a["stamped"], seeds)
         if poll["n_published"] < len(seeds):
-            if poll.get("running") is False and poll["n_published"] == 0:
-                st["halted"] = f"sweep {a['stamped']} not running and nothing published — died?"
+            # running is False ⇒ the box answered and NO driver/trainer exists ⇒ the sweep died
+            # mid-flight (e.g. the WSL window closing killed it at 1/4). running None = box
+            # unreachable — keep waiting on CDN progress, never declare death blind.
+            if poll.get("running") is False:
+                st["halted"] = (f"sweep {a['stamped']} dead at {poll['n_published']}/{len(seeds)} "
+                                f"published — box answered with no trainer. Requeue the remaining "
+                                f"seeds (reset, propose with the missing seeds, step)")
                 save_state(st, state_dir)
                 return {"phase": "halted", "reason": st["halted"], "poll": poll}
             return {"phase": "running", "active": a, "poll": poll,
