@@ -852,6 +852,23 @@ stable-baseline goal for the automation loop is met. Next: the MCP iteration loo
 16 live TWAK trade) — further RL levers (discrimination obs, recurrence) run through the automated
 loop, not hand-driven sessions.**
 
+### rdL launched (2026-06-11, @ `a27e469`) — RecurrentPPO: the memory the forensics demand
+The user's full per-token rd9 review (B/BANANAS31/HUMA/Q/SIREN/TAG/UB/ZEC, all seeds) distilled to
+three recurring failure classes — **re-buying the post-pump bleed churn** (B, BANANAS31, UB-s2,
+ZEC-s1: "trade the structured pump then WALK AWAY"), **failure to hold a winner to the top**
+(ZEC-s2 sold 5× instead of holding; TAG-s0 no profit-take at the high), **missed obvious early
+runs** (SIREN Mar 22 again at 5M) — plus the meta-observation: *no sign of learned experience,
+seeds incoherent*. **All of these are SEQUENCE skills, structurally inexpressible for the stateless
+feedforward MLP** (each decision sees only the current 16-dim snapshot; "this token already gave
+its move" requires memory). RecurrentPPO was roadmapped since GATE-2, sequenced LAST pending a
+demonstrated feedforward ceiling — 7 configs later that ceiling is demonstrated, and the user
+called for it independently. Built: `--recurrent --lstm-size 256` (sb3-contrib MlpLstmPolicy,
+TradeSim's converged size), stateful eval threading (fresh LSTM state per split episode), rule-prior
+bias unchanged. Q note: the det-blacklist behaved exactly as scoped (zero Q trades, signal-level,
+per-token — no general-logic impact possible). **Verdict checklist (behavioral, not just returns):
+(1) bleed-churn re-entries down? (2) winners held longer / TP rungs used at tops? (3) SIREN Mar 22
+participation? (4) cross-seed coherence up?** Sweep: `ppo-event-rdL-a27e469-s{0..3}`, 4×1M, val.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
