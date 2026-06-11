@@ -370,8 +370,14 @@ def rl_train(reward_config: dict, seeds: str = "0 1 2 3", split: str = "val",
             return {"launched": False, "reason": "smoke gate failed", "smoke": smoke_result,
                     "preflight": pf, "plan": plan}
 
-    # 4) launch detached, then 5) wait + verify exactly one clean run.
-    driver_pid = run_ssh(sweep_cmd, timeout=120.0).splitlines()[-1].strip()
+    # 4) launch detached — FIRE-AND-VERIFY: tailscale's session handler waits on the detached
+    # job's whole descendant tree (setsid notwithstanding), so the ssh client may never return
+    # even though the remote command started immediately. A short timeout is swallowed and the
+    # box-state verification below is the truth-teller (proven twice: rdLq, rdLe4).
+    try:
+        driver_pid = run_ssh(sweep_cmd, timeout=20.0).splitlines()[-1].strip()
+    except Exception:  # noqa: BLE001 — lingering session, not a launch failure
+        driver_pid = "unknown (ssh session lingered; trusting the box-state verify)"
     import time
     time.sleep(max(0, int(verify_wait_s)))
     # A short sweep can self-complete before the check — count published seeds so a COMPLETION
