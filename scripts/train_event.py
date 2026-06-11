@@ -231,6 +231,12 @@ def main() -> None:
     p.add_argument("--loss-floor", type=float, default=0.0, help="disaster floor: a position below "
                    "entry*(1-floor) cannot be overridden/trimmed — forced full cut, punctures the "
                    "exit-commit window (closes the override-down-a-crash loss path); 0 = off")
+    p.add_argument("--intrabar-floor", action="store_true", help="the floor is a RESTING STOP: "
+                   "filled where the bar's LOW crossed entry*(1-floor), not at the next close — "
+                   "closes the Q hole (a -53%% bar blowing through the floor); needs --loss-floor")
+    p.add_argument("--wick-reject", type=float, default=0.0, help="kill ignitions whose trigger bar "
+                   "closed below (1-X)*high (extreme upper-wick rejection = the dump is mid-flight); "
+                   "probe-calibrated 0.30; the mild 0.10 version is REFUTED — 0 = off")
     p.add_argument("--eval-prepad", action="store_true", help="serve each eval window's 168-bar signal "
                    "warmup from the TAIL OF THE PRIOR SPLIT (contiguous time), so the published window "
                    "is tradeable from bar 0 — no dead first week on the charts; mirrors live trading, "
@@ -281,6 +287,14 @@ def main() -> None:
                                                 total_drop=args.crash_depth, beta=args.crash_beta)
         print(f"[crash] injected {len(placed)} training crashes at bars {placed}")
     vol = build_volume_panel(list(returns.columns), returns.index)
+    ohlc_kwargs = {}
+    if args.intrabar_floor or args.wick_reject > 0:
+        from train_rl import build_ohlc_frac_panels
+        lowf, highf = build_ohlc_frac_panels(list(returns.columns), returns.index)
+        ohlc_kwargs = {"low_frac": lowf if args.intrabar_floor else None,
+                       "intrabar_floor": args.intrabar_floor,
+                       "high_frac": highf if args.wick_reject > 0 else None,
+                       "wick_reject": args.wick_reject}
     env_kwargs = dict(k=args.k, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
                       reward_mode=args.reward_mode, r4_beta=args.r4_beta, res_gamma=args.res_gamma,
@@ -291,7 +305,8 @@ def main() -> None:
                       rule_default=args.rule_default, exit_commit=args.exit_commit,
                       dust_usd=args.dust_usd,
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
-                      loss_floor=args.loss_floor, det_blacklist=args.det_blacklist, seed=args.seed)
+                      loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
+                      **ohlc_kwargs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -408,6 +423,7 @@ def main() -> None:
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
+                             "intrabar_floor": args.intrabar_floor, "wick_reject": args.wick_reject,
                              "det_blacklist": args.det_blacklist, "recurrent": args.recurrent,
                              "lstm_size": args.lstm_size if args.recurrent else None,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,

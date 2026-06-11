@@ -65,6 +65,8 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "det_blacklist": ("--det-blacklist", int),      # detonation blacklist horizon (bars)
     "recurrent": ("--recurrent", bool),             # RecurrentPPO MlpLstmPolicy (memory)
     "lstm_size": ("--lstm-size", int),
+    "intrabar_floor": ("--intrabar-floor", bool),   # the floor as a RESTING STOP (intra-bar fill)
+    "wick_reject": ("--wick-reject", float),        # extreme-rejection wick guard on ignitions
 }
 
 DEFAULT_TIMESTEPS = 1_000_000

@@ -114,6 +114,29 @@ def build_volume_panel(tokens, index):
     return pd.DataFrame(cols, index=index)
 
 
+def build_ohlc_frac_panels(tokens, index):
+    """Per-token intra-bar shape panels aligned to `index`: `low_frac = low/close` (recovers the
+    bar's true LOW from the close-indexed env prices, so a resting stop can fill where the price
+    PATH crossed it — the Q −53%-in-one-bar hole) and `high_frac = close/high` (1.0 = closed at
+    the high; small = a big upper rejection wick — the dump started inside the trigger bar).
+    Missing bars -> 1.0 (no intra-bar information => neither guard can fire spuriously)."""
+    lows, highs = {}, {}
+    for t in tokens:
+        oh = _load_token_ohlcv(t)
+        if oh is None:
+            continue
+        ts = oh["timestamp"].to_numpy()
+        ts = (ts // 1000) if ts.max() > 1e12 else ts
+        close = oh["close"].to_numpy()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lf = np.where(close > 0, oh["low"].to_numpy() / close, 1.0)
+            hi = oh["high"].to_numpy()
+            hf = np.where(hi > 0, close / hi, 1.0)
+        lows[t] = pd.Series(lf, index=ts).reindex(index).fillna(1.0).clip(0.01, 1.0)
+        highs[t] = pd.Series(hf, index=ts).reindex(index).fillna(1.0).clip(0.0, 1.0)
+    return pd.DataFrame(lows, index=index), pd.DataFrame(highs, index=index)
+
+
 def _price_at(win, tm):
     if win.empty:
         return None

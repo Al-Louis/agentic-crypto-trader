@@ -257,6 +257,58 @@ def test_detonation_blacklist_kills_later_ignitions():
     assert (on._ignite[:, other] == off._ignite[:, other]).all()   # other tokens untouched
 
 
+def _frac_panel(returns, default=1.0, **overrides):
+    """A low_frac/high_frac panel: `overrides` = {token: (bar_slice, value)}."""
+    import pandas as pd
+    df = pd.DataFrame(default, index=returns.index, columns=returns.columns)
+    for tok, (sl, v) in overrides.items():
+        df.iloc[sl, df.columns.get_loc(tok)] = v
+    return df
+
+
+def test_intrabar_floor_fills_at_the_stop_not_the_close():
+    """A bar whose LOW crosses entry*(1-floor) force-fills AT the floor price — even when the
+    close collapses far below it (the Q -53%-in-one-bar hole) or recovers above it (a wick)."""
+    returns, btc, vol, liq = _panel()
+    lowf = _frac_panel(returns, 1.0, RUN=(slice(95, 96), 0.5))   # bar 95: low = 50% of close
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=140, vol_mult=2.5,
+                vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0,
+                action_mode="discrete", n_action_levels=4, rule_default=True)
+    env = EventRungEnv(returns, btc, liq, loss_floor=0.2, intrabar_floor=True,
+                       low_frac=lowf, **base)
+    env.reset(start=90)
+    j = env.col_ix["RUN"]
+    entry_px = env._px[91, j]
+    env.pos["RUN"] = {"usd": 1000.0, "entry_bar": 91, "peak_px": entry_px, "origin": 1.0, "tp_i": 0}
+    env.bar = 94
+    cash0 = env.cash
+    env._advance_to_event()                                  # crosses bar 95: low < floor -> fill
+    assert "RUN" not in env.pos
+    got = env.cash - cash0
+    assert got == pytest.approx(1000.0 * 0.8, rel=0.02)      # filled at the floor (-20%), NOT the
+    assert env.cool["RUN"] >= 95                             # bar's path low (-50%+)
+
+
+def test_intrabar_floor_requires_data_and_floor():
+    with pytest.raises(ValueError):
+        _rd_env(intrabar_floor=True, loss_floor=0.2)         # no low_frac data
+
+
+def test_wick_reject_kills_extreme_rejection_ignitions():
+    returns, btc, vol, liq = _panel()
+    highf = _frac_panel(returns, 1.0, RUN=(slice(0, len(returns)), 0.6))   # all bars: close=60% of high
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5,
+                vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0)
+    guarded = EventRungEnv(returns, btc, liq, wick_reject=0.30, high_frac=highf, **base)
+    plain = EventRungEnv(returns, btc, liq, **base)
+    j = guarded.col_ix["RUN"]
+    assert plain._ignite[:, j].any()                         # the fixture's ignition exists
+    assert not guarded._ignite[:, j].any()                   # 0.6 < 0.7 -> every trigger killed
+    ok = EventRungEnv(returns, btc, liq, wick_reject=0.30,
+                      high_frac=_frac_panel(returns, 0.95), **base)
+    assert (ok._ignite[:, j] == plain._ignite[:, j]).all()   # strong closes untouched
+
+
 def test_all_default_policy_tracks_the_rule_mirror():
     """Parity (gate B, unit-scale): a policy answering idx0 at EVERY prompt through the env should
     track the rule mirror's equity on the synthetic panel (flat caps -> sizing matches ef=0.20)."""

@@ -60,6 +60,8 @@ class EventRungEnv:
                  rule_default: bool = False, exit_commit: int = 0, dust_usd: float = 0.0,
                  tp_rungs: tuple | list = (), loss_floor: float = 0.0,
                  det_blacklist: int = 0, det_surge: float = 8.0, det_drop: float = -0.15,
+                 low_frac: pd.DataFrame | None = None, intrabar_floor: bool = False,
+                 high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -85,6 +87,23 @@ class EventRungEnv:
         self.rule_default = bool(rule_default)              # rung-1b: action idx 0 EXECUTES rung-0's decision
         self.exit_commit = int(exit_commit)                 # bars an exit decision (non-cut) commits for
         self.dust_usd = float(dust_usd)                     # partial keeps below this force a full close
+        self.intrabar_floor = bool(intrabar_floor)          # the floor is a RESTING STOP: filled
+        #   intra-bar where the price PATH crossed it (bar low from `low_frac`), not 60 minutes
+        #   later at the next close — closes the Q hole (a −53% bar blowing through a −20% floor).
+        self.wick_reject = float(wick_reject)               # kill ignitions on EXTREME-rejection
+        #   trigger bars (close < (1-wick_reject)*high): the dump is mid-flight at the fill price.
+        #   Probe (`probe_wick.py`): rare (~3 events/5mo) and catastrophic every observed time;
+        #   the mild version (0.10) is REFUTED — bars closing AT their highs are the worst bucket.
+        if self.intrabar_floor and (low_frac is None or loss_floor <= 0.0):
+            raise ValueError("intrabar_floor needs low_frac data AND loss_floor > 0")
+        if self.wick_reject > 0.0 and high_frac is None:
+            raise ValueError("wick_reject needs high_frac data")
+        self._lowf = (low_frac.reindex(self.returns.index).fillna(1.0).clip(0.01, 1.0)
+                      .reindex(columns=self.returns.columns).fillna(1.0).to_numpy()
+                      if low_frac is not None else None)
+        self._highf = (high_frac.reindex(self.returns.index).fillna(1.0).clip(0.0, 1.0)
+                       .reindex(columns=self.returns.columns).fillna(1.0).to_numpy()
+                       if high_frac is not None else None)
         self.loss_floor = float(loss_floor)                 # disaster floor: a position below
         #   entry*(1-loss_floor) CANNOT be overridden — forced full cut, and the floor punctures the
         #   exit-commit window. Closes the one unbounded loss path (the Q ride: override down -45%).
@@ -113,6 +132,8 @@ class EventRungEnv:
         rising = px / px.shift(vol_spk) - 1.0
         ema_up = ema >= ema.shift(vol_fast)
         ignite = ((surge >= vol_mult) & (rising > 0) & (cushion > 0) & ema_up)
+        if self.wick_reject > 0.0:                          # extreme-rejection wick guard (user
+            ignite = ignite.to_numpy() & (self._highf >= (1.0 - self.wick_reject))   # idea, probed)
         self.det_blacklist = int(det_blacklist)
         if self.det_blacklist > 0:
             # DETONATION blacklist (the Q pattern, probe-gated by scripts/probe_detonation.py):
@@ -120,7 +141,7 @@ class EventRungEnv:
             # ignitions are poison (fwd48 −8%/−24% train/val, win 8–21%) until ~4wk out, where
             # they revert to baseline. Zero the ignite signal for `det_blacklist` bars after.
             det = ((surge >= det_surge) & (rising <= det_drop)).to_numpy()
-            ig_np = ignite.to_numpy().copy()
+            ig_np = (ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()).copy()
             for j in range(det.shape[1]):
                 for b in np.where(det[:, j])[0]:
                     ig_np[b: b + self.det_blacklist, j] = False
@@ -245,6 +266,13 @@ class EventRungEnv:
                 return
             self.bar += 0 if first else 1
             first = False
+            if self.intrabar_floor and self.pos:            # the RESTING-STOP floor: fill where the
+                for t in list(self.pos):                    # bar's LOW crossed entry*(1-floor) —
+                    p = self.pos[t]                         # not at the next close (the Q hole)
+                    j = self.col_ix[t]
+                    floor_px = self._px[p["entry_bar"], j] * (1.0 - self.loss_floor)
+                    if self._px[self.bar, j] * self._lowf[self.bar, j] <= floor_px:
+                        self._stop_fill(t, floor_px)
             eqb = self._equity()
             if self.bar >= self.end or eqb <= 1.0:
                 self._done, self._pending = True, ("none", None)
@@ -359,6 +387,21 @@ class EventRungEnv:
         if a >= HOLD_EPS:
             return                                               # let it run (the rule's behavior)
         self._sell_down(tok, max(a, 0.0))
+
+    def _stop_fill(self, tok: str, fill_px: float):
+        """Force-fill a full close at `fill_px` (the resting-stop price the intra-bar path
+        crossed) instead of the bar close — AMM cost applies; cooldown + dead-zone arm as on any
+        full exit. The position's value at the stop = usd * fill_px/entry_px = usd*(1-floor)."""
+        p = self.pos[tok]
+        j = self.col_ix[tok]
+        val = p["usd"] * fill_px / self._px[p["entry_bar"], j]
+        c = amm_cost_usd(-val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
+        self.cash += val - c
+        if val >= 1.0:
+            self._trades.append((tok, -val, c))
+        self.cool[tok] = self.bar
+        self.prior_origin[tok] = p["origin"]
+        del self.pos[tok]
 
     def _sell_down(self, tok: str, keep: float):
         """Sell a position down to `keep` of its value (shared by exit cuts/trims and profit-takes):
