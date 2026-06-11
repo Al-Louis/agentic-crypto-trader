@@ -746,6 +746,32 @@ no-result for obs levers). **Next single-variable lever: `dd_lambda 0` on this e
 the relative reward alone drive (parity=0, beat-the-rule positive), keep the DQ enforcement in the
 gate where it belongs, and watch worst-seed DD for the regression signal.
 
+## Standings — rd8h0 (`ppo-event-rd8h0-a12ba18`, rd8h with dd_lambda 0, 4×1M)
+
+| seed | val | test | crash | trades |
+|------|-----|------|-------|--------|
+| s0 | +2.3% (DD 26.9%) | +15.8% (DD 17.5%) | +11.8% (DD 19.7%) | 63 |
+| s1 | −20.3% (DD 25.3%) | +11.9% (DD 17.5%) | +12.3% (DD 12.7%) | 61 |
+| s2 | −6.9% (DD 10.4%) | +33.0% (DD 4.1%) | +22.2% (DD 11.0%) | 38 |
+| s3 | −9.9% (DD 23.5%) | **+51.0% (DD 8.4%)** | **+52.9% (DD 4.2%)** | 49 |
+| **mean** | **−8.7%** | **+27.9%** | **+24.8%, 4/4 survive** | |
+| bars | rule −0.6% / B&H +17.1% | rule +89.3% / B&H +58.6% | rule +62–64% / B&H ~−74% | |
+
+### Verdict — FAIL, but the dd-penalty hypothesis was HALF confirmed, and the residual is the crash curriculum
+- **Confirmed:** removing `dd_lambda` un-shrank the policy — crash mean +15.4%→+24.8% (s3 +52.9% at
+  4.2% DD, nearly rule-parity), test up, sizes/DDs grew — **and the substrate held the DQ bound with
+  NO reward brake at all (worst seed anywhere 26.9% < 30%)**. The structural-safety claim is proven.
+- **Not confirmed:** no discrimination appeared — variance exploded (test +11.9%..+51.0%; val s0
+  +2.3% vs s1 −20.3%) and the seed-mean still trails the rule everywhere. val got *worse* (−8.7%).
+- **The remaining suspect, carried since GATE-2: `crash_train=4`** — four synthetic crashes per
+  ~128-day train window ≈ one per month, vs ZERO alt-crashes in the real sample. The policy's
+  learned crash prior is massively inflated, so deviating DOWN from the rule pays *on the training
+  distribution* (the rule rides ignitions into injected crashes) and transfers as blanket caution to
+  real windows. Every "defensive-everywhere" reading since GATE-2 is consistent with this.
+- **Next single variable: `crash_train 4 → 1`** on the rd8h0 config. Expect: means move toward the
+  rule on val/test; the regression signals are crash-split worst-seed DD (does survival skill
+  survive a thinner curriculum, with breadth obs still present?) and worst-seed DD anywhere.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
