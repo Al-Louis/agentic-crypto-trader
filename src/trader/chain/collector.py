@@ -176,9 +176,11 @@ class LogCollector:
             if self._buf_n >= self.flush_rows:
                 self._flush(cursor)
                 self._buf_from = cursor + 1
-            if len(logs) < 2_000:
+            # grow toward responses of ~8-12k logs — therpc returns >12k fine,
+            # and per-call fixed cost dominates when chunks are small
+            if len(logs) < 8_000:
                 easy += 1
-                if easy >= 5 and span < self.span_max:
+                if easy >= 3 and span < self.span_max:
                     span = min(int(span * 1.5), self.span_max)
                     easy = 0
             else:
