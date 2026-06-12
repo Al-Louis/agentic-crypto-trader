@@ -939,6 +939,26 @@ s0's bundle survived; driver gained partial-death detection). **Proposed next (i
 variable): `ent_coef 0.4→0.6`** — dose-response probe: if the gradient continues, ride it; if it
 regresses, 0.4 is the plateau and the next lever is steps-at-0.4.
 
+## Standings — rdLe6 (`ppo-event-rdLe6-c07bda0`, rdLe4 + **ent_coef 0.6**, loop iter 4)
+
+| seed | val | test | crash |
+|------|-----|------|-------|
+| s0 | +2.4% (DD 7%) | +7.7% (DD 4%) | +4.7% (DD 6%) |
+| s1 | +0.5% (DD 7%) | +5.8% (DD 10%) | +7.8% (DD 6%) |
+| s2 | +10.6% (DD 5%) | +8.9% (DD 10%) | +7.5% (DD 10%) |
+| s3 | −0.4% (DD 5%) | +29.3% (DD 10%) | **+35.0% (DD 6%)** |
+| **mean** | **+3.3%** | **+12.9%** | **+13.8%, 4/4 survive** |
+
+### Verdict — the entropy dose-response is answered: **0.4 is the peak**
+0.6 overshot on the binding regime: val collapsed +13.6%→+3.3% (test/crash ≈ flat) — too much
+exploration noise to consolidate the val-window selection skill, exactly the regression branch the
+iter-3 plan pre-registered. The ladder is now bracketed: 0.2 muted / **0.4 peak** / 0.6 over. Risk
+stays superb (worst DD anywhere 10.5%; the substrate brakes hold at every entropy level). Margin
+did not beat rdLe4 → stall 1/3. **Proposed next (iter 5, ONE variable, the pre-registered branch):
+`timesteps 1M→2M` at ent 0.4** — the LSTM at the working exploration level may consolidate the
+s0-style skill across seeds with more samples; watching for the rd9-style convergence collapse
+(different mechanism — that was the MLP at ent 0.2 with the anneal — but the verdict checks it).
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
