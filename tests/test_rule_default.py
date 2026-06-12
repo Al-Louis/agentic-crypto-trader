@@ -309,6 +309,30 @@ def test_wick_reject_kills_extreme_rejection_ignitions():
     assert (ok._ignite[:, j] == plain._ignite[:, j]).all()   # strong closes untouched
 
 
+def test_cycle_obs_spent_move_slots():
+    """cycle_obs appends 2 bounded slots: ret-since / bars-since the token's PRIOR ignition.
+    At RUN's FIRST ignition prompt the token is fresh (0.0 / 1.0); at a later prompt after the
+    runup, ret_since is positive (the spent-move flag the probe validated)."""
+    env = _rd_env(cycle_obs=True)
+    env.reset(start=40)
+    assert env.obs_dim == 15                              # 13 base + 2 cycle slots
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    obs = env._obs()
+    assert obs.shape == (15,)
+    first_ret, first_bars = float(obs[-2]), float(obs[-1])
+    assert first_ret == 0.0 and first_bars == 1.0        # fresh token: no prior ignition
+    j = env.col_ix["RUN"]
+    later = min(env.bar + 30, env.n_bars - 1)            # mid/post-runup: a prior ignition exists
+    env.bar = later
+    env._pending = ("entry", "RUN")
+    obs2 = env._obs()
+    assert obs2[-1] < 1.0                                 # bars-since now meaningful
+    assert abs(obs2[-2]) <= 1.0                           # tanh-bounded
+    plain = _rd_env()
+    plain.reset(start=40)
+    assert plain.obs_dim == 13                            # flag off: unchanged
+
+
 def test_all_default_policy_tracks_the_rule_mirror():
     """Parity (gate B, unit-scale): a policy answering idx0 at EVERY prompt through the env should
     track the rule mirror's equity on the synthetic panel (flat caps -> sizing matches ef=0.20)."""

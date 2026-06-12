@@ -62,6 +62,7 @@ class EventRungEnv:
                  det_blacklist: int = 0, det_surge: float = 8.0, det_drop: float = -0.15,
                  low_frac: pd.DataFrame | None = None, intrabar_floor: bool = False,
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
+                 cycle_obs: bool = False,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -115,7 +116,11 @@ class EventRungEnv:
             raise ValueError("rule_default needs action_mode='discrete' with n_action_levels=4")
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
-        self.obs_dim = OBS_DIM + (3 if self.harvest_obs else 0)   # +r24/r3d/r7d when harvest_obs
+        self.cycle_obs = bool(cycle_obs)                    # SPENT-MOVE knowledge (probe_knowledge:
+        #   an ignition whose token's PRIOR ignition already paid >10% returns −6..−7% fwd-24h vs
+        #   −1..−2% fresh, on BOTH train and val) — 2 slots: ret-since / bars-since prior ignition.
+        self.obs_dim = (OBS_DIM + (3 if self.harvest_obs else 0)   # +r24/r3d/r7d when harvest_obs
+                        + (2 if self.cycle_obs else 0))
         self.action_dim = 1
         self.n_bars = len(self.returns)
         self.cols = list(self.returns.columns)
@@ -151,6 +156,14 @@ class EventRungEnv:
         self._surge = surge.clip(0.0, SURGE_CLIP).to_numpy()
         self._ignite = ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()
         self._std = self.returns.rolling(warmup, min_periods=8).std().to_numpy()  # for causal universe
+        if self.cycle_obs:                                  # last-ignition bar per (bar, token):
+            ig_arr = ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()
+            last = np.full(ig_arr.shape, -1, dtype=np.int32)   # causal cumulative pass — the prior
+            run = np.full(ig_arr.shape[1], -1, dtype=np.int32)  # ignition STRICTLY BEFORE this bar
+            for b in range(ig_arr.shape[0]):
+                last[b] = run
+                run = np.where(ig_arr[b], b, run)
+            self._last_ig = last
         # entry_forward: the TYPICAL-ignition forward return (the demean null). A single scalar over
         # this panel's ignitions -> the preflight computes it identically, so the reward landscapes match.
         self._mu_base = self._ignition_base_rate() if reward_mode == "entry_forward" else 0.0
@@ -645,6 +658,15 @@ class EventRungEnv:
                     r = (self._px[self.bar, j] / p0 - 1.0) if p0 > 0 else 0.0
                     harv[i] = float(np.tanh(3.0 * np.clip(r, -RET_CLIP, RET_CLIP)))
             obs += harv
+        if self.cycle_obs:                                 # SPENT-MOVE: the event token's prior-
+            ret_since, bars_since = 0.0, 1.0               # ignition payoff + staleness (fresh = 0/1)
+            if tok is not None:
+                j = self.col_ix[tok]
+                pb = int(self._last_ig[self.bar, j])
+                if pb >= 0 and self._px[pb, j] > 0:
+                    ret_since = float(np.tanh(2.0 * (self._px[self.bar, j] / self._px[pb, j] - 1.0)))
+                    bars_since = float(min(self.bar - pb, 672) / 672.0)
+            obs += [ret_since, bars_since]
         return np.nan_to_num(np.array(obs, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
 
     def _info(self) -> dict:

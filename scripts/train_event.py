@@ -210,6 +210,9 @@ def main() -> None:
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
     p.add_argument("--harvest-obs", action="store_true", help="lever-2: append the event token's r24/r3d/r7d "
                    "momentum slots (OBS_DIM 13->16) so the policy can size UP on bull-harvest setups")
+    p.add_argument("--cycle-obs", action="store_true", help="SPENT-MOVE knowledge: 2 obs slots - "
+                   "the event token's ret-since / bars-since its PRIOR ignition (probe: "
+                   "prior-paid>10%% ignitions return -6..-7%% fwd-24h vs -1..-2%% fresh, train AND val)")
     p.add_argument("--rule-default", action="store_true", help="rung-1b: discrete action idx 0 EXECUTES "
                    "rung-0's decision (entry at rule sizing / exit full cut); deviations are earned")
     p.add_argument("--exit-commit", type=int, default=0, help="rung-1b: bars a non-cut exit decision "
@@ -306,7 +309,7 @@ def main() -> None:
                       dust_usd=args.dust_usd,
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
-                      **ohlc_kwargs, seed=args.seed)
+                      cycle_obs=args.cycle_obs, **ohlc_kwargs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -419,7 +422,8 @@ def main() -> None:
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
-                             "harvest_obs": args.harvest_obs, "rule_default": args.rule_default,
+                             "harvest_obs": args.harvest_obs, "cycle_obs": args.cycle_obs,
+                             "rule_default": args.rule_default,
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
@@ -436,7 +440,8 @@ def main() -> None:
     flags = (f"{args.reward_mode} k{args.k}/{args.universe_mode} dd{args.dd_lambda}"
              + (f" +lstm{args.lstm_size}" if args.recurrent else "")
              + (" +rd" if args.rule_default else "") + (" +tp" if args.tp_rungs else "")
-             + (" +harvest" if args.harvest_obs else "") + (" +crash" if args.crash_eval else ""))
+             + (" +harvest" if args.harvest_obs else "") + (" +cyc" if args.cycle_obs else "")
+             + (" +crash" if args.crash_eval else ""))
     model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"
     entry = ap.export_portfolio_run(out, args.run_id, equity=eq_pub, metrics=metrics, weights=weights,
                                     token_candles=candles, token_trades=trades, universe=universe,
