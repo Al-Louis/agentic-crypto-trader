@@ -69,10 +69,18 @@ def main(argv: list[str] | None = None) -> int:
     universe = eligible_symbols(include_stables=not args.no_stables)
     cfg = LoopConfig(universe=universe, mode=args.mode, tick_seconds=args.interval,
                      max_ticks=args.ticks)
-    loop = Loop(cfg, feed, HoldCore())
+    # Telemetry to the trading/ surface (put-only instance role on the host). Unset -> off;
+    # the loop still records everything locally — publishing is read-side, never load-bearing.
+    publish_target = config.get("APENTIC_PUBLISH_TARGET")
+    publisher = None
+    if publish_target:
+        from trader.agent.publish import build_publisher
+        publisher = build_publisher(cfg.agent_ledger_path, publish_target)
+    loop = Loop(cfg, feed, HoldCore(), publisher=publisher)
     loop.install_signal_handlers()
     print(f"loop start: mode={cfg.mode} universe={len(universe)} core={loop.core.name} "
-          f"interval={cfg.tick_seconds}s ticks={args.ticks or 'inf'}", file=sys.stderr)
+          f"interval={cfg.tick_seconds}s ticks={args.ticks or 'inf'} "
+          f"publish={publish_target or 'off'}", file=sys.stderr)
     n = loop.run()
     print(f"loop stop: {n} ticks executed", file=sys.stderr)
     return 0

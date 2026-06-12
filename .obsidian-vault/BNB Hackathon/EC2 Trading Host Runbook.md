@@ -10,9 +10,14 @@ is copy-pasteable. Deployable templates live in **`deploy/`** at the repo root.
 **Hard rules carried in from the custody design:**
 - The competition wallet is **created ON this box** — keys are born where signing happens and
   never transit. The laptop spike wallet (`0x2C19…D32E`) is a throwaway and is never reused.
-- The mnemonic backup is **paper, user-held, offline** — never cloud, never a password manager,
-  never a screenshot (this differs from the spike wallet, where a password-manager note was
-  fine for a ≤$10 throwaway).
+- **(Corrected 2026-06-12, as-found)** TWAK **never displays the mnemonic** — it is generated
+  inside Trust Wallet Core, AES-256-GCM-encrypted straight into `wallet.json`, and there is no
+  export command (References §key-management: "never stored in plaintext"; confirmed on both the
+  spike and the production wallet). So a paper-mnemonic backup is impossible; **the backup IS
+  `wallet.json` (ciphertext) + the password**, held separately: password in the password manager,
+  a copy of `wallet.json` on **user-held offline media (USB), never cloud, never alongside the
+  password** — taken before any funds land (Phase G). Losing the EBS volume without that copy
+  loses the bankroll.
 - **No `--password` flag, ever.** The unlock path on this headless box is the root-owned
   `0600` env-file (§the headless keychain answer, below).
 - **Never snapshot/AMI this instance** once the wallet exists — a snapshot copies
@@ -236,19 +241,20 @@ twak setup --wallet
 
 - **Password:** fresh and strong, never used elsewhere. It goes in exactly two places: your
   password manager, and (E3) the env-file. Nowhere else, ever.
-- **Keychain:** on this headless box the default keychain save has **no Secret Service to
-  talk to** — expect it to fail or be skipped; that is by design here (§headless answer
-  below). If `setup --wallet` aborts on the keychain step, fall back to
-  `twak wallet create --no-keychain` (it prompts for the password interactively, same as the
-  spike). Contingency only if some path *demands* a `--password` flag: `set +o history`
-  first, run it, `history -c`, and treat that shell as burned — but prefer the prompts.
-- **The mnemonic** (shown once): copy it to **paper, by hand, two copies**, stored where you
-  control them. Read it back from paper to verify before continuing. NEVER: screenshot,
-  clipboard, cloud notes, password manager — this is the competition wallet, not the spike
-  throwaway. Don't run this step inside any terminal that logs scrollback to disk.
+- **Keychain (as-found 2026-06-12):** the save **"succeeds"** on this headless box — the
+  `@napi-rs/keyring` backend lands the password in the **kernel user keyring** (kernel memory:
+  survives the SSH session, does NOT survive reboot, readable by any trader-level process).
+  That is a second, reboot-fragile unlock copy we don't want — **delete it**
+  (`twak wallet keychain delete`) so the root-owned env-file is the ONE unlock path
+  (§headless answer below). Contingency only if some path *demands* a `--password` flag:
+  `set +o history` first, run it, `history -c`, and treat that shell as burned — but prefer
+  the prompts.
+- **The mnemonic is never shown** (see the corrected hard rule above) — there is nothing to
+  write down at this step. The backup is taken later (G2-pre): an offline copy of
+  `wallet.json` + the password manager entry, stored apart.
 
-**Agent verifies (read-only):** `sudo -u trader -H twak wallet status` → `Wallet: configured`
-(keychain line expected to read *no password stored* — correct on this host);
+**Agent verifies (read-only):** `sudo -u trader -H twak wallet status` → `Wallet: configured`;
+`twak wallet keychain check` → *no password stored* (after the delete);
 `sudo -n stat -c '%U %a' /srv/trader/.twak/wallet.json` → `trader 600`-class perms.
 
 ### E3 — USER-ACTION: wire the unlock path
@@ -272,9 +278,9 @@ used. Then **USER-ACTION E4a:** `sudoedit /etc/trader/trader.env` → set
 for monitoring). If either command auth-errors, the env-file password is wrong — fix E3
 before anything else.
 
-**Checkpoint E (the ceremony gate):** signature returned; address recorded; mnemonic on
-paper and verified; password in exactly password-manager + env-file; `verify-host.sh` all
-green through item 5.
+**Checkpoint E (the ceremony gate):** signature returned; address recorded; keychain copy
+deleted; password in exactly password-manager + env-file; `verify-host.sh` all green through
+item 5. (Wallet backup — the offline `wallet.json` copy — is the G2-pre gate, before funding.)
 
 ---
 
@@ -319,6 +325,15 @@ placeholder for now) and publish it from the **laptop** (existing publisher cred
 `trading/agent-card.json` on the data bucket. Verify
 `https://data.alexlouis.dev/trading/agent-card.json` returns 200 JSON. **`--uri` is REQUIRED
 on the erc8004 mint** ([[TWAK Spike Runbook]] step 7 gotcha) — this must exist first.
+
+### G2-pre — USER-ACTION: the wallet backup (BEFORE any funds)
+
+From the laptop: `scp -i ~/.ssh/act-trading-host ubuntu@<EIP>:/tmp/wallet-backup.json .` after
+staging it on the box (`sudo cp /srv/trader/.twak/wallet.json /tmp/wallet-backup.json && sudo
+chown ubuntu /tmp/wallet-backup.json`; remove the staged copy after). Move the file to
+**offline media (USB)** — it is AES-256-GCM ciphertext, useless without the password, but
+keep it away from the password manager's storage anyway. Then `rm` the laptop copy.
+Recovery path: restore to `~/.twak/wallet.json` on any box with the TWAK CLI + the password.
 
 ### G2 — USER-ACTION: gas + smoke funding (~$10 of BNB)
 
@@ -437,8 +452,8 @@ Order matters — funds first, then secrets, then the box:
 3. Destroy secrets on-box: `sudo shred -u /etc/trader/trader.env
    /srv/trader/.twak/wallet.json /srv/trader/.twak/credentials.json`.
 4. **USER-ACTION:** revoke the production TWAK API key in the portal; remove the GitHub
-   deploy key; destroy the paper mnemonic copies (the wallet is empty and retired — the
-   address's history stays public, which is fine and expected).
+   deploy key; destroy the offline `wallet.json` backup copy (the wallet is empty and
+   retired — the address's history stays public, which is fine and expected).
 5. **USER-ACTION (laptop):** terminate the instance (EBS `DeleteOnTermination` wipes the
    volume), release the Elastic IP, delete the SG/role/profile/keypair if not reused.
 

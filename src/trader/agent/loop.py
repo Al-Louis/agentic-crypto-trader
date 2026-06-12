@@ -29,6 +29,7 @@ at <= $1 equity scores 0% per the competition mechanic — surfaced, not silentl
 from __future__ import annotations
 
 import signal
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -72,12 +73,14 @@ class Loop:
     for tests). Construct -> `run()` blocks until `max_ticks` or a stop signal."""
 
     def __init__(self, config: LoopConfig, feed: PriceFeed, core: DecisionCore | None = None,
-                 *, execute_fn=None, sleep=time.sleep, now_iso=_now_iso):
+                 *, execute_fn=None, sleep=time.sleep, now_iso=_now_iso, publisher=None):
         self.cfg = config
         self.feed = feed
         self.core = core or HoldCore()
         self._sleep = sleep
         self._now_iso = now_iso
+        # Optional zero-arg telemetry hook (trading/ surface — `agent.publish.build_publisher`)
+        self._publisher = publisher
         # Live signing is injectable for tests, but defaults to the ONE real path.
         if execute_fn is None:
             from trader.execution.execute import execute_trade
@@ -141,6 +144,11 @@ class Loop:
         equity = self._equity(prices)
         dd_pct, peak = self._mark_equity(equity, ts, tick_idx)
         self._heartbeat(ts, tick_idx, equity)
+        if self._publisher is not None:
+            try:
+                self._publisher()
+            except Exception as e:  # noqa: BLE001 — telemetry must never stop the loop
+                print(f"publish warning (tick {tick_idx}): {e}", file=sys.stderr)
         # advance the in-memory tick pointer (disk rows carry it for crash-recovery)
         self.state = store.derive_state(self.cfg.agent_ledger_path)
         return {"ts": ts, "tick": tick_idx, "equity_usd": equity, "drawdown_pct": dd_pct,

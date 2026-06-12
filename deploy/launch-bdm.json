@@ -1,0 +1,11 @@
+[
+  {
+    "DeviceName": "/dev/sda1",
+    "Ebs": {
+      "VolumeSize": 16,
+      "VolumeType": "gp3",
+      "Encrypted": true,
+      "DeleteOnTermination": true
+    }
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "ResourceType": "instance",
+    "Tags": [
+      {
+        "Key": "Name",
+        "Value": "act-trading-host"
+      }
+    ]
+  }
+]
