@@ -706,3 +706,18 @@ against the panel before touching the rule:
   confirmed from the CLI reference).
 - **RL training time vs June 16 gate:** RL adds a training phase that the other families skip.
   If the execution loop isn't stable by ~June 12, RL is likely out of scope for the live window.
+
+## PARKED — wallet-attributed token personality (post-competition expansion, 2026-06-12)
+
+The user theory chain, held for after the live window: the token-personality probe found a real
+but price-only-unusable kernel (cross-family sign persistence ~2/3, magnitude unpredictable,
+entry-payoff REFUTED — see [[Experiment Log]]). The expansion: an **on-chain trade-execution
+logger** (BscScan transfers/holders — the [[Real-time Monitoring]] surface) attributing each
+token's flow to specific WALLETS: the resident MM/dev wallets that *create* the stable
+personality, vs disrupting actors (a new wallet accumulating -> pump precursor; an aged wallet
+distributing -> local-dump precursor; the MM going quiet -> detonation precursor). This is the
+concrete mechanism behind the quant consult's Addition-3 (liquidity/flow state), which was
+DATA-GATED — the logger IS the missing time-varying data source. Probe targets when built:
+(a) does wallet-cohort flow lead price by enough hours to act on; (b) does MM-wallet behavior
+change predict personality breaks; (c) detonation early-warning. Strictly post-competition:
+needs live collection infrastructure, not derivable from the recorded OHLCV panel.
