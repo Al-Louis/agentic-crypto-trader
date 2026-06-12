@@ -1076,3 +1076,16 @@ diluted the working 16-dim policy). The probe gates necessity, not sufficiency -
 contract.** Open paths for the human: (a) widen seeds at rdLe4 (n=8-12) - the distribution/
 deployment question; (b) spend the frozen test on rdLe4; (c) the parked structural ideas
 (exit-style personality, wallet-attributed flow) - bigger bets, post-competition scale.
+
+## Standings — rdLk (`ppo-event-rdLk-c061ed8`, rdLe4 + n_epochs 4 + target_kl 0.03, loop iter 8) → DRIFT ALARM #3
+val **+3.1%** (-1.3/+3.8/-1.8/+11.5, worst-DD 10.2%) | test **-0.7%** | crash **+4.9%**.
+**The update-geometry hypothesis is ANSWERED, both halves:** conservative updates DID compress the
+val seed spread (1.7..35.3 -> -1.8..11.5) — the per-seed basin lottery IS driven by the aggressive
+10-epoch updates — but it compressed by REMOVING THE RIGHT TAIL, not lifting the floor. The +35%
+basin requires the aggressive updates to be FOUND. Conclusion of the whole mechanics arc (8
+single-variable neighbors, 3 drift alarms): **rdLe4's excellence is a right-tail draw of a
+high-variance training lottery, and every variance-taming lever destroys the tail it was meant to
+stabilize.** The remaining move is the quant-cleared statistics: EMBRACE the lottery — (a) widen
+seeds at rdLe4 (n=8-12, ~85% power of >=1 good-basin draw), select on val, then (b) spend the
+frozen test ONCE on the selected seed across all three regimes. Loop halted by contract; the
+seed-widening is a human-launch decision (it is N draws of the SAME config, not a new lever).
