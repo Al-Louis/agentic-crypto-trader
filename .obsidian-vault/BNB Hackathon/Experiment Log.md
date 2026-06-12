@@ -1055,3 +1055,14 @@ REDUCE OOS IC by -0.065 (baseline +0.104 -> +0.039). Same shape as the cross-sec
 a real structural fact that does not convert to entry-moment alpha. **No build** — the probe saved
 the sweep. Residual (unprobed, parked): the sign-kernel might inform EXIT style (reversion-affine
 tokens -> bank TP rungs earlier), a different target needing its own probe.
+
+## Standings context — loop iter 7 launched: rdLc (`ppo-event-rdLc-51f1b93`, rdLe4 + cycle_obs)
+The first KNOWLEDGE-expansion iteration. `probe_knowledge.py` gated three obs candidates from the
+quant consult: **cross-sectional rank REFUTED** (incremental OOS IC -0.029 train / +0.015 val -
+adding rank features HURTS; the redundancy null the consult predicted), **linear cycle memory
+REFUTED** (+0.003), but the **SPENT-MOVE categorical effect VALIDATED ON BOTH SPLITS**: ignitions
+on a token whose prior ignition already paid >10% return **-5.99% fwd-24h (train) / -6.96% (val)**
+vs -1.82%/-0.74% fresh. Built as KNOWLEDGE not a rule (the user principle): `cycle_obs` appends 2
+slots - tanh(ret-since-prior-ignition) + bars-since/672 - so the agent can LEARN the walk-away.
+OBS_DIM 16->18. ONE variable vs the rdLe4 champion. Verdict checklist: beat val +13.6/test +14.7,
+AND the post-mortem re-entry-churn + entry-chase numbers (s2-class craft) should drop.

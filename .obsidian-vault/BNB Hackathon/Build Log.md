@@ -829,3 +829,15 @@ live.
 - 🔄 **June 16 PoC gate** — the on-chain half is **met** (real guarded trade landed via TWAK);
   the autonomous loop (read→decide→sign→confirm, continuous) is the active build, with AWS
   deployment + paper forward-run to follow (see the plan-forward entry above).
+
+## 2026-06-11 → 06-12 — the autonomous loop runs the lab; the knowledge era opens
+
+- **Loop driver built + armed** (`trader.experiment.driver`, `scripts/rl_loop.py`, `/rl-loop`
+  skill, 30-min cron): launch->poll->verdict->record->decide, judgment left to the driving agent.
+  Hardened live: smoke-parser fix, fire-and-verify launches (tailscale session-tree wait), setsid
+  (retires the kill-PGID hazard), partial-sweep death detection (the WSL-close crash).
+- **Six autonomous iterations** -> rdLe4 family champion (val +13.6/test +14.7/crash +13.2,
+  worst-DD 10.5%) -> drift-alarm self-halt with the neighborhood mapped. -> [[Experiment Log]].
+- **Knowledge era:** trade post-mortem grader + quant-consult rubric; five theories probed
+  (1 validated -> `cycle_obs`/rdLc sweeping; 3 refuted pre-compute; 1 data-gated/parked).
+  Probes: `probe_knowledge.py`, `probe_personality.py`. -> [[AI Training]] as-built.

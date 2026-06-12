@@ -556,3 +556,26 @@ decision-core interface lets us decide this late.
 - **Training host.** Where the offline runs execute — the **desktop**, chosen for CPU cores +
   RAM (this workload is env-stepping-bound; torch CPU-only). Parallelize via vectorized envs
   (`n_envs ≈ physical cores`), not GPU → [[Remote Capabilities]].
+
+## As-built (2026-06-12) — the autonomous loop arc + the knowledge-expansion era
+
+**The loop ran the lab.** Six autonomous iterations in ~24h (driver: [[MCP Server]] 4B/4C):
+rdL (LSTM muted) -> rdLq (Q-tail guards, +3.2pp) -> **rdLe4 (ent 0.4 - BREAKTHROUGH: val +13.6 /
+test +14.7 / crash +13.2, worst-DD 10.5%, two individual val gate passes)** -> rdLe6/rdL2m/rdLp1
+(entropy/steps/prior all REGRESS) -> **drift-alarm self-halt**. rdLe4 = family champion, its
+neighborhood mapped on four sides. Two desktop crashes absorbed (WSL-close mid-sweep; partial-death
+detection added). Verdicts auto-logged, leaderboard auto-published each iteration.
+
+**The knowledge era (post-plateau, user direction: expand what the agent KNOWS).**
+- `scripts/trade_postmortem.py` — round-trip grader (entry/exit/alloc/freq/risk). Findings: seed
+  variance IS craft variance (champion seed: entries +12% off the low, MAE -3%, sizes winners
+  +0.19; laggard: chases +21%, MAE -13.5%, sizes losers -0.28); **TP-rung exits are perfect
+  (100% capture); trailing exits give back 9-19%** — the missing skill is mid-trade exhaustion
+  recognition. Quant-corrected rubric: vs-baselines GO/NO-GO panel FIRST (anti-proxy-drift),
+  causal metrics only are scored, skip-quality panel, cross-seed coherence axis.
+- **Probe scoreboard** (probe-before-build, 5 theories this era): cross-sectional rank REFUTED;
+  linear cycle-memory REFUTED; **spent-move flag VALIDATED both splits -> `cycle_obs` built
+  (rdLc sweeping)**; token-personality kernel real (pooled persistence rho +0.256, sign ~2/3
+  stable) but **entry-payoff REFUTED** (-0.065 OOS IC) -> no build, exit-style variant parked;
+  liquidity/flow DATA-GATED (static sim liquidity) -> the wallet-attributed logger parked in
+  [[Trading Strategies]] as the post-competition mechanism.
