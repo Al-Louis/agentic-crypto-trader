@@ -981,6 +981,31 @@ the init logit bias toward the rule is the gravity well the seeds keep falling b
 training lengthens; at the working entropy a weaker prior should let more seeds escape the way
 s0/s3 did, and the substrate brakes make a freer init safe (worst DD this sweep: 14.9%).
 
+## Standings — rdLp1 (`ppo-event-rdLp1-c07bda0`, rdLe4 + **rule_prior 1.0**, loop iter 6) → **DRIFT ALARM**
+
+| seed | val | test | crash |
+|------|-----|------|-------|
+| s0 | +1.8% (DD 7%) | −7.1% (DD 8%) | −3.1% (DD 4%) |
+| s1 | +4.6% (DD 4%) | +2.7% (DD 10%) | +6.8% (DD 6%) |
+| s2 | −3.2% (DD 8%) | +9.4% (DD 9%) | +16.4% (DD 7%) |
+| s3 | +4.1% (DD 3%) | −1.7% (DD 9%) | +4.9% (DD 6%) |
+| **mean** | **+1.8%** | **+0.8%** | **+6.3%, 4/4 survive** |
+
+### Verdict — the weak-prior hypothesis FAILED; the prior was load-bearing. **Loop HALTED (drift alarm 3/3).**
+Halving the rule-prior diluted the family back toward noise (val 13.6→1.8 vs rdLe4): the init
+anchor is what lets entropy explore *around* a sensible policy instead of from scratch. The
+**rdLe4 neighborhood is now mapped on four sides** — ent↑ (rdLe6 ✗), steps↑ (rdL2m ✗), prior↓
+(rdLp1 ✗), and its own ancestor (rdLq ✗ below) — **rdLe4 (LSTM-256, ent 0.4, prior 2.0, 1M, full
+Q-tail substrate) is a genuine local optimum and the FAMILY CHAMPION**: val +13.6% / test +14.7% /
+crash +13.2%, worst-DD 10.5%, two individual val regime-gate passes in family (s0 +35.3%, rdL2m-s3
++20.0%). The autonomous loop ran 6 iterations over ~24h (1 breakthrough, 3 refutations, 2 crash
+recoveries, every verdict logged + leaderboard auto-published) and **halted itself by contract**
+rather than grind the plateau. **Open hypotheses for the human:** (a) spend the frozen test on
+rdLe4 (the one-shot champion question); (b) widen seeds at rdLe4 (n=8–12) for distribution +
+best-seed selection; (c) episode_bars 336→672 (longer LSTM context); (d) lstm_size 128 (smaller
+memory generalizes); (e) seed-ensemble voting. The loop awaits `rl_loop_reset` + a human-chosen
+direction.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
