@@ -263,6 +263,8 @@ def main() -> None:
     p.add_argument("--dd-lambda", type=float, default=2.0)
     p.add_argument("--dd-soft", type=float, default=0.15, help="drawdown penalty soft knee")
     p.add_argument("--ent-coef", type=float, default=0.1)
+    p.add_argument("--n-epochs", type=int, default=10, help="PPO epochs per rollout (update conservatism; semi-MDP decisions are few)")
+    p.add_argument("--target-kl", type=float, default=None, help="PPO early-stop KL per update (None = SB3 default, unconstrained)")
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--lr-end", type=float, default=None, help="if set, linearly anneal lr -> lr-end")
     p.add_argument("--eval-split", default="val", choices=["val", "test"])
@@ -341,10 +343,12 @@ def main() -> None:
         from sb3_contrib import RecurrentPPO
         model = RecurrentPPO("MlpLstmPolicy", venv, verbose=0, seed=args.seed, n_steps=1024,
                              batch_size=256, ent_coef=args.ent_coef, learning_rate=lr,
+                             n_epochs=args.n_epochs, target_kl=args.target_kl,
                              policy_kwargs=dict(lstm_hidden_size=args.lstm_size))
     else:
         model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
-                    ent_coef=args.ent_coef, learning_rate=lr)
+                    ent_coef=args.ent_coef, learning_rate=lr,
+                    n_epochs=args.n_epochs, target_kl=args.target_kl)
     if args.rule_default and args.rule_prior > 0:      # default-executes-the-rule prior: bias the
         import torch                                   # categorical head toward idx 0 at init, so the
         with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
@@ -433,7 +437,7 @@ def main() -> None:
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
-                             "ent_coef": args.ent_coef, "lr": args.lr, "lr_end": args.lr_end,
+                             "ent_coef": args.ent_coef, "n_epochs": args.n_epochs, "target_kl": args.target_kl, "lr": args.lr, "lr_end": args.lr_end,
                              "eval_split": args.eval_split}
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows
