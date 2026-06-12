@@ -164,3 +164,19 @@ trading/trades.json     { generated, mode, fills: [<fill rows>], refusals: [<ref
 - Wiring: `python -m trader.agent` builds the publisher iff `APENTIC_PUBLISH_TARGET` is set
   (the host env-file sets `s3://alexlouis-apentic-data/trading`); the loop's hook is
   fail-safe — a broken put warns on stderr and never stops a tick.
+
+## PARKED SPEC — configurable simulation frontend (user design, 2026-06-12)
+
+Site page: pick {trained model, historical window, universe-vol-lookback} -> simulated
+performance bundle. Enablers BUILT: (1) trainer now persists `policy.zip` +
+`vecnormalize.pkl` per run (CRITICAL gap found: every pre-2026-06-12 policy was lost on
+process exit — weights begin persisting from the next launch; the in-flight 12-seed pool is
+deliberately unpatched to keep the draws identical); (2) `universe_lookback` env param +
+`--universe-lookback` (the current selection window is trailing 168h/7d — NOT 1yr; the ladder
+24h/168h/720h/2160h/4320h is an untested axis). REMAINING to build: a `simulate` job (load
+saved policy + VecNormalize, run evaluate_event_policy over an arbitrary window/lookback,
+publish a `kind:"simulation"` bundle — the manifest field already exists and the dashboard
+already filters on it) + a precomputed matrix or an EC2-hosted API for on-demand runs (static
+site cannot trigger compute — choose per Apentic architecture). The vol-lookback experiment
+ALSO runs offline without the frontend: rung-0/B&H across lookbacks is a cheap probe;
+model-based requires the new weight artifacts.

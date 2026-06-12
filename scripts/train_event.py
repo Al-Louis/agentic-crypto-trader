@@ -208,6 +208,8 @@ def main() -> None:
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
+    p.add_argument("--universe-lookback", type=int, default=0, help="trailing bars for universe vol "
+                   "ranking (0 = warmup/168h default; 24=1d 720=1mo 2160=3mo 4320=6mo)")
     p.add_argument("--harvest-obs", action="store_true", help="lever-2: append the event token's r24/r3d/r7d "
                    "momentum slots (OBS_DIM 13->16) so the policy can size UP on bull-harvest setups")
     p.add_argument("--cycle-obs", action="store_true", help="SPENT-MOVE knowledge: 2 obs slots - "
@@ -311,7 +313,7 @@ def main() -> None:
                       dust_usd=args.dust_usd,
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
-                      cycle_obs=args.cycle_obs, **ohlc_kwargs, seed=args.seed)
+                      cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback, **ohlc_kwargs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -354,6 +356,10 @@ def main() -> None:
         with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
             model.policy.action_net.bias[0] += args.rule_prior
     model.learn(total_timesteps=args.timesteps, callback=ProgressCb())
+    model.save(os.path.join(out, "policy.zip"))           # persist the trained policy + the obs-
+    venv.save(os.path.join(out, "vecnormalize.pkl"))      # normalization stats: re-loadable for the
+    #   simulator/deployment (every pre-2026-06-12 policy was lost on process exit). Stays on the
+    #   training box (outside the published bundle subdir).
 
     write_progress(out, state="running", phase="evaluate")
 
@@ -425,7 +431,7 @@ def main() -> None:
                              "res_gamma": args.res_gamma, "fwd_horizon": args.fwd_horizon,
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
-                             "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k,
+                             "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k, "universe_lookback": args.universe_lookback,
                              "harvest_obs": args.harvest_obs, "cycle_obs": args.cycle_obs,
                              "rule_default": args.rule_default,
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,

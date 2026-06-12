@@ -62,7 +62,7 @@ class EventRungEnv:
                  det_blacklist: int = 0, det_surge: float = 8.0, det_drop: float = -0.15,
                  low_frac: pd.DataFrame | None = None, intrabar_floor: bool = False,
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
-                 cycle_obs: bool = False,
+                 cycle_obs: bool = False, universe_lookback: int = 0,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -155,7 +155,12 @@ class EventRungEnv:
         self._cush = cushion.to_numpy()
         self._surge = surge.clip(0.0, SURGE_CLIP).to_numpy()
         self._ignite = ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()
-        self._std = self.returns.rolling(warmup, min_periods=8).std().to_numpy()  # for causal universe
+        # causal universe-selection volatility: trailing `universe_lookback` bars (0 = the historical
+        # default, warmup=168h/7d). The lookback is an UNTESTED axis (user simulator design,
+        # 2026-06-12): 24=1d, 168=1wk, 720=1mo, 2160=3mo, 4320=6mo (data permitting).
+        ulb = int(universe_lookback) if universe_lookback else warmup
+        self.universe_lookback = ulb
+        self._std = self.returns.rolling(ulb, min_periods=8).std().to_numpy()
         if self.cycle_obs:                                  # last-ignition bar per (bar, token):
             ig_arr = ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()
             last = np.full(ig_arr.shape, -1, dtype=np.int32)   # causal cumulative pass — the prior
