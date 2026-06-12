@@ -721,3 +721,13 @@ DATA-GATED — the logger IS the missing time-varying data source. Probe targets
 (a) does wallet-cohort flow lead price by enough hours to act on; (b) does MM-wallet behavior
 change predict personality breaks; (c) detonation early-warning. Strictly post-competition:
 needs live collection infrastructure, not derivable from the recorded OHLCV panel.
+
+**Addendum (2026-06-12, order-book depth concept):** a third independent arrow at this same parked
+target. The CLOB depth-leads-price mechanism (vanishing resting bids, book imbalance, ~11s lead)
+does NOT exist on our AMM venue (no book; deterministic constant-product slippage - already
+modeled in the broker; and sub-minute edges die to our ~0.7-1% round-trip cost). The on-chain
+ANALOGS are real and belong to the same logger: **LP Mint/Burn events** (liquidity withdrawal
+precedes the dump - plausibly the mechanism behind the detonation pattern) and **net swap-flow
+imbalance** (the AMM book-imbalance analog, probe-able for reversion stats at cost-survivable
+timescales). The pool-event stream (Sync/Mint/Burn/Swap logs) is the single missing instrument
+behind all three ideas: wallet attribution, liquidity/flow knowledge, depth-leads-price.
