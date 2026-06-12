@@ -150,6 +150,28 @@ def test_malformed_ledger_refuses_to_start(tmp_path):
         Loop(cfg, FakeFeed([{"BNB": 600.0}]), HoldCore())
 
 
+# --- clean shutdown ----------------------------------------------------------
+
+def test_request_stop_wakes_the_inter_tick_wait(tmp_path):
+    """A stop signal during the (hour-long) inter-tick wait must return promptly — the
+    systemd `stop` path. time.sleep resumes after a signal handler (PEP 475); the loop's
+    default Event-based wait must not."""
+    import threading
+    import time as _time
+
+    cfg = _cfg(tmp_path, max_ticks=None)
+    cfg = LoopConfig(universe=cfg.universe, mode="paper", tick_seconds=3600.0,
+                     max_ticks=None, agent_ledger_path=cfg.agent_ledger_path,
+                     risk_ledger_path=cfg.risk_ledger_path)
+    loop = Loop(cfg, FakeFeed([{"BNB": 600.0, "USDT": 1.0}]), HoldCore())  # default wait
+    t = threading.Thread(target=loop.run)
+    t.start()
+    _time.sleep(0.2)          # let the first tick finish and the loop enter its wait
+    loop.request_stop()
+    t.join(timeout=5.0)       # must wake immediately, not after 3600s
+    assert not t.is_alive()
+
+
 # --- mode gating ------------------------------------------------------------
 
 def test_live_requires_explicit_mode_string():

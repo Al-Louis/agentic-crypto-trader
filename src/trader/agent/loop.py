@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import signal
 import sys
-import time
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,11 +73,15 @@ class Loop:
     for tests). Construct -> `run()` blocks until `max_ticks` or a stop signal."""
 
     def __init__(self, config: LoopConfig, feed: PriceFeed, core: DecisionCore | None = None,
-                 *, execute_fn=None, sleep=time.sleep, now_iso=_now_iso, publisher=None):
+                 *, execute_fn=None, sleep=None, now_iso=_now_iso, publisher=None):
         self.cfg = config
         self.feed = feed
         self.core = core or HoldCore()
-        self._sleep = sleep
+        # Default inter-tick wait is an Event.wait, not time.sleep: a stop signal mid-wait
+        # wakes it immediately (time.sleep resumes after the handler per PEP 475, which made
+        # `systemctl stop` hang out the full tick and end in SIGKILL).
+        self._wake = threading.Event()
+        self._sleep = sleep if sleep is not None else (lambda s: self._wake.wait(s))
         self._now_iso = now_iso
         # Optional zero-arg telemetry hook (trading/ surface — `agent.publish.build_publisher`)
         self._publisher = publisher
@@ -93,8 +97,10 @@ class Loop:
     # --- lifecycle ---------------------------------------------------------
 
     def request_stop(self, *_a) -> None:
-        """Clean shutdown signal — the current tick finishes, then run() returns."""
+        """Clean shutdown signal — the current tick finishes, then run() returns. Waking the
+        inter-tick wait makes the stop immediate instead of up to a tick away."""
         self._stop = True
+        self._wake.set()
 
     def install_signal_handlers(self) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
