@@ -731,3 +731,10 @@ precedes the dump - plausibly the mechanism behind the detonation pattern) and *
 imbalance** (the AMM book-imbalance analog, probe-able for reversion stats at cost-survivable
 timescales). The pool-event stream (Sync/Mint/Burn/Swap logs) is the single missing instrument
 behind all three ideas: wallet attribution, liquidity/flow knowledge, depth-leads-price.
+
+**Addendum (2026-06-12, instrument BUILT):** the pool-event logger now exists —
+`src/trader/chain/` + a historical backfill over the recorded OHLCV window, which un-parks the
+*probing* of all three ideas without waiting for live collection (the "strictly post-competition"
+constraint applied to live infrastructure; the backfill route was the unlock). Data contract,
+RPC findings, and the three pre-registered probes: [[Pool-Event Data Layer]]. Probe results land
+in [[Experiment Log]]; integration into training stays gated on a probe PASS, per the law.

@@ -28,6 +28,7 @@ data/*.parquet
 data/ohlcv/
 data/anchor/
 data/features/
+data/chain/
 data/*.json
 data/*.csv
 # Risk ledger: tx hashes + trade sizes (no secrets, but operational state — never committed)

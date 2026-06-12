@@ -830,6 +830,23 @@ live.
   the autonomous loop (read→decide→sign→confirm, continuous) is the active build, with AWS
   deployment + paper forward-run to follow (see the plan-forward entry above).
 
+## 2026-06-12 — pool-event data layer: the parked instrument gets built
+
+- **`src/trader/chain/` built** (fully isolated, read-only — see [[Pool-Event Data Layer]] for the
+  data contract and the isolation contract): `rpc` (multi-endpoint failover — `bsc.therpc.io` is
+  the one free endpoint serving deep historical `eth_getLogs`; publicnode prunes to ~1 day;
+  dataseed refuses getLogs entirely), `events` (V2 Sync/Swap/Mint/Burn + V3 Swap/Mint/Burn/Collect
+  decoders, one pool-perspective sign convention; Pancake V3's Swap topic0 ≠ Uniswap's — confirmed
+  on Q), `registry` (16 V3 + 4 V2 pools, probed decimals — XAUt 6, BabyDoge 9, HUMA 6), `collector`
+  (downloader-pattern manifest resume, adaptive span, truncation-split), `panels` (hourly frames
+  aligned to the returns index). 11 new tests (decoders + aggregation).
+- **Why:** retroactively unblocks the data-gated liquidity/flow knowledge direction — the backfill
+  covers the SAME Nov-2025→Jun-2026 window every prior probe ran on. Three parked ideas converge on
+  this one instrument ([[Trading Strategies]] PARKED + addendums).
+- **Backfill launched** (~35.9M blocks, ~20-25M logs, ~10-14h laptop, resumable). Three
+  pre-registered probes ship with it: LP-pull→detonation lead (graded on DRAWDOWN), flow-imbalance→
+  reversion (≥24h horizons), wallet-cohort lead. Findings -> [[Experiment Log]] when run.
+
 ## 2026-06-11 → 06-12 — the autonomous loop runs the lab; the knowledge era opens
 
 - **Loop driver built + armed** (`trader.experiment.driver`, `scripts/rl_loop.py`, `/rl-loop`
