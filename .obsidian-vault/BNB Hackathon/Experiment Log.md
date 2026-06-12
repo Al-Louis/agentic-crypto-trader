@@ -959,6 +959,28 @@ did not beat rdLe4 → stall 1/3. **Proposed next (iter 5, ONE variable, the pre
 s0-style skill across seeds with more samples; watching for the rd9-style convergence collapse
 (different mechanism — that was the MLP at ent 0.2 with the anneal — but the verdict checks it).
 
+## Standings — rdL2m (`ppo-event-rdL2m-c07bda0`, rdLe4 @ **2M steps**, loop iter 5)
+
+| seed | val | test | crash |
+|------|-----|------|-------|
+| s0 | −3.0% (DD 15%) | +2.1% (DD 8%) | −4.5% (DD 12%) |
+| s1 | +4.5% (DD 6%) | +10.6% (DD 8%) | +15.1% (DD 5%) |
+| s2 | −0.7% (DD 13%) | +7.7% (DD 13%) | +12.4% (DD 9%) |
+| s3 | **+20.0% (DD 9%) — val regime-gate PASS** | +10.5% (DD 9%) | +7.1% (DD 12%) |
+| **mean** | **+5.2%** | **+7.7%** | **+7.5%, 4/4 survive** |
+
+### Verdict — 2M does NOT consolidate; it erodes (the mild convergence-collapse). Stall 2/3.
+Doubling steps at the entropy peak pulled every mean DOWN vs rdLe4@1M (val 13.6→5.2, test
+14.7→7.7, crash 13.2→7.5) — longer training drifts the family back toward the rule-parity basin
+(the rd9 collapse in miniature), even as s3 logged the **second-ever val regime-gate pass**
+(+20.0% at 9% DD). The scaling directions are now BOTH refuted at this config: more entropy (0.6)
+and more steps (2M) each regress. **rdLe4 (1M, ent 0.4) stands as the family champion.** Margin
+did not improve → **drift-alarm stall 2 of 3** — the next non-improving iteration halts the loop
+for human review. **Proposed next (iter 6, ONE variable): `rule_prior 2.0 → 1.0`** — hypothesis:
+the init logit bias toward the rule is the gravity well the seeds keep falling back into as
+training lengthens; at the working entropy a weaker prior should let more seeds escape the way
+s0/s3 did, and the substrate brakes make a freer init safe (worst DD this sweep: 14.9%).
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
