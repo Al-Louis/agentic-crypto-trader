@@ -1066,3 +1066,13 @@ vs -1.82%/-0.74% fresh. Built as KNOWLEDGE not a rule (the user principle): `cyc
 slots - tanh(ret-since-prior-ignition) + bars-since/672 - so the agent can LEARN the walk-away.
 OBS_DIM 16->18. ONE variable vs the rdLe4 champion. Verdict checklist: beat val +13.6/test +14.7,
 AND the post-mortem re-entry-churn + entry-chase numbers (s2-class craft) should drop.
+
+## Standings — rdLc (`ppo-event-rdLc-51f1b93`, rdLe4 + cycle_obs, loop iter 7) → DRIFT ALARM #2
+val **-1.0%** (s0 +6.1/dd4, s1 -5.8, s2 -2.7, s3 -1.6) | test **+7.6%** | crash **+5.8%**, all
+DQ-safe (worst 16.9%). **The probe-validated spent-move obs did NOT convert to training lift** -
+the signal is real (both splits) but 1M steps of PPO did not exploit it (or the 2 extra slots
+diluted the working 16-dim policy). The probe gates necessity, not sufficiency - lesson logged.
+**rdLe4 remains champion after SEVEN single-variable neighbors (5 directions). Loop halted by
+contract.** Open paths for the human: (a) widen seeds at rdLe4 (n=8-12) - the distribution/
+deployment question; (b) spend the frozen test on rdLe4; (c) the parked structural ideas
+(exit-style personality, wallet-attributed flow) - bigger bets, post-competition scale.
