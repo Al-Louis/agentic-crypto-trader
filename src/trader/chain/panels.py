@@ -46,7 +46,8 @@ def build_panel(symbol: str, root: str = DEFAULT_ROOT) -> pd.DataFrame:
     p = next(pp for pp in pools if pp["symbol"] == symbol)
     df = load_pool_logs(symbol, root)
     if df.empty:
-        return pd.DataFrame(columns=PANEL_COLUMNS)
+        return pd.DataFrame(columns=PANEL_COLUMNS,
+                            index=pd.Index([], name="timestamp", dtype="int64"))
     bix = load_block_index(root)
     df["ts"] = interpolate_ts(df["block"].to_numpy(), bix)
     df["hour"] = (df["ts"] // 3600).astype("int64") * 3600
