@@ -1043,3 +1043,15 @@ are not suspect; getting DQ'd is the failure. See [[Market Conditions]].
 > The returns are real within a mostly-sound simulation. Residual realism gaps to tighten later:
 > static liquidity that doesn't collapse under stress, and concentration (one token can dominate
 > the portfolio). Details in [[Build Log]].
+
+### Token-personality probe (2026-06-12, `probe_personality.py`) — kernel real, payoff REFUTED
+User theory: MM-controlled low-caps have stable per-token indicator affinities; precompute a
+trailing-30d indicator-dominance profile as obs. Probe (train, 4 families x 20 tokens, weekly
+checkpoints): **(A) within-family efficacy LEVEL does not persist** (rho -0.06..+0.04) but the
+**cross-family personality has a kernel** — pooled persistence rho +0.256, efficacy SIGN agrees
+59-67% week-over-week (which family works for a token is ~2/3 stable; how well, not at all).
+**(B) the payoff gate FAILS decisively**: efficacy-weighted family signals at ignition events
+REDUCE OOS IC by -0.065 (baseline +0.104 -> +0.039). Same shape as the cross-sectional-rank null:
+a real structural fact that does not convert to entry-moment alpha. **No build** — the probe saved
+the sweep. Residual (unprobed, parked): the sign-kernel might inform EXIT style (reversion-affine
+tokens -> bank TP rungs earlier), a different target needing its own probe.
