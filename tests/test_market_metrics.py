@@ -33,7 +33,7 @@ def _metrics():
 
 def test_shape_and_keys():
     m = _metrics()
-    assert set(m) == {"generated", "window", "btc", "tokens", "correlation", "summary"}
+    assert set(m) == {"generated", "window", "btc", "tokens", "vol_rankings", "correlation", "summary"}
     assert len(m["tokens"]) == 3
     assert m["summary"]["n_tokens"] == 3
     tok = m["tokens"][0]

@@ -25,7 +25,10 @@ import pandas as pd
 from trader.report.apentic import _slug, _to_secs
 
 HOURS_PER_YEAR = 24 * 365
-DEFAULT_WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
+# the full lookback ladder (user frontend toggle, 2026-06-12): how token volatility EVOLVES, and
+# per-window top-8 rankings — the evolving-pool view (would ZEC fall out of the tradeable 8 by
+# day 3 while a candidate rises?). Old keys kept stable for the existing frontend.
+DEFAULT_WINDOWS = {"24h": 24, "7d": 168, "30d": 720, "90d": 2160, "180d": 4320}
 
 
 def _ann_vol(r: pd.Series, hpy: int = HOURS_PER_YEAR) -> float:
@@ -90,6 +93,17 @@ def compute_market_metrics(returns: pd.DataFrame, btc_close: pd.Series, *,
         peers = Ctok.loc[d["symbol"]].drop(d["symbol"])
         d["avg_corr_peers"] = round(float(peers.mean()) if len(peers) else 0.0, 4)
 
+    # per-window vol RANKINGS + top-8 pools — the evolving-universe view. A window longer than the
+    # available history falls back to the full panel (rankings converge to ann_vol order).
+    vol_rankings = {}
+    for k in windows:
+        ranked = sorted(tokens, key=lambda d: d["vol_by_window"][k], reverse=True)
+        vol_rankings[k] = {
+            "ranked": [{"symbol": d["symbol"], "ann_vol": d["vol_by_window"][k],
+                        "rank": i + 1} for i, d in enumerate(ranked)],
+            "top8": [d["symbol"] for d in ranked[:8]],
+        }
+
     n = len(tokens)
     offdiag = Ctok.to_numpy()[np.triu_indices(n, 1)] if n > 1 else np.array([0.0])
     uni_ew = float(np.mean([d["ret_window"] for d in tokens])) if tokens else 0.0
@@ -103,6 +117,7 @@ def compute_market_metrics(returns: pd.DataFrame, btc_close: pd.Series, *,
         "btc": {"ret_window": round(float((1.0 + btc_ret).prod() - 1.0), 4),
                 "ann_vol": round(_ann_vol(btc_ret, hours_per_year), 4)},
         "tokens": tokens,
+        "vol_rankings": vol_rankings,
         "correlation": {"symbols": labels, "matrix": matrix},
         "summary": {"n_tokens": n,
                     "avg_pairwise_corr": round(float(offdiag.mean()), 4),
