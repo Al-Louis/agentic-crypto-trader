@@ -1006,6 +1006,29 @@ best-seed selection; (c) episode_bars 336→672 (longer LSTM context); (d) lstm_
 memory generalizes); (e) seed-ensemble voting. The loop awaits `rl_loop_reset` + a human-chosen
 direction.
 
+### Post-plateau direction (2026-06-12) — post-mortem grader + quant consult on knowledge expansion
+User direction after the drift-alarm halt: the limit is the agent's KNOWLEDGE, not the optimizer —
+build a trade post-mortem grader, consult `quant-analyst`. **Built** `scripts/trade_postmortem.py`
+(round-trip reconstruction + entry/exit/alloc/freq/risk scorecard). First findings (rdLe4): s0 vs
+s2 localizes seed variance as CRAFT variance — s0 enters +12% off the local low / MAE −3% / sizes
+winners (+0.19 Spearman); s2 chases (+21%) / MAE −13.5% / sizes losers (−0.28). **When TP rungs
+fire, craft is perfect (ZEC: 100% capture, 0 giveback); trailing exits give back 9–19%** — the
+missing skill is mid-trade exhaustion recognition. **Quant consult (full deliverable in the
+session record):** (1) rubric corrected for honesty — forward-path metrics are descriptive only;
+SCORED metrics must be causal (entry cush-rank, detonation proximity, loser-override count,
+re-entry churn, realized DD/Calmar-per-regime), plus two added axes: **Axis 6 vs-baselines
+GO/NO-GO printed FIRST** (the anti-exp1→exp5 guard — a quality grade cited without the per-regime
+B&H/rung-0/Random panel IS the drift) and **Axis 7 cross-seed coherence** (live = one seed = one
+draw); plus a **skip-quality panel** (grade the decision set, not just executed trades). (2)
+**Knowledge additions, ranked + probe-gated:** ① cross-sectional rank context (cush-rank among the
+bar's simultaneous candidates — exp5 already proved the mechanism in-env; safest), ② per-token
+cycle memory (bars-since-exit, prior-cycle PnL, n-prior-ignitions — targets the re-buying-the-bleed
+and missed-re-ignition classes), ③ liquidity/flow state (highest upside, DATA-GATED: the sim's
+liquidity is static — verify time-varying pool data exists before any design). Gates: extend
+`probe_subset_ic.py`, incremental OOS IC > +0.02 over [cush,surge,btcT] before any sweep. Also
+flagged: **the event skeleton's ~0.3 round-trips/day may violate the live ≥1-trade/day DQ rule** —
+escalated to the execution side.
+
 ## Thesis (the lens for reading all of the above)
 
 This is volatile shitcoin/vaporware trading, **not the S&P 500**. **Realized-volatility capture is
