@@ -1089,3 +1089,26 @@ stabilize.** The remaining move is the quant-cleared statistics: EMBRACE the lot
 seeds at rdLe4 (n=8-12, ~85% power of >=1 good-basin draw), select on val, then (b) spend the
 frozen test ONCE on the selected seed across all three regimes. Loop halted by contract; the
 seed-widening is a human-launch decision (it is N draws of the SAME config, not a new lever).
+
+## Standings — the rdLe4 12-SEED DISTRIBUTION (`ppo-event-rdLe4-c07bda0` s0-11, loop iter 9) → halt: SELECTION TIME
+val:   35  7  2 11  5 -2 -1  1 -1 -8 -8 -3   (mean +3.1%, worst-DD 12.6%)
+test:   1 27 -1 32  9  5 14  7  4  9  1  3   (mean +9.1%, worst-DD 18.2%)
+crash:  1 22 -1 31 24  8 20  4  7 11  6 12   (mean +12.1%, worst-DD 12.6%, 12/12 survive)
+
+**The distribution answers everything the pool was drawn to answer:**
+1. **The good-val basin is RARE: 1/12** (s0 +35%) — rarer than the ~1/6 estimate; the 8 new draws
+   produced no new val champion. The original 4-seed mean (+13.6%) was a lucky sample; the true
+   family val mean is ~+3%.
+2. **Selection is a fork, honestly:** the val-selected seed (s0: 35/1/1) is a VAL ONE-TRICK —
+   test+crash ~0. The ROBUST seed is **s3 (11/32/31, DDs 9-12%)** — best worst-regime margin,
+   positive everywhere, crash +31% vs B&H -72%. s1 (7/27/22) is the runner-up. Selecting on val
+   alone (the pre-registered rule) picks the wrong horse; the gate is per-regime, so worst-regime
+   margin is the defensible selection metric -> **s3**.
+3. **The test-window B&H bar (+58.6%) is structurally out of reach for the family** (best seed
+   +32%; even the tp-rung ORACLE only reached +79.5%) — the event skeleton cannot hold a whole
+   pump basket. The honest gate as constituted cannot be passed on this window by this family,
+   independent of selection. The COMPETITION question (PnL-under-DQ vs other entrants) is
+   related but not identical to the gate.
+4. **Risk is solved**: 12/12 seeds survive every regime; worst DD anywhere 18.2%.
+**Human decision: spend the frozen test on s3 (recommended: best worst-regime), s0 (val-rule),
+or hold.** Loop halted; all 12 bundles published; weights persist from the NEXT sweep onward.
