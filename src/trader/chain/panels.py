@@ -81,14 +81,16 @@ def build_panel(symbol: str, root: str = DEFAULT_ROOT) -> pd.DataFrame:
         sy = df[df["event"] == "sync"]
         rt, rq = ("r0", "r1") if side == 0 else ("r1", "r0")
         last = sy.groupby("hour").last()
-        g["reserve_token_end"] = last[rt]
-        g["reserve_quote_end"] = last[rq]
-        g["liquidity_end"] = np.sqrt(last["r0"] * last["r1"])
-        g["price_end"] = last[rq] / last[rt]
+        r0v = pd.to_numeric(last["r0"])      # object dtype from None-mixed parquet cols
+        r1v = pd.to_numeric(last["r1"])
+        g["reserve_token_end"] = r0v if side == 0 else r1v
+        g["reserve_quote_end"] = r1v if side == 0 else r0v
+        g["liquidity_end"] = np.sqrt(r0v * r1v)
+        g["price_end"] = (r1v / r0v) if side == 0 else (r0v / r1v)
     else:
         last = sw.groupby("hour").last()
-        price10 = last["price1per0"]                     # token1 per token0
-        liq = last["liquidity"]                          # normalized L
+        price10 = pd.to_numeric(last["price1per0"])      # token1 per token0
+        liq = pd.to_numeric(last["liquidity"])           # normalized L
         sqrt_p = np.sqrt(price10)
         r0v, r1v = liq / sqrt_p, liq * sqrt_p            # virtual in-range reserves
         g["reserve_token_end"] = r0v if side == 0 else r1v

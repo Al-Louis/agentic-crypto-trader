@@ -1112,3 +1112,37 @@ crash:  1 22 -1 31 24  8 20  4  7 11  6 12   (mean +12.1%, worst-DD 12.6%, 12/12
 4. **Risk is solved**: 12/12 seeds survive every regime; worst DD anywhere 18.2%.
 **Human decision: spend the frozen test on s3 (recommended: best worst-regime), s0 (val-rule),
 or hold.** Loop halted; all 12 bundles published; weights persist from the NEXT sweep onward.
+
+## Pool-event probes (2026-06-13, `probe_lp_pull` / `probe_flow_imbalance` / `probe_wallet_cohort`) — instrument REAL, all three pre-registered targets REFUTED/UNUSABLE
+The [[Pool-Event Data Layer]] backfill landed (36.1M PancakeSwap events, 20 pools, Nov-2025→
+Jun-2026 — the SAME window as every prior probe; decoders validated: panel price tracks OHLCV at
+corr 0.91-0.99 on the V3 pools). Three pre-registered probes, train/val only (test frozen), graded
+per [[verify-claims-with-run-data]]. **Same shape as the cross-sectional-rank and personality
+nulls: real structural facts that do not convert to entry-moment alpha or a usable guardrail. The
+probes saved three builds.**
+
+1. **LP-PULL → DETONATION LEAD — the most robust finding, but REFUTED on the DQ-relevant target.**
+   A big LP pull (trailing-24h Burn ≥10% of pool) raises detonation odds **x4.2 train / x4.7 val,
+   both splits** (P(det≤48h): 0.88%→3.73% train, 1.52%→7.18% val). Real association. But graded on
+   DRAWDOWN (the pre-registered DQ target) it fails: train fwd48-worst **−4.72% pulled vs −4.71%
+   clean (flat)**; val −8.3% vs −5.2% (worse, but fwd RETURNS after pulls are POSITIVE +3.2%, so
+   not a clean danger signal). And recall is low (only 25-39% of detonations had a prior pull) and
+   precision low (93-96% of pulls are NOT followed by a detonation). A pull-triggered trading halt
+   would be a false alarm 93%+ of the time. **No build** — the det-blacklist (reactive, validated)
+   stays the guardrail; this does not upgrade it to predictive.
+2. **FLOW-IMBALANCE → REVERSION — REFUTED.** Trailing-24h net_quote_in/vol_quote IC vs fwd
+   {24,48,72}h is at/below the noise bar both splits (train +0.004..−0.025 vs noise 0.009; val
+   −0.04..−0.05 vs noise 0.016). Faint negative-IC reversion whiff on val does not replicate on
+   train; quintiles non-monotone. Dead on arrival vs the ~0.7-1% round-trip. **No build.**
+3. **WALLET-COHORT LEAD — REFUTED** (recipient-proxy attribution; 2183 cross-pool router addrs
+   dropped). NEW-wallet flow IC train +0.025 → **val FLIPS to −0.02** (no OOS replication).
+   AGED-wallet flow has a faint kernel (train +0.017..+0.038, val +0.026..+0.027 at 24-48h, above
+   noise) but the **WRONG SIGN vs hypothesis** (accumulation→up, not distribution→dump) and dead by
+   72h — not tradable below cost. MM-going-quiet → detonation: contradictory across splits (train
+   0× lift / val 1.3×; drawdown train worse / val better). **No build.**
+
+**Verdict:** the pool-event instrument is built, validated, and isolated ([[Build Log]]); the
+liquidity/flow knowledge direction is now DATA-UNGATED but its first three hypotheses do not pay.
+Strongest residual is the LP-pull x4.5 detonation lift (both-splits robust) — parkable as a
+per-token SIGNAL-level feature like the det-blacklist, but NOT a validated drawdown guardrail.
+Integration stays gated on a PASS through the training loop's process; none earned one here.

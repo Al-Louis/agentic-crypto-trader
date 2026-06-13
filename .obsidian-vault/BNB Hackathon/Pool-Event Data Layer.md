@@ -88,6 +88,22 @@ keep panels current through the live window. *Evaluation:* low risk (read-only, 
 touched, ~negligible CPU), but deferred until the paper-loop forward-run is stable — do not
 co-deploy new software onto the trading host during its own validation window.
 
+## Backfill + probes — RESULT (2026-06-13)
+
+Backfill completed: **36.1M events** across all 20 pools, blocks 66.98M→102.87M
+(Nov-2025→Jun-2026), ~14h laptop. Decoders validated against ground truth — panel `price_end`
+tracks the recorded OHLCV at **corr 0.91–0.99 on the V3 pools** (the two V2 pools, ADA/BabyDoge,
+~0.70, consistent with WBNB-vs-USD quote / GeckoTerminal sampling a different pool). Thinnest:
+XAUt (78 hours, listed April); all others 4.1k–5.2k hours.
+
+**All three pre-registered targets refuted** (full numbers in [[Experiment Log]]) — the
+cross-sectional-rank / personality null shape: real structural facts that don't convert. (1)
+LP-pull raises detonation odds **×4.5 both splits** but is flat on the DRAWDOWN target, recall
+25-39% / precision 4-7%; (2) flow-imbalance IC at/below the noise bar; (3) wallet-cohort flow
+flips sign OOS / wrong-sign kernel / MM-quiet contradictory. The probes saved three builds; the
+reactive det-blacklist stays the guardrail; integration stays gated on a PASS through the
+training loop's process (none earned one).
+
 ## Pre-registered probes (the law: probe-before-build, OOS, honest framing)
 
 Scripts ship with the layer; run after backfill+panels; train/val only (test frozen);

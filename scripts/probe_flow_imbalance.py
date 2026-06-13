@@ -28,6 +28,12 @@ WARMUP = 168
 HORIZONS = (24, 48, 72)
 
 
+def spearman(x, y):
+    """Spearman rho = Pearson on ranks (avoids a scipy dependency)."""
+    xs, ys = pd.Series(x).rank(), pd.Series(y).rank()
+    return xs.corr(ys)
+
+
 def imbalance(panel: pd.DataFrame, index: pd.Index, window: int) -> pd.Series:
     p = panel.reindex(index)
     net = p["net_quote_in"].fillna(0.0).rolling(window, min_periods=1).sum()
@@ -60,7 +66,7 @@ def run_split(name: str, r: pd.DataFrame, panels: dict[str, pd.DataFrame], windo
         return
     # Spearman IC per horizon (pandas-native; ~2/sqrt(n) is the noise bar)
     for h, col in zip(HORIZONS, (1, 2, 3)):
-        ic = pd.Series(recs[:, 0]).corr(pd.Series(recs[:, col]), method="spearman")
+        ic = spearman(recs[:, 0], recs[:, col])
         print(f"  IC(imb -> fwd{h}) = {ic:+.4f}  (noise ~{2 / np.sqrt(len(recs)):.4f})")
     # quintiles
     q = np.quantile(recs[:, 0], [0.2, 0.4, 0.6, 0.8])

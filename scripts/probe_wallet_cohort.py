@@ -43,6 +43,12 @@ HORIZONS = (24, 48, 72)
 NEW_H, AGED_H = 7 * 24 * 3600, 28 * 24 * 3600
 
 
+def spearman(x, y):
+    """Spearman rho = Pearson on ranks (avoids a scipy dependency)."""
+    xs, ys = pd.Series(x).rank(), pd.Series(y).rank()
+    return xs.corr(ys)
+
+
 def _swaps(symbol: str, registry: dict) -> pd.DataFrame:
     """Swap rows with interpolated ts and token-side wallet delta."""
     from trader.chain.collector import load_block_index, load_pool_logs
@@ -141,7 +147,7 @@ def run_split(name, r, vol, cohorts, det):
             continue
         line = f"  {label.upper():4} flow (n={len(a):,}): "
         for h, col in zip(HORIZONS, (1, 2, 3)):
-            ic = pd.Series(a[:, 0]).corr(pd.Series(a[:, col]), method="spearman")
+            ic = spearman(a[:, 0], a[:, col])
             line += f"IC(fwd{h}) {ic:+.4f}  "
         print(line + f"(noise ~{2 / np.sqrt(len(a)):.4f})")
     q, base = np.array(quiet_rows, dtype=float), np.array(base_rows, dtype=float)
