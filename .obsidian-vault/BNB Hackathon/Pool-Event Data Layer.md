@@ -111,8 +111,48 @@ real incremental signal over price-vol on partial-IC — but **failed the matche
 de-risking overlay**: dominated by the trailing realized-vol the agent already observes (the
 redundancy null, fifth occurrence). Verdict: **STOP — route none into the obs** (dilution risk per
 the rdLc spent-move precedent); the binding constraint is RETURN, not drawdown (already DQ-safe).
-**Keep warm as OPS TELEMETRY only:** turnover spiking 5σ on a held token = a human-eyeball alert on
+**Keep warm as OPS TELEMETRY only:** turnover spiking on a held token = a human-eyeball alert on
 the EC2 live tail, not a model input or validated guardrail.
+
+## Turnover Anomaly Alert — spec (2026-06-13, `quant-analyst`; SPECCED, not built)
+
+Operator situational-awareness for the live week (June 22-28). **Not** a policy input, auto-halt,
+or guardrail — it routes a human's attention to anomalous pool flow. Honest-claim ceiling:
+*attention-routing, not prediction* (residual fires precede a price-vol spike <10% of the time on
+most tokens — the lead-check was run specifically to REFUSE a "predicts" claim).
+
+**Build the RESIDUAL-GATED version, not raw turnover.** Raw turnover-z is ~65% redundant with the
+price-vol the agent already sees (median per-token corr(zT,zV) = 0.74); only the residual (turnover
+spike with NO matching price move) carries info the agent can't see. Gating to it makes every fire
+informative *and* collapses operator load to ~3.7 alerts/week universe-wide.
+
+- **Signal (per-token, causal, robust):** `turnover_24h = sum(vol_quote[t-23..t]) / reserve_quote_end[t]`
+  (the per-token denominator is mandatory — raw reserves span ~7 orders of magnitude across the
+  universe; the dimensionless ratio makes V2 real-reserve and V3 virtual-reserve directly
+  comparable). `zT = robustz(log(turnover_24h), win=336h)` (median/MAD — turnover is heavy-tailed).
+  Price-vol gate: `zV = robustz(rolling_std(dlog(price_end),24h), 336h)`.
+- **Fire:** `zT ≥ 3.5 AND zV < 1.5`; re-arm when `zT < 1.75` (debounce). Backtested firing rate on
+  the real panels: ~3.7/wk universe-wide, median 0.07/tok/wk — eyeball-able. (z=3.5 chosen from the
+  rate-vs-threshold curve; z=5 over-suppresses.)
+- **Scope:** whole eligible universe (not just held) — the cheap value is entry-avoidance/re-screen;
+  tag each fire HELD/UNHELD from current positions so the operator prioritizes. (XAUt excluded — 78h
+  history, not a real series.)
+- **Plumbing:** an ADDITION to the existing `trader/monitoring` module (so it ships inside the
+  agent's own monitoring layer — respects the "no new co-deploy during validation" caution). Runs
+  after the existing hourly `scripts/chain_backfill.py --tail --panels` on EC2; computes on the
+  latest hour only; surfaces as an `alerts[]` field on the apentic results JSON + one WARN log line.
+- **Latency — honest:** hourly panel + 24h rolling numerator = near-real-time-to-post-hoc (0-60min
+  after the hour). Adequate for "something's off with X today" situational awareness; explicitly NOT
+  a trade trigger.
+- **Stale-data guard (mandatory):** if the universe-freshest panel is >2h behind, emit
+  `turnover_alert_status=STALE` (a third state, never collapsed into OK) — a stalled RPC tail must
+  not read as a calm board. Keys off the universe-wide freshest panel (thin tokens have natural
+  gaps).
+- **Locked constants:** `TURNOVER_WIN_H=24, ROBUST_WIN_H=336, Z_FIRE=3.5, Z_REARM=1.75,
+  ZV_GATE=1.5, STALE_H=2`. Home (to create): `src/trader/monitoring/turnover_alert.py`.
+
+Build is a separate greenlight (deferred per the deploy-during-validation caution); the spec is
+implementation-ready.
 
 ## Pre-registered probes (the law: probe-before-build, OOS, honest framing)
 
