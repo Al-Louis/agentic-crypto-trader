@@ -104,6 +104,16 @@ flips sign OOS / wrong-sign kernel / MM-quiet contradictory. The probes saved th
 reactive det-blacklist stays the guardrail; integration stays gated on a PASS through the
 training loop's process (none earned one).
 
+**Quant cross-check (2026-06-13, full numbers in [[Experiment Log]]):** independent re-analysis
+agreed all three refutals and tested six more functionals. **Depth-normalized turnover**
+(`vol_quote / reserve_quote_end`) is the correct risk functional — fwd48-worst IC −0.19/−0.39,
+real incremental signal over price-vol on partial-IC — but **failed the matched-frequency
+de-risking overlay**: dominated by the trailing realized-vol the agent already observes (the
+redundancy null, fifth occurrence). Verdict: **STOP — route none into the obs** (dilution risk per
+the rdLc spent-move precedent); the binding constraint is RETURN, not drawdown (already DQ-safe).
+**Keep warm as OPS TELEMETRY only:** turnover spiking 5σ on a held token = a human-eyeball alert on
+the EC2 live tail, not a model input or validated guardrail.
+
 ## Pre-registered probes (the law: probe-before-build, OOS, honest framing)
 
 Scripts ship with the layer; run after backfill+panels; train/val only (test frozen);

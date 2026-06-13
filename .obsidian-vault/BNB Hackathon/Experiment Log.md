@@ -1146,3 +1146,24 @@ liquidity/flow knowledge direction is now DATA-UNGATED but its first three hypot
 Strongest residual is the LP-pull x4.5 detonation lift (both-splits robust) — parkable as a
 per-token SIGNAL-level feature like the det-blacklist, but NOT a validated drawdown guardrail.
 Integration stays gated on a PASS through the training loop's process; none earned one here.
+
+**Quant cross-check (2026-06-13, `quant-analyst` consult — 9 independent probes on the parquets):**
+agreed all three refutals, then tested the six untested functionals. **One lit up and was then
+killed honestly: depth-normalized turnover** (24h `vol_quote / reserve_quote_end`) vs fwd48-worst-
+trough IC **−0.19 train / −0.39 val**, sign-stable, and it survived a partial-IC test against
+trailing price-realized-vol (partial IC −0.04/−0.14 — *real incremental* risk signal). But the
+decisive **matched-frequency de-risking overlay test refuted it**: price-realized-vol — which the
+agent ALREADY observes — avoids a worse forward tail at equal flag-rate (val top-10%: −0.143 vs
+turnover −0.103), and the bars turnover uniquely flags have a forward tail (−0.07) barely worse
+than random (−0.05) with flat/positive forward returns — cutting them forgoes upside, doesn't dodge
+drawdown. **Turnover is the CORRECT risk functional of this data and the only one with incremental
+IC over price-vol, but it is dominated by the trailing realized-vol the agent already sees — the
+redundancy null, now hit a FIFTH time** (cross-sectional rank, personality, spent-move, pool-event,
+turnover). Pool-vs-OHLCV price divergence: faint momentum confirmer (IC +0.03..+0.05) but <1%
+quintile spread, dead vs round-trip. Raw reserve-depth as a gate: non-monotone (token-identity
+proxy) — refuted. **Go/stop: STOP — route none of it into the obs** (a 17-col panel would dilute the
+policy like the spent-move slots did; rdLc precedent). The binding constraint is RETURN (the family
+can't reach the +58.6% test B&H bar), not drawdown (already DQ-safe, worst 18.2%) — and no column
+here moves return. **Keep warm, NOT as a model input:** turnover spiking 5σ on a held token is a
+reasonable human-eyeball OPS ALERT on the EC2 live tail (telemetry, not a validated guardrail) —
+consistent with the don't-co-deploy-during-validation posture.
