@@ -416,9 +416,9 @@ class EventRungEnv:
         val = p["usd"] * fill_px / self._px[p["entry_bar"], j]
         c = amm_cost_usd(-val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += val - c
-        if val >= 1.0:
-            self._trades.append((tok, -val, c, int(self.returns.index[self.bar]),
-                                 fill_px))                          # -sell @ the intra-bar stop price index
+        if val > 0.0:                                        # record EVERY close (even sub-$1 crash
+            self._trades.append((tok, -val, c, int(self.returns.index[self.bar]),   # closes) so the
+                                 fill_px))                          # marker stream nets to flat -sell @ stop price index
         self.cool[tok] = self.bar
         self.prior_origin[tok] = p["origin"]
         del self.pos[tok]
@@ -434,9 +434,9 @@ class EventRungEnv:
         j = self.col_ix[tok]
         c = amm_cost_usd(-sell_val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += sell_val - c
-        if sell_val >= 1.0:
-            self._trades.append((tok, -sell_val, c, int(self.returns.index[self.bar]),
-                                 self._px[self.bar, j]))            # -sell @ the bar's price index (incl. rotation)
+        if sell_val > 0.0:                                   # record EVERY sell (even sub-$1) so the
+            self._trades.append((tok, -sell_val, c, int(self.returns.index[self.bar]),   # marker stream
+                                 self._px[self.bar, j]))            # nets to flat -sell @ bar index (incl. rotation)
         if keep <= 1e-6:                                         # full exit -> cooldown + dead-zone
             self.cool[tok] = self.bar
             self.prior_origin[tok] = p["origin"]

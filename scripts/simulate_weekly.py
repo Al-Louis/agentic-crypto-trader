@@ -56,9 +56,10 @@ def remap_candles(cs: list[dict]) -> list[dict]:
 
 
 def fold_positions(markers: list[dict], last_t: int, last_close: float) -> list[dict]:
-    """The agent's buy/sell fills -> FIFO round-trips with AMM cost baked into the prices.
-    Open lots at session end are force-closed mark-to-market at `last_close` (no exit fee — matches
-    the env marking open positions at current value on the weekly reset)."""
+    """The agent's buy/sell fills -> FIFO round-trips with AMM cost baked into the prices. Prices are
+    in the env's _px execution basis (scaled per token), so buy/sell quantities match exactly. The
+    marker stream is COMPLETE (every sell recorded + open positions synthetic-closed upstream), so no
+    force-close is needed; any residual lot would surface as a per-week reconstruction error."""
     lots: list[list] = []          # open buys: [qty_remaining, entry_t, entry_price_eff]
     out: list[dict] = []
     for m in markers:
@@ -80,11 +81,7 @@ def fold_positions(markers: list[dict], last_t: int, last_close: float) -> list[
                 remaining -= q
                 if lot[0] <= 1e-12:
                     lots.pop(0)
-    for qty_rem, entry_t, entry_eff in lots:                                  # force-close at reset
-        if last_t > entry_t:
-            out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,
-                        "exit_price": last_close, "qty": qty_rem, "kind": "core"})
-    return out
+    return out          # `lots` should be empty (complete markers); a residual -> recon-error flag
 
 
 def week_starts(idx_secs) -> list[int]:
