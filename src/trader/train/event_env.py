@@ -40,6 +40,15 @@ RULE_DEFAULT_ENTRY_MULT = (1.0, 0.5, 0.0, 2.0)   # idx -> multiple of the RULE's
 RULE_DEFAULT_EXIT_KEEP = (0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0)   # idx -> fraction kept (0 = the rule's cut)
 RULE_DEFAULT_TP_KEEP = (1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0)   # profit prompts: idx0 = let it run (the rule)
 
+# `basket_default` (the long-default OVERLAY, 2026-06-14): the env starts fully long the risk-parity
+# basket (= Buy&Hold) and events TILT names off it, so the default action HOLDS. The exit/profit
+# tables INVERT rule-default — idx 0 keeps the basket weight (hold-through), deviations trim — so
+# doing nothing ≈ B&H, the floor the event-only skeleton lacked (it trailed B&H by a +13% bull-gap on
+# cold weekly sessions, [[Experiment Log]] §2026-06-14). Entries (re-buying a name trimmed to flat)
+# reuse the rule-default entry table. With `rule_prior` on idx 0, the untrained policy ≈ Buy&Hold.
+BASKET_EXIT_KEEP = (1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0)   # idx0 = HOLD the basket (default); idx3 = full cut
+BASKET_TP_KEEP = (1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0)     # idx0 = let it run (default); higher = trim into strength
+
 
 class EventRungEnv:
     """Event-driven rung-0 env. `reset()`/`step(action)` are plain numpy in/out (one scalar action
@@ -57,12 +66,13 @@ class EventRungEnv:
                  action_mode: str = "continuous", n_action_levels: int = 4,
                  universe_mode: str = "voltopk", vol_target: float = 0.0, cap_floor: float = 0.02,
                  harvest_obs: bool = False,
-                 rule_default: bool = False, exit_commit: int = 0, dust_usd: float = 0.0,
+                 rule_default: bool = False, basket_default: bool = False,
+                 exit_commit: int = 0, dust_usd: float = 0.0,
                  tp_rungs: tuple | list = (), loss_floor: float = 0.0,
                  det_blacklist: int = 0, det_surge: float = 8.0, det_drop: float = -0.15,
                  low_frac: pd.DataFrame | None = None, intrabar_floor: bool = False,
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
-                 cycle_obs: bool = False, universe_lookback: int = 0,
+                 cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -114,8 +124,16 @@ class EventRungEnv:
         #   prompts fire on weakness only. Each rung prompts once per position; default = let it run.
         if self.rule_default and (action_mode != "discrete" or self.n_action_levels != 4):
             raise ValueError("rule_default needs action_mode='discrete' with n_action_levels=4")
+        self.basket_default = bool(basket_default)          # long-default OVERLAY: start fully long the
+        #   risk-parity basket; events tilt off it; the default action HOLDS (exit/profit tables invert).
+        if self.basket_default and not self.rule_default:
+            raise ValueError("basket_default builds on rule_default's discrete 4-level head; set rule_default=True")
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
+        self.no_btc_obs = bool(no_btc_obs)                  # neutralize the btc_trend obs slot to a
+        #   constant 0: the universe was selected for LOW BTC correlation, so a BTC-anchored regime
+        #   signal is near-noise (the alts decouple). Slot kept (obs_dim unchanged) so the policy
+        #   just learns to ignore a dead input; the regime signal that earns its keep is breadth.
         self.cycle_obs = bool(cycle_obs)                    # SPENT-MOVE knowledge (probe_knowledge:
         #   an ignition whose token's PRIOR ignition already paid >10% returns −6..−7% fwd-24h vs
         #   −1..−2% fresh, on BOTH train and val) — 2 slots: ret-since / bars-since prior ignition.
@@ -202,11 +220,17 @@ class EventRungEnv:
         self._eq_mark = self.capital
         self._trades = []                                       # trades made in the current step (markers)
         self._eq_trace = [(int(self.returns.index[self.start]), self.capital)]  # per-bar equity (eval)
-        # relative/residual reward: precompute the rung-0 RULE's per-bar equity AND per-token weights
-        # over the episode - the benchmark the agent must BEAT. "relative" = beat the rule's portfolio
-        # return; "residual" = beat it per-decision (only the agent's weight DEVIATIONS earn/lose).
+        if self.basket_default:                                 # long-default OVERLAY: start fully long the
+            self._buy_basket()                                  # risk-parity basket (= B&H); events tilt off it
+            self._eq_mark = self._equity()                      # post-buy equity (entry cost paid) is the mark
+            self._eq_trace = [(int(self.returns.index[self.start]), self._eq_mark)]
+        # relative/residual reward: precompute the BENCHMARK per-bar equity AND per-token weights over the
+        # episode - the rung-0 RULE normally, or (basket_default) the held-basket B&H. "relative" = beat the
+        # benchmark's portfolio return; "residual" = beat it per-decision (only weight DEVIATIONS earn/lose).
         if self.reward_mode in ("relative", "residual", "residual_ranked"):
-            self._rule_eq, self._rule_w = self._rule_equity_curve(self.start, self.end)
+            self._rule_eq, self._rule_w = (self._basket_equity_curve(self.start, self.end)
+                                           if self.basket_default
+                                           else self._rule_equity_curve(self.start, self.end))
         else:
             self._rule_eq = self._rule_w = None
         self._rule_eq_mark = float(self._rule_eq[0]) if self._rule_eq is not None else self.capital
@@ -223,11 +247,14 @@ class EventRungEnv:
         if self.action_mode == "discrete":                 # Discrete level idx -> m in {0, .., 1}
             idx = int(round(float(np.asarray(action).reshape(-1)[0])))
             idx = int(np.clip(idx, 0, self.n_action_levels - 1))
-            if self.rule_default:                          # idx 0 = EXECUTE the rule; deviations earned
+            if self.rule_default:                          # idx 0 = EXECUTE the default; deviations earned
                 etype0 = self._pending[0]
-                m = (RULE_DEFAULT_ENTRY_MULT[idx] if etype0 == "entry"
-                     else RULE_DEFAULT_TP_KEEP[idx] if etype0 == "profit"
-                     else RULE_DEFAULT_EXIT_KEEP[idx])
+                if etype0 == "entry":
+                    m = RULE_DEFAULT_ENTRY_MULT[idx]       # re-buy a trimmed-flat name at rule sizing
+                elif etype0 == "profit":                   # basket_default inverts: idx0 = let it run / hold
+                    m = (BASKET_TP_KEEP if self.basket_default else RULE_DEFAULT_TP_KEEP)[idx]
+                else:                                      # exit: idx0 = HOLD the basket (basket_default)
+                    m = (BASKET_EXIT_KEEP if self.basket_default else RULE_DEFAULT_EXIT_KEEP)[idx]
             else:
                 m = idx / max(self.n_action_levels - 1, 1)  # 4 levels -> {0, 1/3, 2/3, 1}
         else:
@@ -545,6 +572,57 @@ class EventRungEnv:
             # else (mb >= end): dropped — window not realized within the episode
         self._pending_entries = keep
 
+    def _basket_weights(self) -> dict:
+        """Risk-parity basket weights (cap-normalized, fully invested) — the long-default target."""
+        wsum = sum(self._tok_cap[t] for t in self.universe) or 1.0
+        return {t: self._tok_cap[t] / wsum for t in self.universe}
+
+    def _buy_basket(self):
+        """Long-default OVERLAY (`basket_default`): buy the full risk-parity basket at reset so the env
+        starts like Buy&Hold. Cost is baked into the position basis (value = alloc - cost, matching
+        `buy_and_hold_return` and `_basket_equity_curve`), cash drops to ~0. Held names then only get
+        exit/profit (trim) prompts; doing nothing holds the basket — the floor the skeleton lacked."""
+        w = self._basket_weights()
+        for t in self.universe:
+            j = self.col_ix[t]
+            alloc = w[t] * self.capital
+            c = amm_cost_usd(alloc, self.liquidity.get(t, 0.0), self.lp_fee_bps, self.gas_usd)
+            usd = alloc - c                                      # cost baked into the basis (B&H convention)
+            if usd < 1.0:
+                continue
+            self.cash -= alloc
+            self._realized[t] = self._realized.get(t, 0.0) - alloc
+            self.pos[t] = {"usd": usd, "entry_bar": self.start, "peak_px": self._px[self.start, j],
+                           "origin": self._px[self.start, j], "tp_i": 0}
+            self.ignite_armed[t] = False                         # already held -> no immediate entry re-prompt
+            self._trades.append((t, usd, c, int(self.returns.index[self.start]), self._px[self.start, j]))
+
+    def _basket_equity_curve(self, start: int, end: int):
+        """Buy&Hold of the risk-parity basket over [start, end] — the benchmark under `basket_default`
+        (a do-nothing agent matches it, so only correct tilts score). Buy at `start` (cost baked in),
+        hold, drift. Returns `(eq[n], w[n, k])` with `w[bar, i]` = the basket's weight in `universe[i]`."""
+        w0 = self._basket_weights()
+        invested = {}
+        for t in self.universe:
+            alloc = w0[t] * self.capital
+            c = amm_cost_usd(alloc, self.liquidity.get(t, 0.0), self.lp_fee_bps, self.gas_usd)
+            invested[t] = alloc - c
+        px, cix = self._px, self.col_ix
+        eq = np.empty(end - start + 1)
+        w = np.zeros((end - start + 1, len(self.universe)))
+        for kbar, bar in enumerate(range(start, end + 1)):
+            vals = []
+            for t in self.universe:
+                j = cix[t]
+                p0 = px[start, j]
+                vals.append(invested[t] * px[bar, j] / p0 if p0 > 0 else invested[t])
+            e = sum(vals)
+            eq[kbar] = e
+            if e > 0:
+                for i, v in enumerate(vals):
+                    w[kbar, i] = v / e
+        return eq, w
+
     def _rule_equity_curve(self, start: int, end: int):
         """The rung-0 RULE's per-bar equity AND per-token weights over [start, end] on this episode's
         universe — a faithful mirror of `run_rung0` (exits on stop/EMA, ignition entries, loser-funded
@@ -658,7 +736,7 @@ class EventRungEnv:
         exposure = sum(self._pos_value(t) for t in self.pos) / eq
         dd = (self.peak_eq - eq) / self.peak_eq if self.peak_eq > 0 else 0.0
         ema = float(self.btc_ema.iloc[self.bar])
-        btc_trend = float(self.btc.iloc[self.bar]) / ema - 1.0 if ema else 0.0
+        btc_trend = 0.0 if self.no_btc_obs else (float(self.btc.iloc[self.bar]) / ema - 1.0 if ema else 0.0)
         rule_expo = 0.0                                        # the rung-0 rule's current invested fraction
         if self._rule_w is not None:
             rule_expo = float(self._rule_w[min(self.bar - self.start, len(self._rule_w) - 1)].sum())

@@ -170,6 +170,56 @@ def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed)
             "regime": regime, "gate_pass": gate_pass, "binding": binding}
 
 
+def evaluate_weekly_gate(returns, btc, liq, vol, env_kwargs, make_predict, val_start, test_start,
+                         seed, k, vol_target, cap_floor):
+    """Grade the policy the way it DEPLOYS: independent COLD weekly sessions (fresh $10k, no cross-week
+    holds) over the OOS weeks (val+test), vs rung-0 + Buy&Hold graded the same way, then apply the
+    random-week distribution gate ([[AI Training]] §the-fork). A fresh predictor per week = a cold LSTM
+    start each session (in-distribution: every training episode also starts cold). Returns (verdict, rows)."""
+    from trader.train import weekly_eval as we
+    pol_rets, pol_dds, bh_rets, rule_rets, active, rows = [], [], [], [], [], []
+    for ws, win in we.cold_week_windows(returns):
+        split = we.split_label(ws, val_start, test_start)
+        if split == "train":
+            continue                                           # gate on OOS weeks only (val+test)
+        base = we.grade_week_baselines(ws, win, liq, vol, k=k, vol_target=vol_target, cap_floor=cap_floor)
+        eq, recs, *_ = evaluate_event_policy(make_predict(), win, btc, liq, vol, env_kwargs)
+        # return from the $10k DEPOSIT (capital), NOT eq[0]: a basket_default policy's eq[0] is already
+        # post-entry-cost, so dividing by it would manufacture a spurious edge over B&H (which measures
+        # from capital). The competition scores final/$10k; a flat-start policy has eq[0]==capital anyway.
+        cap = float(env_kwargs.get("capital", we.START_CAPITAL))
+        pol_ret = float(eq.iloc[-1] / cap - 1.0)               # eq_trace spans the cold week only
+        pol_dd = abs(float((eq / eq.cummax() - 1.0).min()))
+        tdays = we._trade_days(recs, ws)
+        pol_rets.append(pol_ret); pol_dds.append(pol_dd)
+        bh_rets.append(base.buyhold_ret); rule_rets.append(base.rung0_ret)
+        active.append(len(tdays) >= 7)
+        rows.append((ws, split, base.regime, pol_ret, pol_dd, len(tdays), base.buyhold_ret, base.rung0_ret))
+    verdict = we.weekly_gate(pol_rets, pol_dds, bh_rets, rule_rets, active, seed=seed)
+    return verdict, rows
+
+
+def print_weekly_verdict(verdict, rows):
+    """Per-week table + the random-week distribution gate (the sweep's primary read in weekly mode)."""
+    import datetime as dt
+    print(f"[weekly] {'week':>10} {'split':>5} {'regime':>6} {'policy':>8} {'maxDD':>6} {'days':>4} "
+          f"{'B&H':>8} {'rung0':>8}")
+    for ws, split, regime, pr, dd, td, bh, r0 in rows:
+        d = dt.datetime.fromtimestamp(ws, dt.timezone.utc).date()
+        print(f"[weekly] {str(d):>10} {split:>5} {regime:>6} {pr:>+7.1%} {dd:>5.0%} {td:>2}/7 "
+              f"{bh:>+7.1%} {r0:>+7.1%}")
+    blo, bhi = verdict["edge_buyhold_ci"]
+    rlo, rhi = verdict["edge_rung0_ci"]
+    print(f"[weekly] policy mean {verdict['policy_mean']:+.2%}  B&H {verdict['buyhold_mean']:+.2%}  "
+          f"rung-0 {verdict['rung0_mean']:+.2%}  worst-week DD {verdict['worst_week_dd']:.0%}  "
+          f"activity-miss {verdict['activity_fail_weeks']}wk")
+    print(f"[weekly] PAIRED edge vs B&H {verdict['edge_vs_buyhold']:+.2%} (95%% CI [{blo:+.2%},{bhi:+.2%}])"
+          f"  vs rung-0 {verdict['edge_vs_rung0']:+.2%} (95%% CI [{rlo:+.2%},{rhi:+.2%}])")
+    print(f"[weekly] gate: {'PASS' if verdict['pass'] else 'FAIL'}"
+          + ("" if verdict["pass"] else f" (binding: {verdict['binding']})")
+          + f"  checks={verdict['checks']}")
+
+
 def print_verdict(r):
     """Print the per-split [regime]/[baselines]/[verdict]/[gate] block for one split's result."""
     rg, rep = r["regime"], r["report"]
@@ -221,6 +271,10 @@ def main() -> None:
                    "prior-paid>10%% ignitions return -6..-7%% fwd-24h vs -1..-2%% fresh, train AND val)")
     p.add_argument("--rule-default", action="store_true", help="rung-1b: discrete action idx 0 EXECUTES "
                    "rung-0's decision (entry at rule sizing / exit full cut); deviations are earned")
+    p.add_argument("--basket-default", action="store_true", help="long-default OVERLAY (2026-06-14): "
+                   "start fully long the risk-parity basket (= Buy&Hold); events TILT names off it and "
+                   "the default action HOLDS, so doing nothing ~= B&H — closes the +13%% bull-gap the "
+                   "event-only skeleton bleeds on cold weekly sessions. Builds on --rule-default.")
     p.add_argument("--exit-commit", type=int, default=0, help="rung-1b: bars a non-cut exit decision "
                    "commits for (no re-prompt drip); 0 = legacy per-bar re-prompting")
     p.add_argument("--dust-usd", type=float, default=0.0, help="rung-1b: partial keeps below this USD "
@@ -258,7 +312,7 @@ def main() -> None:
                    "into the test window) to the per-regime gate — where de-risking finally pays")
     p.add_argument("--crash-depth", type=float, default=-0.6, help="systemic drop of an injected crash")
     p.add_argument("--crash-beta", type=float, default=1.4, help="alt stress beta in a crash (realized "
-                   "alt drop ~ beta*crash-depth; 1.4*-0.6 ~ -84%, SIREN-scale)")
+                   "alt drop ~ beta*crash-depth; 1.4*-0.6 ~ -84%%, SIREN-scale)")
     p.add_argument("--norm-reward", action="store_true", help="VecNormalize norm_reward (for the small "
                    "zero-centered relative/residual rewards)")
     p.add_argument("--r4-beta", type=float, default=0.0, help="residual R4 foregone-opportunity penalty: "
@@ -274,6 +328,12 @@ def main() -> None:
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--lr-end", type=float, default=None, help="if set, linearly anneal lr -> lr-end")
     p.add_argument("--eval-split", default="val", choices=["val", "test"])
+    p.add_argument("--eval-mode", default="continuous", choices=["continuous", "weekly"],
+                   help="continuous = one held episode per split (legacy, flattering); weekly = the "
+                        "COLD weekly-session DISTRIBUTION gate (the deployment structure, 2026-06-14 "
+                        "fork) — bootstrap-CI beat B&H + rung-0 over random OOS weeks, worst-week DD<30%%")
+    p.add_argument("--no-btc-obs", action="store_true", help="neutralize the btc_trend obs slot — the "
+                   "tokens are BTC-decorrelated by selection, so a BTC-anchored regime signal is near-noise")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     config.load_dotenv()
@@ -313,11 +373,12 @@ def main() -> None:
                       action_mode=args.action_mode, n_action_levels=args.n_action_levels,
                       universe_mode=args.universe_mode, vol_target=args.vol_target,
                       cap_floor=args.cap_floor, harvest_obs=args.harvest_obs,
-                      rule_default=args.rule_default, exit_commit=args.exit_commit,
-                      dust_usd=args.dust_usd,
+                      rule_default=args.rule_default, basket_default=args.basket_default,
+                      exit_commit=args.exit_commit, dust_usd=args.dust_usd,
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
-                      cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback, **ohlc_kwargs, seed=args.seed)
+                      cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback,
+                      no_btc_obs=args.no_btc_obs, **ohlc_kwargs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -393,16 +454,29 @@ def main() -> None:
     if args.eval_prepad:                                   # serve the warmup from the PRIOR split's tail
         prev = {"val": train_pre, "test": val_r, "crash": val_r}   # (contiguous time; pristine train)
         held = {nm: pd.concat([prev[nm].tail(WARMUP), r]) for nm, r in held.items()}
-    results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, make_predict(), args.seed)
-               for nm, r in held.items()}
-    pr = results[args.eval_split]                          # primary split -> the published bundle
-    print(f"[eval] primary={args.eval_split} events={len(pr['raw'])} action "
-          f"mean={np.mean(pr['raw']):.3f} min={min(pr['raw']):.3f} max={max(pr['raw']):.3f}")
-    for nm in results:
-        print_verdict(results[nm])
-    overall_gate = all(r["gate_pass"] for r in results.values())
-    print(f"[gate] OVERALL: {'PASS - beats every baseline on EVERY held-out regime' if overall_gate else 'FAIL'}"
-          + ("" if overall_gate else " - must clear rung-0 + Buy&Hold + Random on val AND test"))
+    weekly_verdict = None
+    if args.eval_mode == "weekly":                         # the DEPLOYMENT-structure gate (2026-06-14 fork)
+        weekly_verdict, weekly_rows = evaluate_weekly_gate(
+            returns, btc, liq, vol, env_kwargs, make_predict, int(val_r.index[0]), int(test_r.index[0]),
+            args.seed, args.k, args.vol_target, args.cap_floor)
+        print_weekly_verdict(weekly_verdict, weekly_rows)
+        overall_gate = weekly_verdict["pass"]
+        pr = evaluate_and_gate(args.eval_split, held[args.eval_split], btc, liq, vol, env_kwargs,
+                               make_predict(), args.seed)    # continuous replay -> dashboard CHART only
+        results = {args.eval_split: pr}                    # the [eval] line keeps the continuous format
+        print(f"[eval] primary={args.eval_split} events={len(pr['raw'])} action "   # (smoke-gate parses
+              f"mean={np.mean(pr['raw']):.3f} min={min(pr['raw']):.3f} max={max(pr['raw']):.3f}")  # it)
+    else:                                                  # legacy: one held episode per split
+        results = {nm: evaluate_and_gate(nm, r, btc, liq, vol, env_kwargs, make_predict(), args.seed)
+                   for nm, r in held.items()}
+        pr = results[args.eval_split]                      # primary split -> the published bundle
+        print(f"[eval] primary={args.eval_split} events={len(pr['raw'])} action "
+              f"mean={np.mean(pr['raw']):.3f} min={min(pr['raw']):.3f} max={max(pr['raw']):.3f}")
+        for nm in results:
+            print_verdict(results[nm])
+        overall_gate = all(r["gate_pass"] for r in results.values())
+        print(f"[gate] OVERALL: {'PASS - beats every baseline on EVERY held-out regime' if overall_gate else 'FAIL'}"
+              + ("" if overall_gate else " - must clear rung-0 + Buy&Hold + Random on val AND test"))
 
     eq, records, universe, fees, raw, report = (pr["eq"], pr["records"], pr["universe"], pr["fees"],
                                                 pr["raw"], pr["report"])
@@ -414,12 +488,20 @@ def main() -> None:
     weights, candles, trades = build_portfolio_artifacts(records, universe, d0, d1)
     metrics.update(trade_stats(trades))
     metrics.update({"baseline_return": pr["base"], "buyhold_return": pr["bh"], "random_return": pr["rnd"],
-                    "regime": pr["regime"], "gate_pass": overall_gate, "gate_binding": pr["binding"],
+                    "regime": pr["regime"], "gate_pass": overall_gate, "eval_mode": args.eval_mode,
+                    "gate_binding": (weekly_verdict["binding"] if weekly_verdict else pr["binding"]),
                     "regimes": {nm: {"return": r["pol"], "baseline_return": r["base"],
                                      "buyhold_return": r["bh"], "random_return": r["rnd"],
                                      "regime": r["regime"], "maxdd": r["report"].max_drawdown_pct,
                                      "gate_pass": r["gate_pass"], "gate_binding": r["binding"]}
                                 for nm, r in results.items()}})
+    if weekly_verdict is not None:                         # the DEPLOYMENT-structure verdict (the real gate)
+        metrics["weekly"] = {k: v for k, v in weekly_verdict.items() if k != "checks"}
+        metrics["weekly"]["checks"] = weekly_verdict["checks"]
+        metrics["weekly"]["weeks"] = [
+            {"ws": ws, "split": sp, "regime": rg, "return": prr, "maxdd": dd,
+             "trade_days": td, "buyhold": bh, "rung0": r0}
+            for ws, sp, rg, prr, dd, td, bh, r0 in weekly_rows]
 
     import subprocess
     try:
@@ -437,7 +519,7 @@ def main() -> None:
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k, "universe_lookback": args.universe_lookback,
                              "harvest_obs": args.harvest_obs, "cycle_obs": args.cycle_obs,
-                             "rule_default": args.rule_default,
+                             "rule_default": args.rule_default, "basket_default": args.basket_default,
                              "exit_commit": args.exit_commit, "dust_usd": args.dust_usd,
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
@@ -448,12 +530,14 @@ def main() -> None:
                              "crash_depth": args.crash_depth, "crash_beta": args.crash_beta,
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
                              "ent_coef": args.ent_coef, "n_epochs": args.n_epochs, "target_kl": args.target_kl, "lr": args.lr, "lr_end": args.lr_end,
+                             "no_btc_obs": args.no_btc_obs, "eval_mode": args.eval_mode,
                              "eval_split": args.eval_split}
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows
     flags = (f"{args.reward_mode} k{args.k}/{args.universe_mode} dd{args.dd_lambda}"
              + (f" +lstm{args.lstm_size}" if args.recurrent else "")
-             + (" +rd" if args.rule_default else "") + (" +tp" if args.tp_rungs else "")
+             + (" +rd" if args.rule_default else "") + (" +basket" if args.basket_default else "")
+             + (" +tp" if args.tp_rungs else "")
              + (" +harvest" if args.harvest_obs else "") + (" +cyc" if args.cycle_obs else "")
              + (" +crash" if args.crash_eval else ""))
     model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"

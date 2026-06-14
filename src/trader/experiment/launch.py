@@ -56,6 +56,9 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "crash_depth": ("--crash-depth", float),
     "crash_beta": ("--crash-beta", float),
     "rule_default": ("--rule-default", bool),       # idx0 EXECUTES rung-0 (rung-1b)
+    "basket_default": ("--basket-default", bool),   # long-default OVERLAY: start long the basket, tilt off it
+    "no_btc_obs": ("--no-btc-obs", bool),           # neutralize the btc_trend obs slot (BTC-decorrelated tokens)
+    "eval_mode": ("--eval-mode", str),              # continuous | weekly (cold-session distribution gate)
     "exit_commit": ("--exit-commit", int),
     "dust_usd": ("--dust-usd", float),
     "rule_prior": ("--rule-prior", float),          # init logit bias on the rule action
@@ -144,8 +147,12 @@ def build_smoke_command(*, python: str, workdir: str, reward_config: dict, split
     writes a bundle to the CDN. `tail -6` keeps the reply tiny (the [eval]/[verdict]/[train_event]
     lines sit at the end).
     """
+    smoke_config = {k: v for k, v in reward_config.items() if k != "eval_mode"}  # smoke runs CONTINUOUS:
+    #   the alive/straddle check is regime-agnostic, while the weekly grade (an 11-week policy replay)
+    #   is slow AND its [eval] line carries no action distribution for the gate to parse. The real
+    #   sweep keeps eval_mode; only the smoke is forced to the fast, parseable continuous eval.
     cmd = [python, "scripts/train_event.py", "--timesteps", str(smoke_steps), "--n-envs", str(n_envs),
-           "--eval-split", split, *build_reward_args(reward_config),
+           "--eval-split", split, *build_reward_args(smoke_config),
            "--seed", "0", "--run-id", f"{prefix}-smoke"]
     inner = " ".join(shlex.quote(a) for a in cmd)
     # grep exactly the two gate lines — `tail -6` broke when the per-regime verdict grew the output

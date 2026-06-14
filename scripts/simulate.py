@@ -52,10 +52,11 @@ def env_kwargs_from_provenance(prov: dict, returns, build_ohlc_frac_panels) -> d
               action_mode=prov["action_mode"], n_action_levels=prov["n_action_levels"],
               universe_mode=prov["universe_mode"], vol_target=prov["vol_target"],
               cap_floor=prov["cap_floor"], harvest_obs=prov["harvest_obs"],
-              rule_default=prov["rule_default"], exit_commit=prov["exit_commit"],
+              rule_default=prov["rule_default"], basket_default=prov.get("basket_default", False),
+              exit_commit=prov["exit_commit"],
               dust_usd=prov["dust_usd"], tp_rungs=[float(x) for x in tp.split(",") if x],
               loss_floor=prov["loss_floor"], det_blacklist=prov["det_blacklist"],
-              cycle_obs=prov.get("cycle_obs", False),
+              cycle_obs=prov.get("cycle_obs", False), no_btc_obs=prov.get("no_btc_obs", False),
               universe_lookback=prov.get("universe_lookback", 0), seed=prov.get("seed", 0))
     if prov.get("intrabar_floor") or (prov.get("wick_reject") or 0) > 0:
         lowf, highf = build_ohlc_frac_panels(list(returns.columns), returns.index)

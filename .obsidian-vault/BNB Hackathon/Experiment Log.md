@@ -1246,3 +1246,42 @@ weekly start is in-distribution. The breakdown is NOT the cold start; it is (1) 
     competition — removing the flattering continuous-vs-weekly mismatch. (Eval was continuous; must change.)
   - **Hold to the honest gate across UNSEEN regimes** (beat B&H + rung-0 OOS). s0 fails it; a model that
     PASSES it is, by definition, deployable and its logic applies broadly (the user's correct expectation).
+
+## 2026-06-14 — the deployment-honest BAR: rung-0 + B&H graded on COLD weekly sessions
+
+Built the first piece of the fork's eval-structure fix: a **torch-free cold-weekly grader**
+(`src/trader/train/weekly_eval.py` + `scripts/eval_weekly_baselines.py`, tests
+`tests/test_weekly_eval.py` 5 green). It chops the held data into Mon-00:00-UTC weeks (fresh $10k,
+168h warmup prepad, per-week causal vol-top-8, no cross-week holds — `simulate_weekly`'s slicing) and
+grades the **rung-0 RULE** and risk-parity **Buy&Hold** per week: return, within-week maxDD, the
+**≥1-trade/day activity floor**, regime, split. This is the BAR the next training phase must clear —
+measured the way the competition scores, not the flattering continuous episode. Config: rung-0,
+k=8 voltopk, risk-parity vol_target 0.005. Data: 5123h, 2025-11-05..2026-06-06, 20 tokens.
+
+| scope | rung-0 mean/wk | median | win-rate | B&H mean/wk | **BULL-GAP** (B&H−rung0, bull wks) | worst-wk DD | activity-miss |
+|-------|---------------|--------|----------|-------------|-----------------------------------|-------------|---------------|
+| **OOS (val+test, n=11)** | +7.8% | +3.5% | 55% | **+15.0%** | **+13.2%** (5 bull wks) | 36% (1 DQ wk) | **11/11 weeks** |
+| ALL (n=28) | +0.8% | −2.5% | 39% | +6.3% | +15.1% (8 bull wks) | 36% | 24/28 weeks |
+
+**Three deployment findings the continuous eval completely hid:**
+1. **The skeleton trails passive holding.** rung-0 makes **+7.8%/wk OOS vs B&H +15.0%** — and the OOS
+   mean is **carried entirely by one +92.2% monster week** (2026-04-27 test); median is +3.5%, ALL-weeks
+   mean is +0.8% (median −2.5%, win-rate 39%). The rule is a defensive underperformer that occasionally
+   catches a vol-capture week — the same "a few big weeks carry it" fragility as s0.
+2. **The BULL-GAP is +13.2% OOS (+15.1% all).** In bull weeks B&H beats the rung-0 rule by ~13–15pp.
+   This **quantifies, in the deployment structure, the documented structural ceiling** — "the event
+   skeleton can only be long via ignition entries + trailing-stop exits; in a grind-up bull it bleeds
+   vs holding, and the action space cannot express 'just stay long'." The agent (s0) is *worse* than
+   the rule OOS, so it is ≥13pp behind B&H in bulls. No reward/obs tweak inside the skeleton closes this.
+3. **≥1-trade/day is violated almost every week.** The ignition-only rule misses a trading day in
+   **11/11 OOS weeks** (24/28 all). NOTE: this is a **universal daily-activity requirement** (passive
+   B&H would miss it too), not a rung-0-specific strike — but the continuous eval hid that the deployed
+   loop needs a **forced minimal daily trade/rebalance** or it is DQ'd on Rule-1 regardless of PnL.
+
+**Substrate read (the user's "decide after the diagnostic" input).** The measured bull-gap +
+the activity reality both point the same way: a long-default **basket overlay** — hold the
+risk-parity vol-top-8 by default (captures the +13pp bull beta B&H is harvesting; rebalancing supplies
+daily activity; risk-parity B&H breached the DQ in only 1/28 weeks, so survival holds), with rung-0
+discretion as a **tilt** (its defensive edge in chop/bear weeks becomes additive, not the whole policy).
+The from-scratch curriculum then trains *within* a substrate that can structurally reach the gate,
+instead of one provably ≥13pp short of it in bulls. Recommendation pending user confirmation.

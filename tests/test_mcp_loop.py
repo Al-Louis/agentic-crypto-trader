@@ -31,6 +31,34 @@ def test_reward_args_refuse_unknown_key():
         L.build_reward_args({"reward_mode": "relative", "lstm_sise": 256})
 
 
+OVERLAY_CONFIG = {  # the long-default basket overlay + weekly gate (2026-06-14 fork)
+    "reward_mode": "relative", "rule_default": True, "basket_default": True, "no_btc_obs": True,
+    "eval_mode": "weekly", "exit_commit": 12, "dust_usd": 10.0, "rule_prior": 2.0,
+    "tp_rungs": "0.25,0.5,1.0,2.0", "eval_prepad": True, "loss_floor": 0.2, "action_mode": "discrete",
+    "n_action_levels": 4, "universe_mode": "voltopk", "k": 8, "vol_target": 0.005, "cap_floor": 0.02,
+    "norm_reward": True, "dd_lambda": 0.0, "ent_coef": 0.2, "lr": 3e-4, "lr_end": 3e-5, "episode_bars": 168,
+}
+
+
+def test_reward_args_accept_the_overlay_config():
+    args = L.build_reward_args(OVERLAY_CONFIG)
+    for flag in ("--basket-default", "--no-btc-obs", "--eval-mode", "--rule-default"):
+        assert flag in args
+    assert args[args.index("--eval-mode") + 1] == "weekly"
+
+
+def test_smoke_forces_continuous_but_sweep_keeps_weekly():
+    """The smoke must run the fast, parseable CONTINUOUS eval (its [eval] line carries the action
+    distribution the gate reads); the real sweep keeps --eval-mode weekly."""
+    smoke = L.build_smoke_command(python="py", workdir="/w", reward_config=OVERLAY_CONFIG,
+                                  split="val", prefix="ppo-event-overlay")
+    assert "--eval-mode" not in smoke                       # stripped for the smoke
+    assert "--basket-default" in smoke                      # but the substrate stays
+    sweep = L.build_sweep_command(python="py", workdir="/w", reward_config=OVERLAY_CONFIG,
+                                  seeds=[0], split="val", prefix="ppo-event-overlay")
+    assert "--eval-mode weekly" in sweep                    # the sweep grades on the deployment structure
+
+
 def test_sweep_command_sha_stamps_run_ids_and_sequences():
     cmd = L.build_sweep_command(python="py", workdir="/w", reward_config={"reward_mode": "relative"},
                                 seeds=[0, 1], split="val", prefix="ppo-event-x")

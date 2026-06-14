@@ -645,3 +645,51 @@ general policy would trade ZEC's ignition regardless of date or portfolio path. 
 **Bottom line:** s0 is a reproducible checkpoint and a sharp diagnostic, not the product. The route to a
 deployable agent is to train AND evaluate in the real (weekly/cold) structure, to the honest gate. That
 is the work the loop returns to.
+
+## As-built (2026-06-14) — the cold-weekly bar, the random-week gate, and the long-default OVERLAY
+
+Returning to training (user `/orient`). Two decisions: **train FROM SCRATCH** (no warm-start — s0 is a
+proven-overfit val-pocket policy and no `--warm-start` path exists), and **decide the substrate AFTER a
+diagnostic**. A third reframe from the user mid-session: **drop the BTC/regime focus** — the universe was
+selected for *low BTC correlation*, so a BTC-anchored regime signal is near-noise — and judge configs on
+the **distribution over randomly-selected cold weeks**, not curated bull/bear/crash buckets.
+
+**1. The deployment-honest BAR (`src/trader/train/weekly_eval.py`, `scripts/eval_weekly_baselines.py`).**
+A torch-free cold-weekly grader (Mon-00:00-UTC weeks, fresh $10k, 168h warmup prepad, per-week causal
+vol-top-8, no cross-week holds — `simulate_weekly`'s slicing) grading rung-0 + risk-parity B&H per week.
+Result (full table → [[Experiment Log]] §2026-06-14): **OOS rung-0 +7.8%/wk vs B&H +15.0%, BULL-GAP
++13.2%**, one DQ week, ≥1-trade/day missed every week. The bull-gap *quantifies the skeleton ceiling in
+the deployment structure*: event-only can't express "just stay long," so it bleeds vs holding in up-weeks;
+its one positive OOS number is carried by a single +92% week. Same verdict whether framed by regime or as
+a raw random-week distribution (skeleton beats holding in only ~36% of weeks, loses big when it loses).
+
+**2. The random-week distribution GATE (`weekly_eval.weekly_gate` + `bootstrap_mean_ci`).** Judges a
+config on its weekly-return *distribution* via the bootstrap-CI **lower bound** (so one lucky +92% week —
+the s0 flatterer — can't crown it): pass iff worst-week DD < 30% AND CI-low beats B&H's weekly mean AND
+beats rung-0's AND respects the activity floor; binding constraint named. (Activity ≥1-trade/day is a
+*universal* daily requirement — B&H misses it too — so deployment needs a forced minimal daily rebalance,
+a guardrail, not a strategy discriminator.) **Wired into `train_event` as `--eval-mode weekly`** (grades
+the policy on cold weekly sessions vs rung-0 + B&H, the `--no-btc-obs` flag neutralizes the `btc_trend`
+slot). The gate uses a **PAIRED** bootstrap — `policy_week − baseline_week`, CI-low > 0 — because policy
+and baseline see the SAME weeks, so the difference cancels the common (huge) market variance an unpaired
+test is swamped by. A subtle artifact was caught and fixed: measure the policy's return from the $10k
+**deposit**, not the post-entry-cost `eq[0]`, else a basket policy fakes a +0.48%/wk edge; after the fix a
+hold-everything overlay == B&H *exactly* and correctly FAILS `beats_buyhold` (it must add tilt value).
+
+**3. The long-default basket OVERLAY (`EventRungEnv.basket_default`, built + validated).** The substrate
+fix the bar demanded (user picked it after the diagnostic): `reset()` buys the full risk-parity vol-top-8
+basket (= B&H, cost baked in), and the exit/profit action tables **invert** — idx 0 = HOLD the basket,
+deviations trim — so the default action holds and *doing nothing ≈ B&H*. The relative-reward benchmark
+becomes the **held-basket B&H curve** (`_basket_equity_curve`), so a do-nothing agent nets ~0 and *only
+correct tilts score* — a well-posed gradient that directly targets the +13pp. rung-0's ignition/exit
+discretion becomes a **tilt** on top (its real value is the exit/risk side — TradeSim's #1 lesson — now
+additive instead of the whole policy). Flag defaults OFF (378 tests green, prior behavior byte-identical);
+new flag builds on `rule_default` (discrete 4-level), with `rule_prior` making the untrained policy ≈ B&H.
+Validated on real data: hold-everything == B&H to 5 decimals over 6 cold weeks. Plumbed through the gym
+adapter, `train_event` (`--basket-default` + provenance), and `simulate` provenance.
+
+**Next:** finish the random-week gate wiring (drop btc_trend obs), then the **from-scratch random-week
+sweep** on the overlay to the distribution gate (desktop — shared-box gotchas apply). The honest question:
+can learned tilts beat holding the basket OOS across random weeks? "No, just hold" is now a valid,
+gate-safe answer the substrate makes reachable. See [[curriculum-and-checkpoints-are-legitimate]],
+[[Simulated Market]], [[Experiment Log]] §2026-06-14.
