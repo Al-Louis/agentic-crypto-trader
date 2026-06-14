@@ -158,13 +158,22 @@ def build_portfolio_artifacts(records, universe, t0, t1):
         token_candles[t] = ap.candles_from_ohlcv(win)
         marks = []
         for r in records:
-            tr = r["trades_usd"].get(t)
-            if tr is None:
-                continue
-            marks.append({"time": r["time"], "price": _price_at(win, r["time"]),
-                          "side": "buy" if tr > 0 else "sell", "usd": abs(tr),
-                          "fee": r.get("trade_fees", {}).get(t, 0.0),
-                          "weight": r["weights"].get(t, 0.0)})
+            if "fills" in r:                                  # event-env: TRUE per-fill time + exec price
+                for f in r["fills"]:                          # (a stop fills sub-close: candle x ratio)
+                    if f["token"] != t:
+                        continue
+                    marks.append({"time": f["time"],
+                                  "price": _price_at(win, f["time"]) * f.get("ratio", 1.0),
+                                  "side": "buy" if f["usd"] > 0 else "sell", "usd": abs(f["usd"]),
+                                  "fee": f["fee"], "weight": r["weights"].get(t, 0.0)})
+            else:                                             # legacy path (rung-0 / PortfolioEnv records)
+                tr = r["trades_usd"].get(t)
+                if tr is None:
+                    continue
+                marks.append({"time": r["time"], "price": _price_at(win, r["time"]),
+                              "side": "buy" if tr > 0 else "sell", "usd": abs(tr),
+                              "fee": r.get("trade_fees", {}).get(t, 0.0),
+                              "weight": r["weights"].get(t, 0.0)})
         token_trades[t] = marks
     return weights, token_candles, token_trades
 

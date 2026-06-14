@@ -47,10 +47,12 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
         raw.append(float(np.asarray(a).reshape(-1)[0]))
         obs, _, done, info = env.step(a)
         if info.get("trades"):
-            records.append({"time": info["trade_time"], "weights": info["weights"],
-                            "trades_usd": {t: u for t, u, _ in info["trades"]},
-                            "trade_fees": {t: c for t, _, c in info["trades"]}})
-            fees += sum(c for _, _, c in info["trades"])
+            fills = [{"token": t, "usd": u, "fee": c, "time": ft, "ratio": r}
+                     for t, u, c, ft, r in info["trades"]]   # per-fill TRUE time + exec ratio (stops fill sub-close)
+            records.append({"time": info["trade_time"], "weights": info["weights"], "fills": fills,
+                            "trades_usd": {f["token"]: f["usd"] for f in fills},   # legacy dicts (other consumers)
+                            "trade_fees": {f["token"]: f["fee"] for f in fills}})
+            fees += sum(f["fee"] for f in fills)
     eq = pd.Series([e for _, e in env._eq_trace], index=[t for t, _ in env._eq_trace])
     universe = sorted({t for rec in records for t in rec["trades_usd"]} | set(env.universe))
     return eq, records, universe, fees, raw
