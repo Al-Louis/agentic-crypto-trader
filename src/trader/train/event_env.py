@@ -193,6 +193,7 @@ class EventRungEnv:
         self.cash = self.capital
         self.peak_eq = self.capital
         self.pos = {}                                            # tok -> dict(usd, entry_bar, peak_px, origin)
+        self._realized = {}                                      # tok -> cumulative realized cash flow (PnL ledger)
         self.cool = {t: -10 ** 9 for t in self.universe}        # last exit bar (cooldown)
         self._exit_decided = {}                                 # tok -> bar of last committed non-cut exit
         self.prior_origin = {t: None for t in self.universe}    # dead-zone: runup origin of last cycle
@@ -366,6 +367,7 @@ class EventRungEnv:
                 j = self.col_ix[tok]
                 c = amm_cost_usd(size, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
                 self.cash -= size + c
+                self._realized[tok] = self._realized.get(tok, 0.0) - (size + c)   # ledger: cash out
                 self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
                                  "origin": self._px[self.bar, j], "tp_i": 0}
                 self._trades.append((tok, size, c, int(self.returns.index[self.bar]),
@@ -416,6 +418,7 @@ class EventRungEnv:
         val = p["usd"] * fill_px / self._px[p["entry_bar"], j]
         c = amm_cost_usd(-val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += val - c
+        self._realized[tok] = self._realized.get(tok, 0.0) + (val - c)   # ledger: cash in (even at $0)
         if val > 0.0:                                        # record EVERY close (even sub-$1 crash
             self._trades.append((tok, -val, c, int(self.returns.index[self.bar]),   # closes) so the
                                  fill_px))                          # marker stream nets to flat -sell @ stop price index
@@ -434,6 +437,7 @@ class EventRungEnv:
         j = self.col_ix[tok]
         c = amm_cost_usd(-sell_val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += sell_val - c
+        self._realized[tok] = self._realized.get(tok, 0.0) + (sell_val - c)   # ledger: cash in
         if sell_val > 0.0:                                   # record EVERY sell (even sub-$1) so the
             self._trades.append((tok, -sell_val, c, int(self.returns.index[self.bar]),   # marker stream
                                  self._px[self.bar, j]))            # nets to flat -sell @ bar index (incl. rotation)
@@ -463,6 +467,13 @@ class EventRungEnv:
         p = self.pos[tok]
         j = self.col_ix[tok]
         return p["usd"] * self._px[self.bar, j] / self._px[p["entry_bar"], j]
+
+    def token_pnls(self) -> dict:
+        """Per-token EXACT PnL = realized cash flow + current open-position value. Sums to
+        (equity - capital); the ledger the dashboard export reconciles each asset's positions to."""
+        toks = set(self._realized) | set(self.pos)
+        return {t: self._realized.get(t, 0.0) + (self._pos_value(t) if t in self.pos else 0.0)
+                for t in toks}
 
     def _equity(self) -> float:
         return self.cash + sum(self._pos_value(t) for t in self.pos)

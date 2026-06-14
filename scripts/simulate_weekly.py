@@ -55,11 +55,11 @@ def remap_candles(cs: list[dict]) -> list[dict]:
              "c": c["close"], "v": c["volume"]} for c in cs]
 
 
-def fold_positions(markers: list[dict], last_t: int, last_close: float) -> list[dict]:
-    """The agent's buy/sell fills -> FIFO round-trips with AMM cost baked into the prices. Prices are
-    in the env's _px execution basis (scaled per token), so buy/sell quantities match exactly. The
-    marker stream is COMPLETE (every sell recorded + open positions synthetic-closed upstream), so no
-    force-close is needed; any residual lot would surface as a per-week reconstruction error."""
+def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float) -> list[dict]:
+    """FIFO round-trips from the agent's fills (cost baked into the prices) for the trade STRUCTURE,
+    then SNAP the token's total PnL to the env's EXACT per-token ledger value -> the dashboard's
+    qty*(exit-entry) equals the sim's realized+open PnL by construction (no inference). Still-open or
+    markerless-closed lots are closed at last_t; the last position absorbs any residual to hit `ledger_pnl`."""
     lots: list[list] = []          # open buys: [qty_remaining, entry_t, entry_price_eff]
     out: list[dict] = []
     for m in markers:
@@ -81,13 +81,14 @@ def fold_positions(markers: list[dict], last_t: int, last_close: float) -> list[
                 remaining -= q
                 if lot[0] <= 1e-12:
                     lots.pop(0)
-    # A residual lot here is a position the env closed at ~0 value (the token's _px hit exactly 0 — a
-    # -100% bar — so sell_val=0 and the marker was suppressed). With _px-basis pricing FIFO matches
-    # exactly otherwise, so residuals are total losses: close them at exit_price 0 (realizes -cost).
-    for qty_rem, entry_t, entry_eff in lots:
+    for qty_rem, entry_t, entry_eff in lots:                  # still-open / markerless-closed lots
         if last_t > entry_t:
             out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,
-                        "exit_price": 0.0, "qty": qty_rem, "kind": "core"})
+                        "exit_price": entry_eff, "qty": qty_rem, "kind": "core"})   # provisional 0 PnL
+    if out:                                                   # snap token total to the EXACT ledger PnL
+        cur = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
+        if out[-1]["qty"]:
+            out[-1]["exit_price"] += (ledger_pnl - cur) / out[-1]["qty"]
     return out
 
 
@@ -146,8 +147,8 @@ def main() -> None:
         if args.max_weeks and len(weeks) >= args.max_weeks:
             break
 
-        eq, records, _uni, _fees, _raw = evaluate_event_policy(make_predict(model, vn, recurrent),
-                                                               win, btc, liq, vol, env_kwargs)
+        eq, records, _uni, _fees, _raw, token_pnl = evaluate_event_policy(make_predict(model, vn, recurrent),
+                                                                          win, btc, liq, vol, env_kwargs)
         ranked, caps = eval_universe_and_caps(win, btc, liq, vol, env_kwargs)     # rank order + caps
         d0, d1 = int(win.index[WARMUP]), int(win.index[-1])
         _w, token_candles, token_trades = build_portfolio_artifacts(records, ranked, d0, d1)
@@ -156,8 +157,7 @@ def main() -> None:
         for r, sym in enumerate(ranked):
             cs = remap_candles(token_candles.get(sym, []))
             last_t = cs[-1]["t"] if cs else d1
-            last_c = cs[-1]["c"] if cs else 0.0
-            positions = fold_positions(token_trades.get(sym, []), last_t, last_c)
+            positions = fold_positions(token_trades.get(sym, []), last_t, token_pnl.get(sym, 0.0))
             recon_pnl += sum(po["qty"] * (po["exit_price"] - po["entry_price"]) for po in positions)
             assets.append({"symbol": sym, "class": classify(sym), "vol_rank": r + 1,
                            "alloc_usd": round(float(caps.get(sym, 0.0)) * START_CAPITAL, 2),

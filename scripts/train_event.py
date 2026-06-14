@@ -53,18 +53,11 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
                             "trades_usd": {f["token"]: f["usd"] for f in fills},   # legacy dicts (other consumers)
                             "trade_fees": {f["token"]: f["fee"] for f in fills}})
             fees += sum(f["fee"] for f in fills)
-    # close any STILL-OPEN positions at the env's true final mark (mark-to-market, no fee) so every
-    # position has an exit marker priced in the SAME _px basis -> the reconstruction is exact.
-    end_t = int(env.returns.index[env.bar])
-    closes = [{"token": tok, "usd": -env._pos_value(tok), "fee": 0.0, "time": end_t,
-               "px": float(env._px[env.bar, env.col_ix[tok]])} for tok in list(env.pos)]
-    if closes:
-        records.append({"time": end_t, "weights": {}, "fills": closes,
-                        "trades_usd": {f["token"]: f["usd"] for f in closes},
-                        "trade_fees": {f["token"]: 0.0 for f in closes}})
     eq = pd.Series([e for _, e in env._eq_trace], index=[t for t, _ in env._eq_trace])
     universe = sorted({t for rec in records for t in rec["trades_usd"]} | set(env.universe))
-    return eq, records, universe, fees, raw
+    # token_pnls() = the EXACT per-token realized+open PnL ledger; the weekly export snaps each asset's
+    # positions to it so the dashboard's derived PnL equals the sim's by construction (no inference).
+    return eq, records, universe, fees, raw, env.token_pnls()
 
 
 def rung0_baseline(eval_r, liq, vol):
@@ -163,7 +156,7 @@ def eval_regime(eval_r, btc, universe, warmup=WARMUP):
 def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed):
     """Run the policy on one split and grade it through the full honest gate (universe-matched
     Buy&Hold, Random-through-env, rung-0, regime). Returns everything needed to publish + report."""
-    eq, records, universe, fees, raw = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
+    eq, records, universe, fees, raw, _tp = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
     report = PerformanceMetrics.compute_all(eq.to_numpy(), steps_per_year=HOURS_PER_YEAR)
     pol, pol_dd = report.total_return_pct, report.max_drawdown_pct
     uni, caps = eval_universe_and_caps(eval_r, btc, liq, vol, env_kwargs)
