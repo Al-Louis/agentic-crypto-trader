@@ -292,14 +292,14 @@ class EventRungEnv:
                     if self._px[self.bar, j] * self._lowf[self.bar, j] <= floor_px:
                         self._stop_fill(t, floor_px)
             eqb = self._equity()
-            if self.bar >= self.end or eqb <= 1.0:
-                self._done, self._pending = True, ("none", None)
+            if self.record_trace:                              # record EVERY advanced bar incl. the FINAL
+                self._eq_trace.append((int(self.returns.index[self.bar]), eqb))   # one — the done-check
+            if self.bar >= self.end or eqb <= 1.0:             # used to return FIRST, leaving eq one bar
+                self._done, self._pending = True, ("none", None)   # stale vs the open-position marks
                 return
             self.peak_eq = max(self.peak_eq, eqb)
             if self.reward_mode == "entry_forward":            # mature entries whose forward window elapsed
                 self._mature_entries(self.bar)
-            if self.record_trace:
-                self._eq_trace.append((int(self.returns.index[self.bar]), eqb))
             self._queue = self._scan_bar(self.bar)
             # re-arm entry edges where ignite has dropped (so a future ignite prompts again)
             for t in self.universe:
