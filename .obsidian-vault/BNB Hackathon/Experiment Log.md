@@ -1167,3 +1167,82 @@ can't reach the +58.6% test B&H bar), not drawdown (already DQ-safe, worst 18.2%
 here moves return. **Keep warm, NOT as a model input:** turnover spiking 5σ on a held token is a
 reasonable human-eyeball OPS ALERT on the EC2 live tail (telemetry, not a validated guardrail) —
 consistent with the don't-co-deploy-during-validation posture.
+
+## 2026-06-13/14 — s0 reproduced bit-identically + the cross-timeframe diagnostic
+
+**Reproduction (determinism confirmed).** Re-ran seed 0 of the rdLe4 config three times and got the
+SAME policy to all 17 decimals — val **0.35299690480869833**, maxDD **0.07005478355079246**, vs
+baselines rung-0 −0.58% / B&H +17.07% / Random −2.36%:
+
+| run | sha | val return | val maxDD |
+|-----|-----|-----------|-----------|
+| original s0 | c07bda0 | 0.35299690480869833 | 0.07005478355079246 |
+| repro | c07bda0 | 0.35299690480869833 | 0.07005478355079246 |
+| capture (saved) | 68b268f | 0.35299690480869833 | 0.07005478355079246 |
+
+So rdLe4 training is **fully deterministic** on the box (CPU PPO + fixed seeds) — re-running a seed
+recaptures its exact weights. The capture (68b268f = the save-enabled training-identical sha) persisted
+`policy.zip`+`vecnormalize.pkl` to the box and `s3://alexlouis-apentic-data/ppo-event-rdLe4r-68b268f-s0/`.
+s0's full per-regime profile remains the val one-trick: **val +35.3 / test +0.8 / crash +1.1**.
+
+**Cross-timeframe diagnostic** (`scripts/simulate.py`, the captured checkpoint replayed; [[Simulated Market]]):
+
+| Timeframe | regime | OOS | **policy** | Buy&Hold | rung-0 | trades |
+|-----------|--------|-----|-----------|----------|--------|--------|
+| 6mo | bull | 48% | **−1.2%** | +127.2% | +33.5% | 179 |
+| 3mo | bull | 95% | **+19.7%** | +151.0% | +43.1% | 106 |
+| 1mo | bear | 100% | **+0.7%** | −19.9% | +5.0% | 29 |
+| 1wk | flat | 100% | **−8.7%** | −1.1% | −4.0% | 18 |
+| 1d  | flat | 100% | **+0.0%** | +2.4% | 0.0% | 0 |
+
+**Read:** outside its memorized val pocket, s0 is a **defensive underperformer**. (a) It fails to
+capture bull upside — Buy&Hold here is of the agent's OWN risk-parity basket, so −1.2% vs +127% means
+its entry/exit discretion **actively destroys** value vs doing nothing (it sells winners). (b) It loses
+to its **own rung-0 rule OOS in every window**. (c) It bleeds/churns in chop (1wk −8.7% on 18 trades).
+One virtue: bear capital preservation (1mo +0.7% vs −20%). Episodes were 336-bar (2wk), so it never
+learned long-horizon holding. Fresh OOS confirmation of the val-one-trick story, and the concrete
+**curriculum target list: (a) ride bull winners, (b) beat rung-0 OOS, (c) stand down in chop**
+([[AI Training]]).
+
+## 2026-06-14 — the weekly simulator + the train/deploy reckoning (FORK: back to training)
+
+Built the **competition-structured weekly simulator** (`scripts/simulate_weekly.py`, [[Simulated Market]],
+[[Apentic Data Contract]] §weekly): each session = one **Mon-00:00-UTC week**, fresh **$10k** (no
+compounding), **per-week causal vol-top-8** re-selected before the week. Published per-model to the
+Apentic "Simulated Trades" dashboard. PnL is **exact by construction** (the LEDGER pattern: the env
+reports per-token realized+open PnL via `token_pnls()`; the export snaps positions to it — recon
+**$0.00 across all 28 weeks**).
+
+**s0 weekly results (each week from $10k):** 12/28 winning, mean +$320/wk, best +$4,526 (Nov24, +45%),
+worst −$543; high-variance — a few big vol-capture weeks carry it.
+
+**The ZEC investigation — why the weekly sim looks nothing like the continuous eval.** In the eval
+bundle the user reviewed, ZEC was the STAR (+$2,747, many well-timed trades). In the weekly sim ZEC is
+in the tradable-8 in **17 of 28 weeks** but TRADES in only **2**, and in the Apr 6–12 big-move week
+(+49%) it did **zero** trades. Suspects ruled out one by one:
+  - **Universe?** No — ZEC is top-8 by trailing-168h vol in 17 weeks (rank 3–8).
+  - **Signal/warmup?** No — ZEC's Apr 6–12 ignition fires identically with 168h vs full history.
+  - **Data / reconstruction?** No — recon $0.
+  - **Funding?** No — $7,914 free cash at the ignition.
+  - **What actually happened:** the policy chose discrete action **idx 2 → `RULE_DEFAULT_ENTRY_MULT[2]
+    = 0.0` = SKIP.** The trained agent looked at ZEC's big-move ignition and *deliberately declined.*
+
+**The reckoning — two real breakdowns (neither is "RL is pointless"):**
+1. **Flattering evaluation structure.** The +$2,747 came from ONE continuous multi-week episode that let
+   the agent trade ZEC's setups (and hold across weeks). The weekly-reset structure — and a real cold
+   competition week — is harsher; part of the star number was an artifact of how we evaluated.
+2. **The model overfit — it learned specific WINDOWS, not a general edge.** Already proven by the
+   cross-timeframe diagnostic (loses to B&H and its OWN rule OOS); now concrete — the SAME setup flips
+   from "trade" to "skip" purely with context. A robustly-generalized policy would trade ZEC's ignition
+   regardless of start date / portfolio context. This one doesn't → it memorized.
+
+**Concept clarified (for the record):** a trained policy IS a generalizable obs→action function and does
+NOT require continuous running — every training episode also starts cold (zero LSTM state), so a cold
+weekly start is in-distribution. The breakdown is NOT the cold start; it is (1) generous evaluation and
+(2) s0 not generalizing. s0 was always a diagnostic CHECKPOINT, never the finished trader.
+
+**FORK — return to the training loop, with a sharpened requirement** (detail → [[AI Training]]):
+  - **Train AND evaluate in the SAME structure as deployment** — cold ~1-week sessions matching the
+    competition — removing the flattering continuous-vs-weekly mismatch. (Eval was continuous; must change.)
+  - **Hold to the honest gate across UNSEEN regimes** (beat B&H + rung-0 OOS). s0 fails it; a model that
+    PASSES it is, by definition, deployable and its logic applies broadly (the user's correct expectation).

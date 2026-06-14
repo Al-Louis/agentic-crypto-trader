@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Apentic — Simulated Trades</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="apentic.css" />
+<link rel="stylesheet" href="apentic-sim.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="apentic-backtest.js"></script>
+<script src="apentic-data.js"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="apentic-charts.jsx"></script>
+<script type="text/babel" src="apentic-components.jsx"></script>
+<script type="text/babel" src="apentic-sim-charts.jsx"></script>
+<script type="text/babel" src="apentic-sim-panels.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const ACCENTS = {
+  "Tie Orange": "#FF7512",
+  "Amber Gold": "#F5A623",
+  "Candle Green": "#16D67A",
+  "Hot Magenta": "#FF3D8B",
+};
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "Tie Orange",
+  "grain": true
+}/*EDITMODE-END*/;
+
+function navTo(page) {
+  // Standalone export: Simulated Trades is the only page. In the full Apentic
+  // app these route to the other dashboards — wire them up on integration.
+  if (page === "simulated") return;
+}
+
+const fmtDate = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  // Load real simulator output if present, else fall back to the bundled mock.
+  const [BT, setBT] = useState(window.BACKTEST);
+  const [source, setSource] = useState("mock");
+  useEffect(() => {
+    let alive = true;
+    fetch("simulated_trades.json", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!alive || !json || !json.weeks) return;
+        try {
+          setBT(window.Apentic.computeBacktest(json));
+          setSource("file");
+        } catch (e) { console.warn("simulated_trades.json failed to parse:", e); }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    const r = document.documentElement.style;
+    r.setProperty("--orange", ACCENTS[t.accent] || "#FF7512");
+    r.setProperty("--grain", t.grain ? "1" : "0");
+  }, [t.accent, t.grain]);
+
+  // week selection: hover preview + click lock
+  const [hoverWeek, setHoverWeek] = useState(null);
+  const [lockedWeek, setLockedWeek] = useState(null);
+  const [focusIdx, setFocusIdx] = useState(0);
+
+  // default display week = peak week, until user interacts
+  const peakIdx = useMemo(() => {
+    const vals = BT.weeks.map((w) => w.portfolioEnd);
+    return vals.indexOf(Math.max(...vals));
+  }, [BT]);
+
+  const effective = Math.min(
+    lockedWeek != null ? lockedWeek : (hoverWeek != null ? hoverWeek : peakIdx),
+    BT.weeks.length - 1
+  );
+  const week = BT.weeks[effective];
+
+  const onHover = (i) => { if (lockedWeek == null) setHoverWeek(i); };
+  const onLock = (i) => {
+    setLockedWeek((cur) => (cur === i ? null : i));
+    setHoverWeek(null);
+  };
+
+  return (
+    <div>
+      <Nav page="simulated" onNav={navTo} />
+      <Ticker />
+
+      <div className="sim-page">
+        <div className="sim-intro">
+          <div>
+            <div className="sec-label">SIMULATED TRADES</div>
+            <h2 className="sim-h">Six months, walk-forward.</h2>
+            <p className="sim-sub">The trained agent replayed against {BT.N_WEEKS} weeks of historical market data. Each week it re-ranks the universe by volatility, trades the top 8, and re-deploys. Hover the equity columns to preview a week — click to lock it and dig into the per-asset candles and executions.</p>
+          </div>
+          <div className="sim-window">
+            BACKTEST WINDOW<br />
+            <b>{fmtDate(BT.summary.start)}</b> → <b>{fmtDate(BT.summary.end)}</b><br />
+            {BT.N_WEEKS} weekly snapshots · hourly candles<br />
+            <span style={{ color: source === "file" ? "var(--up)" : "var(--faint)" }}>
+              {source === "file" ? "● live: simulated_trades.json" : "○ sample data (drop in simulated_trades.json)"}
+            </span>
+          </div>
+        </div>
+
+        <BtHeadline summary={BT.summary} weeks={BT.weeks} />
+
+        <div className="sim-section">
+          <div className="sim-sec-head">
+            <span className="sim-sec-title">Competition compliance</span>
+            <span className="sim-sec-desc">two hard disqualifiers · evaluated every session</span>
+          </div>
+          <BtCompliance summary={BT.summary} />
+        </div>
+
+        <div className="sim-section">
+          <div className="sim-sec-head">
+            <span className="sim-sec-title">Equity by week</span>
+            <span className="sim-sec-desc">height = portfolio value · color = weekly P&L · ⚠ orange ring = disqualifying session</span>
+          </div>
+          <div className="hero-eq">
+            <div className="heq-top">
+              <div className="heq-legend">
+                <span className="lg"><span className="sw" style={{ background: "var(--up)" }} /> up week</span>
+                <span className="lg"><span className="sw" style={{ background: "var(--down)" }} /> down week</span>
+                <span className="lg"><span className="sw" style={{ background: "#E8EAED", opacity: .6 }} /> equity path</span>
+              </div>
+              <div className="heq-hint">hover to preview · <b>click to lock</b></div>
+            </div>
+            <BtEquityColumns weeks={BT.weeks} equity={BT.equity} selected={effective}
+                             locked={lockedWeek} onHover={onHover} onLock={onLock} />
+          </div>
+        </div>
+
+        <div className="sim-section">
+          <div className="sim-sec-head">
+            <span className="sim-sec-title">Week detail</span>
+            <span className="sim-sec-desc">8 volatility-ranked assets · candles + executions</span>
+          </div>
+          <BtWeekDetail week={week} locked={lockedWeek === effective} focusIdx={focusIdx} setFocusIdx={setFocusIdx} />
+        </div>
+
+        <div className="sim-section">
+          <div className="sim-sec-head">
+            <span className="sim-sec-title">Token P&L · full backtest</span>
+            <span className="sim-sec-desc">{BT.tokens.length} tokens traded across {BT.N_WEEKS} weeks</span>
+          </div>
+          <BtTokenTable tokens={BT.tokens} nWeeks={BT.N_WEEKS} />
+        </div>
+
+        <div className="foot">
+          <span>APENTIC · 6-month walk-forward backtest · {BT.summary.totalTrades} round trips · {BT.tokens.length} tokens</span>
+          <span>simulated on historical data · past performance ≠ future results · NFA</span>
+        </div>
+      </div>
+
+      <TweaksPanel>
+        <TweakSection label="Brand" />
+        <TweakColor label="Accent" value={t.accent}
+          options={Object.keys(ACCENTS).map((k) => ACCENTS[k])}
+          onChange={(hex) => setTweak("accent", Object.keys(ACCENTS).find((k) => ACCENTS[k] === hex) || "Tie Orange")} />
+        <TweakToggle label="Film grain" value={t.grain} onChange={(v) => setTweak("grain", v)} />
+      </TweaksPanel>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

@@ -858,3 +858,75 @@ live.
 - **Knowledge era:** trade post-mortem grader + quant-consult rubric; five theories probed
   (1 validated -> `cycle_obs`/rdLc sweeping; 3 refuted pre-compute; 1 data-gated/parked).
   Probes: `probe_knowledge.py`, `probe_personality.py`. -> [[AI Training]] as-built.
+
+## 2026-06-13/14 — checkpoint reproduction, the simulator, and the cross-timeframe diagnostic
+
+A direction shift (user-set): a training run is not the deliverable — a **reproducible checkpoint**
+is, to seed **curriculum / warm-start** training. Curriculum + checkpoint warm-start are now
+first-class levers; the prior reflex against them was a category error (they govern OPTIMIZATION; the
+honest gate governs EVALUATION — orthogonal). Standings/detail → [[Experiment Log]], [[AI Training]].
+
+### Checkpoints are reproducible — bit-identically
+- The **pre-2026-06-12 total-loss gap is closed** (`e681c4d`: `model.save(policy.zip)` +
+  `venv.save(vecnormalize.pkl)` after `learn()`). Every run from that sha on persists a reloadable policy.
+- **s0 reproduced to all 17 decimals, THREE times** (original, a c07bda0 re-run, the save-enabled
+  68b268f capture): val 0.35299690480869833 / maxDD 0.07005478355079246. The rdLe4 config's training
+  is **fully deterministic** on the box (CPU PPO + fixed seeds) — re-running a seed recaptures its exact policy.
+- **Workflow (via the `scripts/rl_loop.py` CLI, fresh process):** `reset` → `propose --config <json>
+  --seeds N --sha <save-enabled sha>` → `step`. c07bda0 PREDATES the save, so to capture a pre-e681c4d
+  run you re-run its seed at the minimal **training-identical** save-enabled sha (here 68b268f:
+  n_epochs/target_kl/cycle_obs defaults match, universe_lookback=0→warmup, the save is post-`learn()`
+  so the trajectory is unchanged — proven by byte-identical smoke).
+- **Captured checkpoint:** `runs-rl/ppo-event-rdLe4r-68b268f-s0/{policy.zip 7.27 MB, vecnormalize.pkl}`
+  on the box AND pushed to `s3://alexlouis-apentic-data/ppo-event-rdLe4r-68b268f-s0/` (durable; runs-rl is local/gitignored).
+
+### `scripts/simulate.py` — replay a checkpoint over arbitrary windows (commit `bcb4750`/`ebfebc1`)
+- Loads policy.zip + vecnormalize.pkl from disk (CPU), reads the checkpoint's OWN provenance to
+  rebuild the EXACT trained env config, and grades each trailing window through the trainer's own
+  `evaluate_and_gate` — so sim numbers == a training-eval over that window. Per timeframe: trailing
+  N+warmup bars (tradeable from bar 0), **evolving** voltopk universe (re-ranked at each window start),
+  **in/OOS-labeled** (overlap with the train split), one `kind:"portfolio"`, `simulation:true` bundle
+  per timeframe with full per-token OHLCV candles + markers. Contract → [[Apentic Data Contract]]
+  §Simulation run; mechanism → [[Simulated Market]].
+- **Serving decision: precompute-to-CDN for presets, NOT an on-demand EC2 API.** The stack is already
+  static-JSON-on-CDN and the frontend already renders portfolio bundles, so a model+timeframe selector
+  over precomputed bundles is zero new infra and no security surface. On-demand (arbitrary ranges) is a
+  v2 — and must NOT live on the custody/trading EC2 (it signs txs; no public surface there).
+- Timeframes 6mo/3mo/1mo/1wk/1d (NOT 1yr — only ~5123 bars/~7mo of hourly data exist).
+
+### Cross-timeframe diagnostic on s0 (the curriculum input → [[Experiment Log]] for the table)
+Outside its memorized val pocket, s0 is a **defensive underperformer**: (a) fails to ride bull upside —
+its discretion DESTROYS value vs holding the same risk-parity basket (6mo −1.2% vs B&H +127%; 3mo +20%
+vs +151%); (b) loses to its OWN rung-0 rule OOS in every window; (c) bleeds/churns in chop (1wk −8.7%,
+18 trades). One virtue: bear capital preservation (1mo +0.7% vs B&H −20%). Episodes were 336-bar (2wk)
+→ never learned long-horizon holding. **Curriculum targets (a)/(b)/(c)**; design waits on the user.
+
+### Operational (→ [[Remote Capabilities]])
+- **The in-session `trader` MCP server's SSH goes STALE after the desktop reboots** — every
+  `mcp__trader__rl_*` then fails `subprocess.TimeoutExpired` ("could not reach desktop") while direct
+  PowerShell ssh works; `health` still says ok (it does no ssh). **Fix: drive via the `rl_loop.py` CLI**
+  (fresh process per call, immune) or reconnect via `/mcp`. Don't re-diagnose the MCP ssh path.
+- **sha propagation:** the box's git origin is the stale P: mirror with NO non-interactive GitHub auth —
+  only commits up to `origin/main` reach the box; newer unpushed local commits don't. Propose only an
+  on-box sha; `scp` a new script to the box auth-free.
+
+## 2026-06-14 (cont.) — weekly competition simulator + the train/deploy reckoning (FORK)
+
+- **`scripts/simulate_weekly.py`** — the Apentic "Simulated Trades" dashboard export (design in
+  `.design-export-simulated/HANDOFF.md`): **Mon-00:00-UTC weekly sessions, fresh $10k (no compounding),
+  per-week causal vol-top-8**, `{meta, weeks[]}` JSON published **per-model**
+  (`<run-id>/simulated_trades.json` + a `simulated_models.json` selector index). [[Apentic Data Contract]] §weekly.
+- **The LEDGER pattern (recon fix).** The dashboard derives PnL itself from `qty*(exit-entry)`, but the
+  env is notional/_px-index based and discards real per-coin prices, so reconstructing exact round-trips
+  from markers was whack-a-mole (intrabar stops, total-loss-to-0, an eq-trace off-by-one: $29k→$420→…,
+  never exact). SOLUTION: `EventRungEnv.token_pnls()` = exact per-token realized+open PnL; `fold_positions`
+  builds round-trips for structure then **snaps the last position's exit so the token total == ledger**.
+  **Recon $0.00 / 28 weeks** (commits `8158651`…`d81f301`). Also fixed: eq_trace records the final bar;
+  every sell marker recorded (dropped sub-$1 dust suppression). Gotcha: box clock-skew serves a stale
+  `.pyc` — clear `__pycache__` / `PYTHONDONTWRITEBYTECODE=1` when a box code change "doesn't take."
+- **The diagnostic outcome → FORK.** The weekly sim showed s0's continuous-eval stardom (ZEC +$2,747)
+  does NOT survive cold weekly sessions: ZEC is tradable in 17/28 weeks but trades in 2, and **skipped its
+  Apr 6–12 big-move ignition by deliberate policy choice** (action idx 2 = 0× = skip). Cause = flattering
+  continuous eval + the known overfit, NOT a bug (recon exact, ignition fires, cash free). **Decision:
+  return to the training loop and train+evaluate in the deployment (weekly/cold) structure to the honest
+  gate.** Full reckoning → [[Experiment Log]] §2026-06-14, [[AI Training]] §the-fork.

@@ -196,6 +196,56 @@ against *before* the messy sparse DEX data, and a **feature blueprint** (its 71 
 comparison set and `simulate_trade` as the live-cost bridge. A `/workflows` loop can drive
 *build dataset → backtest → report → diagnose → iterate* deterministically ([[MCP Server]]).
 
+## Checkpoint replay — the cross-timeframe simulator (`scripts/simulate.py`, 2026-06-14)
+
+Once policies are **persisted** (`policy.zip` + `vecnormalize.pkl`, from `e681c4d` onward — every
+pre-2026-06-12 policy was lost on process exit), a saved checkpoint can be **replayed over arbitrary
+windows** without retraining. This is the diagnostic that maps **where a model holds or breaks across
+horizons** — the input to curriculum design (diagnose first, design second; never design blind).
+
+- **It is the trainer's own eval, not a second code path.** `simulate.py` loads the policy from disk
+  (CPU), reads the checkpoint's OWN provenance (`metrics.json`) to rebuild the **exact** env config it
+  trained with (so obs shape / action space match), then grades each window through
+  `train_event.evaluate_and_gate` — so a simulation's numbers are **identical** to a training-time eval
+  over the same window, baselines included (rung-0, universe-matched Buy&Hold, Random).
+- **Per timeframe** (6mo/3mo/1mo/1wk/1d — *not* 1yr; only ~5123 bars/~7mo of hourly data exist): a
+  trailing N+warmup window (warmup served contiguously → tradeable from bar 0), its **own** voltopk
+  universe picked at the window start (so the basket **evolves** across horizons), and an
+  **in-sample/OOS label** (`oos_frac` = fraction after the train split's end — windows that overlap
+  training look optimistic and must be flagged). Publishes one `kind:"portfolio"`, `simulation:true`
+  bundle per timeframe ([[Apentic Data Contract]] §Simulation run).
+- **Determinism makes this trustworthy:** the rdLe4 config reproduces bit-identically (val
+  0.35299690480869833 to 17 decimals, three times), so a replayed checkpoint is the *same* agent, not
+  an approximation.
+- **Serving = precompute-to-CDN for presets, NOT an on-demand EC2 API.** The stack is static-JSON-on-
+  CDN and the frontend already renders portfolio bundles, so a model+timeframe selector over
+  precomputed bundles is zero new infra and no security surface. On-demand (arbitrary date ranges) is a
+  v2 — and must **never** run on the custody/trading EC2 (it holds signing keys; no public surface).
+- **First diagnostic (s0, the val one-trick):** outside its memorized val pocket it is a defensive
+  underperformer — fails to ride bulls (its discretion destroys value vs holding the same risk-parity
+  basket), loses to its own rung-0 rule OOS, churns in chop; only bear capital-preservation works.
+  Full table → [[Experiment Log]]; curriculum implications → [[AI Training]].
+
+### The weekly competition simulator (`scripts/simulate_weekly.py`, 2026-06-14)
+
+The competition-faithful variant for the Apentic "Simulated Trades" dashboard (contract:
+[[Apentic Data Contract]] §weekly; design in `.design-export-simulated/HANDOFF.md`). Each session is one
+**Mon-00:00-UTC week**, fresh **$10k** (no cross-week compounding), with the **vol-top-8 universe +
+risk-parity weights re-selected before each week** (so the basket evolves week to week). Published
+per-model so the page can offer a model selector.
+
+- **Exact PnL by construction — the LEDGER pattern.** The dashboard derives PnL itself from
+  `qty*(exit-entry)`, but the env is notional/_px-index based and discards real per-coin prices, so
+  reconstructing exact round-trips from markers is fragile. Fix: `EventRungEnv.token_pnls()` reports the
+  exact per-token realized+open PnL, and the export snaps each asset's positions to it (recon $0.00 all
+  weeks). **Lesson: don't infer PnL from reconstructed prices — carry the env's own ledger.**
+- **The methodological finding (the reason this matters).** The weekly structure is *honest about
+  deployment*, and it exposed that **evaluating in a continuous multi-week episode FLATTERS the agent**:
+  s0's continuous-eval star (ZEC +$2,747) collapses under cold weekly sessions (ZEC trades 2/17 weeks,
+  skips its big-move ignition by choice). The model overfit windows; it doesn't generalize. **Eval (and
+  training) structure must match deployment** — a first-class requirement for the next training phase
+  ([[AI Training]] §the-fork, [[Experiment Log]] §2026-06-14).
+
 ## Open questions
 
 - **Pool-depth data source.** DexScreener now gives per-pair **liquidity (USD)** for free

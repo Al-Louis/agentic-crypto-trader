@@ -579,3 +579,69 @@ detection added). Verdicts auto-logged, leaderboard auto-published each iteratio
   stable) but **entry-payoff REFUTED** (-0.065 OOS IC) -> no build, exit-style variant parked;
   liquidity/flow DATA-GATED (static sim liquidity) -> the wallet-attributed logger parked in
   [[Trading Strategies]] as the post-competition mechanism.
+
+## Checkpoints + curriculum — the next direction (2026-06-14)
+
+After the hyperparameter neighborhood plateaued (the rdL arc), the user reframed the work:
+**a training run is not the deliverable — a reproducible CHECKPOINT is**, to **warm-start** further /
+**curriculum** training. Two corrections lock this in:
+
+- **Curriculum + checkpoint warm-start are first-class levers, not "cheats."** The earlier reflex
+  against phased/curriculum training was a category error: curriculum governs **optimization** (how a
+  policy reaches a good basin when the obs/decision space is too rich to learn end-to-end); the honest
+  gate governs **evaluation**. They are orthogonal — run an aggressive curriculum, still judge the
+  OUTPUT on the gate. (The 1-in-12 good-val basin rate is itself the symptom of a landscape too hard to
+  navigate cold — exactly what curriculum addresses. Cf. a Jan-2026 locomotive-control RL project where
+  curriculum was the breakthrough after many failed one-shot runs.) `rule_default` is already implicit
+  curriculum; making it explicit + checkpoint-seeded is the natural next step.
+- **Checkpoints reproduce bit-identically.** rdLe4/s0 re-ran to 17 decimals three times → training is
+  deterministic on the box, so any seed's policy is recapturable on demand. Capture workflow + the
+  save-enabled-sha gotcha → [[Build Log]] (2026-06-13/14); persisted artifact in S3.
+
+**Diagnose before designing (the simulator-first rule).** Curriculum is designed against MEASURED gaps,
+not guesses. The cross-timeframe replay of s0 (`scripts/simulate.py`, [[Simulated Market]];
+table in [[Experiment Log]]) gives the target list — outside its memorized val pocket s0:
+  - **(a) doesn't ride bull upside** — its discretion DESTROYS value vs holding the same risk-parity
+    basket (6mo −1.2% vs B&H +127%); it sells winners. Likely cause: 336-bar (2wk) episodes never
+    taught long-horizon holding → a **horizon/episode-length curriculum** is the prime candidate.
+  - **(b) loses to its own rung-0 rule OOS** in every window — the "beat the rule" objective didn't
+    generalize past the val window it overfit.
+  - **(c) churns in chop** (1wk −8.7% on 18 trades) — needs to learn to stand down in flat regimes.
+The one virtue (bear capital preservation) is what the val pocket rewarded. **A curriculum warm-started
+from the checkpoint targets (a)/(b)/(c); validate its OUTPUT on the per-regime honest gate.** Design
+starts on the user's go.
+
+## The train/deploy STRUCTURE mismatch — the fork (2026-06-14)
+
+The weekly simulator ([[Simulated Market]], [[Experiment Log]] §2026-06-14) surfaced a methodology error
+that reframes the next phase. **We trained and evaluated the agent in structures that do not match how
+it will actually run:**
+  - **Trained on:** random 2-week (336-bar) episodes from the train split.
+  - **Evaluated on (flattering):** ONE continuous multi-week episode — where s0 looked like a star
+    (ZEC +$2,747, traded with precision).
+  - **Deployed / honestly tested as:** a COLD ~1-week session, fresh $10k, **no cross-week holds** (the
+    competition is a single week; the weekly sim samples 28 such sessions).
+
+**The conceptual point (so this is never confused again):** a trained policy IS a generalizable
+obs→action function; it does NOT need to have been "running continuously." Every training episode also
+started cold (zero LSTM state), so a cold weekly start is in-distribution — the agent is *trained* to
+start cold. So the cold start is NOT the failure. The failure is that the SAME ignition setup is traded
+in the continuous eval and **skipped** in the cold weekly session — the fingerprint of a model overfit
+to windows rather than generalized (already proven OOS: it loses to B&H and its own rule). A genuinely
+general policy would trade ZEC's ignition regardless of date or portfolio path. This one doesn't.
+
+**Requirements for the next training phase:**
+1. **Evaluate in the deployment structure.** Score on cold ~1-week sessions (the competition shape), not
+   a generous continuous run. The continuous eval flattered s0 and hid its fragility — that eval must
+   change before any config is judged "good."
+2. **Train in (or curriculum toward) that structure** so train ≈ test ≈ deploy, removing the mismatch
+   rather than hoping the policy bridges it. (A weekly-horizon episode is the natural unit.)
+3. **Honest gate across unseen regimes stays the bar** — beat B&H + rung-0 OOS; only a model that passes
+   is deployable, and by construction its logic WILL apply broadly (the user's correct expectation of
+   what a trained agent is).
+4. The curriculum targets (ride winners / beat rung-0 OOS / stand down in chop) feed into this; the
+   warm-start from the s0 checkpoint remains the seed. See [[curriculum-and-checkpoints-are-legitimate]].
+
+**Bottom line:** s0 is a reproducible checkpoint and a sharp diagnostic, not the product. The route to a
+deployable agent is to train AND evaluate in the real (weekly/cold) structure, to the honest gate. That
+is the work the loop returns to.

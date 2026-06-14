@@ -198,7 +198,13 @@ The piece that strings the 4A tools into the autonomous iterate loop:
   launch or drift alarm HALTS for human review. The loop never spends the frozen test (val only;
   `promote` fires only from a human `final_verdict` run).
 - **Surfaces:** CLI `scripts/rl_loop.py {status,step,propose,reset}`; MCP tools `rl_loop_status` /
-  `rl_loop_step` / `rl_loop_propose` / `rl_loop_reset`.
+  `rl_loop_step` / `rl_loop_propose` / `rl_loop_reset`. **Prefer the CLI** — the in-session MCP
+  server's SSH goes **stale after a desktop reboot** (every `rl_*` tool then times out with "could
+  not reach desktop" while direct ssh works; `health` still says ok); the CLI runs a fresh process
+  per call and is immune. Reconnect the server via `/mcp` if you must use the tools. → [[Remote Capabilities]].
+- **Replay/simulate:** `scripts/simulate.py` (CLI, desktop) loads a saved `policy.zip` and replays it
+  over trailing windows, publishing `simulation:true` portfolio bundles ([[Apentic Data Contract]] §Simulation
+  run, [[Simulated Market]]) — the cross-timeframe diagnostic, not an MCP tool (yet).
 - **The driving agent:** the `/rl-loop` project skill — one wake = one tick; on `verdict` it logs
   standings to [[Experiment Log]], runs `rl_forensics` when behavior looks wrong, consults the
   refuted-levers record so nothing dead is re-proposed, and proposes one single-variable config.

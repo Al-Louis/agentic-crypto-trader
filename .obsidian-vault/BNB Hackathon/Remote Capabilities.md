@@ -310,6 +310,34 @@ self-publishes to `data.alexlouis.dev` (`APENTIC_PUBLISH_TARGET=s3://alexlouis-a
   Recovery when the box drops: on the Windows host, `wsl -d act-trainer -u root -e tailscale up --ssh`
   (or restart the distro / the `act-trainer-keepalive` task).
 
+### Driving training: the `rl_loop.py` CLI, not the in-session MCP tools (2026-06-13)
+
+- **The long-lived `trader` MCP server's SSH goes STALE after the desktop reboots.** Once the box has
+  restarted, every `mcp__trader__rl_*` call fails with `subprocess.TimeoutExpired` ("could not reach
+  desktop") **even though direct PowerShell ssh to the same host/opts works fine** — and `health` still
+  returns ok (it does no ssh), which is misleading. Cause: the server process predates the reboot.
+  **Fix: drive training through the `scripts/rl_loop.py` CLI** (`status`/`step`/`propose`/`reset`) — a
+  **fresh process per call**, immune to the staleness — or reconnect the server via `/mcp` (a
+  client-side action; the model can't do it from a tool). Don't burn time re-diagnosing the MCP ssh
+  path. To launch one config: `reset` (if halted) → `propose --config <json> --seeds N --sha <sha>` →
+  `step`. To drain a stale queued item without losing history, edit `experiments/loop_state.json`
+  (`reset --hard` wipes history; soft `reset` only clears the halt).
+- **sha propagation to the box.** The box's git origin is the **stale P: mirror, which has NO
+  non-interactive GitHub auth** (`git fetch` → "could not read Username"). So only commits up to
+  `origin/main` (whatever last reached the mirror) are checkout-able on the box; **newer unpushed local
+  commits are NOT** (`pathspec '<sha>' did not match`). Propose only an on-box sha. To ship a new/edited
+  script to the box auth-free, `scp` it (Windows OpenSSH: `& "C:\Windows\System32\OpenSSH\scp.exe" …`).
+
+### Checkpoints + artifacts to S3 (2026-06-13)
+
+Trained policies persist as `runs-rl/<run-id>/policy.zip` + `vecnormalize.pkl` on the box (from
+`e681c4d`; every pre-2026-06-12 policy was lost on exit). `runs-rl/` is **local and gitignored** — one
+disk failure from gone — so push checkpoints to **S3** for durability + reuse: `put_bytes(join(target,
+"<run-id>/policy.zip"), …)` against `APENTIC_PUBLISH_TARGET` (`s3://alexlouis-apentic-data`).
+`scripts/simulate.py --push-checkpoint` does this; the publisher IAM is put-only (see
+[[apentic-publisher-no-delete]]-style note: no byte deletes). Simulation result bundles publish through
+the same CDN path as training bundles ([[Apentic Data Contract]] §Simulation run).
+
 ## CI/CD and validation gates
 
 - **Offline-first gate:** tests + lint + the strategy core's pure-logic checks must pass

@@ -97,6 +97,38 @@ plus per-token behaviour. Per `<run_id>/`:
 
 `slug` is a URL-safe token name (`run_info.universe[i].slug`); fetch `tk_<slug>_*.json`.
 
+### Simulation run (`simulation:true`) — a saved checkpoint replayed over a timeframe
+
+A **simulation** is a portfolio run produced by `scripts/simulate.py` ([[Simulated Market]]): a
+*saved* policy replayed over a trailing window (6mo/3mo/1mo/1wk/1d), one bundle per timeframe. **Same
+files as a portfolio run** (incl. `tk_<slug>_candles.json` with full per-token OHLCV + markers — a
+complete candlestick chart is renderable), so the existing portfolio renderer works unchanged; the
+only new work is a model+timeframe selector. It adds extra **manifest** + **metrics** fields:
+
+**Manifest entry** — the last three are the selector keys (added so dropdowns need zero per-bundle fetches):
+```
+{ id:"ppo-event-rdLe4r-68b268f-s0-sim-3mo", kind:"portfolio", simulation:true,
+  symbol:"PORTFOLIO", model_name, timestamp, regime:"bull"|"bear"|"flat", universe:[{symbol,slug}],
+  source_run:"ppo-event-rdLe4r-68b268f-s0",   // THE MODEL  (group dropdown 1)
+  timeframe:"3mo",                            // 6mo|3mo|1mo|1wk|1d  (dropdown 2)
+  oos_frac:0.949 }                            // out-of-sample fraction -> in-sample/OOS badge
+```
+Selector: filter manifest `simulation===true && kind==="portfolio"`; model dropdown = distinct
+`source_run`, timeframe dropdown = `timeframe`; bundle id = `${source_run}-sim-${timeframe}`.
+
+**`metrics.json`** adds the comparison bars + a `simulation` block:
+```
+baseline_return,   // hand-coded rung-0 rule on the same window
+buyhold_return,    // buy & hold of the SAME risk-parity basket
+random_return,     // random-action floor
+regime:{ btc_return, universe_ew_return, label },
+simulation:{ source_run, timeframe, window_bars, window_start, window_end,
+             oos_frac, train_frac, val_frac, test_frac, git_commit }
+```
+`baseline_return`/`buyhold_return`/`random_return` drive a "policy vs B&H vs rung-0 vs random" bar;
+`oos_frac` drives the honesty badge — windows that overlap the train split look optimistic, so a
+viewer MUST see e.g. "48% in-sample" vs "100% OOS". All `*_return` are fractions (×100 for display).
+
 ### Frontend rendering (portfolio)
 - **Overview:** weights stacked-area/heatmap (`weights.json`) + equity curve + metrics + the
   universe list. No candlestick at the portfolio level (there's no single price).
@@ -104,6 +136,35 @@ plus per-token behaviour. Per `<run_id>/`:
   `universe` token, render `tk_<slug>_candles.json` as candlesticks with the
   `tk_<slug>_trades.json` buy/sell markers overlaid (same marker placement as the single-asset
   view: `time` + `price` + `side`).
+
+## Weekly simulation (`{meta, weeks[]}`) — the "Simulated Trades" dashboard
+
+A SEPARATE single-file contract (NOT the manifest/bundle shape above) for the locked Apentic "Simulated
+Trades" page (design + page code in `.design-export-simulated/`). Produced by `scripts/simulate_weekly.py`
+([[Simulated Market]]), published **per-model** at `<run-id>/simulated_trades.json`, with a top-level
+`simulated_models.json` index (`[{id, model_name, path, n_weeks, window_start, window_end, generated}]`)
+so the page can offer a **model selector**. The page derives every metric itself from per-asset
+`candles` + `positions` (the producer emits only those — never PnL).
+
+```jsonc
+{ "meta": { "start_capital":10000, "candle_interval_seconds":3600, "drawdown_limit":-0.30,
+            "universe_size":20, "source_run":"<run-id>", "window_start":<sec>, "window_end":<sec>,
+            "n_weeks":28, "generated":"ISO" },
+  "weeks": [ { "index":0, "label":"W01", "start":<Mon 00:00 UTC sec>, "end":<+7d sec>,
+               "portfolio_start":10000,                 // EVERY week resets to $10k (no compounding)
+               "assets": [ {                            // the week's causal vol-top-8 (re-picked weekly)
+                  "symbol":"ZEC", "class":"alt|major|peg", "vol_rank":1, "alloc_usd":1002.25,
+                  "candles":[ {"t":<sec>,"o":,"h":,"l":,"c":,"v":} ],   // 168 hourly bars, real OHLCV
+                  "positions":[ {"entry_t":,"entry_price":,"exit_t":,"exit_price":,"qty":,"kind":"core"} ]
+               } ] } ] }
+```
+Competition semantics baked in: weekly **Mon-00:00-UTC** sessions, **$10k reset each week**, **per-week
+universe**. The page computes weekly PnL/equity, intra-week drawdown (Rule 2, `drawdown_limit`), and
+daily-activity DQ (Rule 1, ≥1 trade/day) from the positions. **Fidelity rule (do NOT bend data to
+schema):** position prices are cost-baked and SNAPPED to the env's exact per-token PnL ledger
+(`token_pnls()`) so the page's `qty*(exit-entry)` equals the sim's true equity (recon $0). Note: this
+revealed the agent's continuous-eval results don't survive weekly sessions — see [[Experiment Log]]
+§2026-06-14 and [[AI Training]] §the-fork.
 
 ## Producer side (this repo)
 - Single-asset: `trader.report.export_run` (+ `roundtrips_from_position`).
