@@ -47,12 +47,21 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
         raw.append(float(np.asarray(a).reshape(-1)[0]))
         obs, _, done, info = env.step(a)
         if info.get("trades"):
-            fills = [{"token": t, "usd": u, "fee": c, "time": ft, "ratio": r}
-                     for t, u, c, ft, r in info["trades"]]   # per-fill TRUE time + exec ratio (stops fill sub-close)
+            fills = [{"token": t, "usd": u, "fee": c, "time": ft, "px": px}
+                     for t, u, c, ft, px in info["trades"]]   # per-fill TRUE time + _px-basis exec price
             records.append({"time": info["trade_time"], "weights": info["weights"], "fills": fills,
                             "trades_usd": {f["token"]: f["usd"] for f in fills},   # legacy dicts (other consumers)
                             "trade_fees": {f["token"]: f["fee"] for f in fills}})
             fees += sum(f["fee"] for f in fills)
+    # close any STILL-OPEN positions at the env's true final mark (mark-to-market, no fee) so every
+    # position has an exit marker priced in the SAME _px basis -> the reconstruction is exact.
+    end_t = int(env.returns.index[env.bar])
+    closes = [{"token": tok, "usd": -env._pos_value(tok), "fee": 0.0, "time": end_t,
+               "px": float(env._px[env.bar, env.col_ix[tok]])} for tok in list(env.pos)]
+    if closes:
+        records.append({"time": end_t, "weights": {}, "fills": closes,
+                        "trades_usd": {f["token"]: f["usd"] for f in closes},
+                        "trade_fees": {f["token"]: 0.0 for f in closes}})
     eq = pd.Series([e for _, e in env._eq_trace], index=[t for t, _ in env._eq_trace])
     universe = sorted({t for rec in records for t in rec["trades_usd"]} | set(env.universe))
     return eq, records, universe, fees, raw

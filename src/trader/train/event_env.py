@@ -368,7 +368,8 @@ class EventRungEnv:
                 self.cash -= size + c
                 self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
                                  "origin": self._px[self.bar, j], "tp_i": 0}
-                self._trades.append((tok, size, c, int(self.returns.index[self.bar]), 1.0))  # +buy @ bar close
+                self._trades.append((tok, size, c, int(self.returns.index[self.bar]),
+                                     self._px[self.bar, j]))      # +buy @ the bar's price index
             else:
                 size = 0.0                                       # couldn't fund -> a skip (dev = -0.20)
         if self.reward_mode == "entry_forward":                  # record for delayed forward crediting
@@ -417,7 +418,7 @@ class EventRungEnv:
         self.cash += val - c
         if val >= 1.0:
             self._trades.append((tok, -val, c, int(self.returns.index[self.bar]),
-                                 fill_px / self._px[self.bar, j]))   # -sell @ the intra-bar stop price
+                                 fill_px))                          # -sell @ the intra-bar stop price index
         self.cool[tok] = self.bar
         self.prior_origin[tok] = p["origin"]
         del self.pos[tok]
@@ -434,7 +435,8 @@ class EventRungEnv:
         c = amm_cost_usd(-sell_val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += sell_val - c
         if sell_val >= 1.0:
-            self._trades.append((tok, -sell_val, c, int(self.returns.index[self.bar]), 1.0))  # -sell @ bar close (incl. rotation)
+            self._trades.append((tok, -sell_val, c, int(self.returns.index[self.bar]),
+                                 self._px[self.bar, j]))            # -sell @ the bar's price index (incl. rotation)
         if keep <= 1e-6:                                         # full exit -> cooldown + dead-zone
             self.cool[tok] = self.bar
             self.prior_origin[tok] = p["origin"]

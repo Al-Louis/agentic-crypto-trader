@@ -156,14 +156,17 @@ def build_portfolio_artifacts(records, universe, t0, t1):
             continue
         win = ohlcv[(ohlcv["timestamp"] >= t0) & (ohlcv["timestamp"] <= t1)]
         token_candles[t] = ap.candles_from_ohlcv(win)
+        # the env trades on a returns-index price `_px` (base 1.0 at the series start); scale it to the
+        # real display basis by k_t = the token's first close, so qty/PnL use the SAME basis the env
+        # executed in (immune to any returns-vs-OHLCV divergence) while markers still sit on the candles.
+        k_t = float(ohlcv["close"].iloc[0]) if len(ohlcv) else 1.0
         marks = []
         for r in records:
-            if "fills" in r:                                  # event-env: TRUE per-fill time + exec price
-                for f in r["fills"]:                          # (a stop fills sub-close: candle x ratio)
+            if "fills" in r:                                  # event-env: TRUE per-fill time + _px-basis price
+                for f in r["fills"]:
                     if f["token"] != t:
                         continue
-                    marks.append({"time": f["time"],
-                                  "price": _price_at(win, f["time"]) * f.get("ratio", 1.0),
+                    marks.append({"time": f["time"], "price": f["px"] * k_t,
                                   "side": "buy" if f["usd"] > 0 else "sell", "usd": abs(f["usd"]),
                                   "fee": f["fee"], "weight": r["weights"].get(t, 0.0)})
             else:                                             # legacy path (rung-0 / PortfolioEnv records)
