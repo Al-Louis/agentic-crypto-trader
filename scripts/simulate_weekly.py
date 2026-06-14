@@ -81,7 +81,14 @@ def fold_positions(markers: list[dict], last_t: int, last_close: float) -> list[
                 remaining -= q
                 if lot[0] <= 1e-12:
                     lots.pop(0)
-    return out          # `lots` should be empty (complete markers); a residual -> recon-error flag
+    # A residual lot here is a position the env closed at ~0 value (the token's _px hit exactly 0 — a
+    # -100% bar — so sell_val=0 and the marker was suppressed). With _px-basis pricing FIFO matches
+    # exactly otherwise, so residuals are total losses: close them at exit_price 0 (realizes -cost).
+    for qty_rem, entry_t, entry_eff in lots:
+        if last_t > entry_t:
+            out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,
+                        "exit_price": 0.0, "qty": qty_rem, "kind": "core"})
+    return out
 
 
 def week_starts(idx_secs) -> list[int]:
