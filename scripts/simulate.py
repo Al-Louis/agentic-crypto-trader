@@ -171,6 +171,9 @@ def main() -> None:
                                         action_mode="event", regime=res["regime"]["label"],
                                         simulation=True,
                                         timestamp=datetime.now(timezone.utc).isoformat())
+        # surface the selector keys directly on the manifest entry so the frontend can build the
+        # model + timeframe dropdowns (and the OOS badge) without fetching every bundle's metrics.json
+        entry.update({"source_run": args.run_id, "timeframe": tf, "oos_frac": oos["oos_frac"]})
         if target:
             ap.publish_run(os.path.join(base, sim_id), sim_id, entry, target, cloudfront_dist_id=cf)
         print(f"[sim] {tf}: policy {res['pol']:+.1%} vs B&H {res['bh']:+.1%} rung0 {res['base']:+.1%} "
