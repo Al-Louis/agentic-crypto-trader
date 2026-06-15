@@ -42,6 +42,14 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
                        record_trace=True, **kw)
     obs = env.reset(start=WARMUP)
     records, fees, raw = [], 0.0, []
+    if env._trades:                                    # basket_default buys the WHOLE basket in reset();
+        ofills = [{"token": t, "usd": u, "fee": c, "time": ft, "px": px}      # step() clears _trades each
+                  for t, u, c, ft, px in env._trades]                          # call, so the opening buy is
+        records.append({"time": int(eval_r.index[WARMUP]), "fills": ofills,    # lost unless emitted HERE —
+                        "weights": {t: env._pos_value(t) / max(env._equity(), 1.0) for t in env.pos},
+                        "trades_usd": {f["token"]: f["usd"] for f in ofills},   # the missing buy that made
+                        "trade_fees": {f["token"]: f["fee"] for f in ofills}})  # the chart show sells-first
+        fees += sum(f["fee"] for f in ofills)
     done = False
     while not done:
         a = predict_fn(obs)
@@ -340,11 +348,21 @@ def main() -> None:
                         "fork) — bootstrap-CI beat B&H + rung-0 over random OOS weeks, worst-week DD<30%%")
     p.add_argument("--no-btc-obs", action="store_true", help="neutralize the btc_trend obs slot — the "
                    "tokens are BTC-decorrelated by selection, so a BTC-anchored regime signal is near-noise")
+    p.add_argument("--reexport", action="store_true", help="regenerate + republish the bundle from the "
+                   "SAVED policy.zip (NO retrain) — e.g. after a marker/export fix. Config is read from "
+                   "the saved provenance so the eval is byte-identical; only the published artifacts change.")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     config.load_dotenv()
     out = args.out or os.path.join("runs-rl", args.run_id)
     os.makedirs(out, exist_ok=True)
+    if args.reexport:                                       # rebuild config from the saved provenance so
+        import json                                         # env_kwargs / recurrent / eval match the run
+        prov = json.load(open(os.path.join(out, args.run_id, "metrics.json"),
+                              encoding="utf-8"))["provenance"]
+        for k, v in prov.items():
+            if hasattr(args, k) and k not in ("git_commit", "env"):
+                setattr(args, k, v)
     hsched = parse_horizon_schedule(args.curriculum_horizon)        # [] when OFF
     construct_bars = max_horizon(hsched) if hsched else args.episode_bars   # build env at the LARGEST horizon
 
@@ -398,60 +416,71 @@ def main() -> None:
                                            **{**env_kwargs, "seed": args.seed + rank}))
         return _f
 
-    venv = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
-    venv = VecNormalize(venv, norm_obs=True, norm_reward=args.norm_reward, clip_obs=10.0)
-
-    class ProgressCb(BaseCallback):
-        def _on_step(self) -> bool:
-            if self.num_timesteps % 2048 < venv.num_envs:
-                rews = [e["r"] for e in self.model.ep_info_buffer] if self.model.ep_info_buffer else []
-                write_progress(out, state="running", phase="train", timesteps=self.num_timesteps,
-                               total=args.timesteps,
-                               mean_reward=float(np.mean(rews)) if rews else None, history_key="curve")
-            return True
-
-    class HorizonCurriculumCallback(BaseCallback):
-        """Push the scheduled episode horizon into EVERY sub-env between episodes — the REAL,
-        non-cosmetic curriculum (it mutates the sampler via `EventRungEnv.set_episode_bars`; the
-        TradeSim post-mortem's #1 lesson was a curriculum that only logged phase names). Only fires
-        when the target changes (next reset() picks it up; never mid-episode)."""
-        def __init__(self, schedule, total):
-            super().__init__()
-            self._sched, self._total, self._cur = schedule, max(int(total), 1), None
-        def _on_step(self) -> bool:
-            target = horizon_at(self._sched, self.num_timesteps / self._total)
-            if target != self._cur:
-                self.training_env.env_method("set_episode_bars", target)
-                self._cur = target
-            return True
-
-    lr = args.lr
-    if args.lr_end is not None:                            # linear anneal lr -> lr_end (progress: 1->0)
-        lr0, lr1 = args.lr, args.lr_end
-        lr = lambda pr: lr1 + (lr0 - lr1) * pr  # noqa: E731
-    if args.recurrent:                                     # memory across the episode's events
-        from sb3_contrib import RecurrentPPO
-        model = RecurrentPPO("MlpLstmPolicy", venv, verbose=0, seed=args.seed, n_steps=1024,
-                             batch_size=256, ent_coef=args.ent_coef, learning_rate=lr,
-                             n_epochs=args.n_epochs, target_kl=args.target_kl,
-                             policy_kwargs=dict(lstm_hidden_size=args.lstm_size))
+    if args.reexport:                                     # regenerate the bundle from the SAVED policy
+        import pickle                                      # (no retrain): load the EXACT policy.zip +
+        if args.recurrent:                                # vecnormalize.pkl, so the verdict is byte-
+            from sb3_contrib import RecurrentPPO           # identical and only the published artifacts
+            model = RecurrentPPO.load(os.path.join(out, "policy.zip"), device="cpu")   # change.
+        else:
+            model = PPO.load(os.path.join(out, "policy.zip"), device="cpu")
+        with open(os.path.join(out, "vecnormalize.pkl"), "rb") as f:
+            venv = pickle.load(f)                          # VecNormalize.normalize_obs works standalone
+        print(f"[reexport] loaded {args.run_id} policy.zip + vecnormalize.pkl (no retrain)")
     else:
-        model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
-                    ent_coef=args.ent_coef, learning_rate=lr,
-                    n_epochs=args.n_epochs, target_kl=args.target_kl)
-    if args.rule_default and args.rule_prior > 0:      # default-executes-the-rule prior: bias the
-        import torch                                   # categorical head toward idx 0 at init, so the
-        with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
-            model.policy.action_net.bias[0] += args.rule_prior
-    callbacks = [ProgressCb()]
-    if hsched:                                             # ramp episode_bars down across training
-        callbacks.append(HorizonCurriculumCallback(hsched, args.timesteps))
-        print(f"[curriculum] horizon schedule {hsched} (env built at {construct_bars} bars)")
-    model.learn(total_timesteps=args.timesteps, callback=callbacks)
-    model.save(os.path.join(out, "policy.zip"))           # persist the trained policy + the obs-
-    venv.save(os.path.join(out, "vecnormalize.pkl"))      # normalization stats: re-loadable for the
-    #   simulator/deployment (every pre-2026-06-12 policy was lost on process exit). Stays on the
-    #   training box (outside the published bundle subdir).
+        venv = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
+        venv = VecNormalize(venv, norm_obs=True, norm_reward=args.norm_reward, clip_obs=10.0)
+
+        class ProgressCb(BaseCallback):
+            def _on_step(self) -> bool:
+                if self.num_timesteps % 2048 < venv.num_envs:
+                    rews = [e["r"] for e in self.model.ep_info_buffer] if self.model.ep_info_buffer else []
+                    write_progress(out, state="running", phase="train", timesteps=self.num_timesteps,
+                                   total=args.timesteps,
+                                   mean_reward=float(np.mean(rews)) if rews else None, history_key="curve")
+                return True
+
+        class HorizonCurriculumCallback(BaseCallback):
+            """Push the scheduled episode horizon into EVERY sub-env between episodes — the REAL,
+            non-cosmetic curriculum (it mutates the sampler via `EventRungEnv.set_episode_bars`; the
+            TradeSim post-mortem's #1 lesson was a curriculum that only logged phase names). Only fires
+            when the target changes (next reset() picks it up; never mid-episode)."""
+            def __init__(self, schedule, total):
+                super().__init__()
+                self._sched, self._total, self._cur = schedule, max(int(total), 1), None
+            def _on_step(self) -> bool:
+                target = horizon_at(self._sched, self.num_timesteps / self._total)
+                if target != self._cur:
+                    self.training_env.env_method("set_episode_bars", target)
+                    self._cur = target
+                return True
+
+        lr = args.lr
+        if args.lr_end is not None:                        # linear anneal lr -> lr_end (progress: 1->0)
+            lr0, lr1 = args.lr, args.lr_end
+            lr = lambda pr: lr1 + (lr0 - lr1) * pr  # noqa: E731
+        if args.recurrent:                                 # memory across the episode's events
+            from sb3_contrib import RecurrentPPO
+            model = RecurrentPPO("MlpLstmPolicy", venv, verbose=0, seed=args.seed, n_steps=1024,
+                                 batch_size=256, ent_coef=args.ent_coef, learning_rate=lr,
+                                 n_epochs=args.n_epochs, target_kl=args.target_kl,
+                                 policy_kwargs=dict(lstm_hidden_size=args.lstm_size))
+        else:
+            model = PPO("MlpPolicy", venv, verbose=0, seed=args.seed, n_steps=1024, batch_size=256,
+                        ent_coef=args.ent_coef, learning_rate=lr,
+                        n_epochs=args.n_epochs, target_kl=args.target_kl)
+        if args.rule_default and args.rule_prior > 0:      # default-executes-the-rule prior: bias the
+            import torch                                   # categorical head toward idx 0 at init, so the
+            with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
+                model.policy.action_net.bias[0] += args.rule_prior
+        callbacks = [ProgressCb()]
+        if hsched:                                         # ramp episode_bars down across training
+            callbacks.append(HorizonCurriculumCallback(hsched, args.timesteps))
+            print(f"[curriculum] horizon schedule {hsched} (env built at {construct_bars} bars)")
+        model.learn(total_timesteps=args.timesteps, callback=callbacks)
+        model.save(os.path.join(out, "policy.zip"))        # persist the trained policy + the obs-
+        venv.save(os.path.join(out, "vecnormalize.pkl"))   # normalization stats: re-loadable for the
+        #   simulator/deployment (every pre-2026-06-12 policy was lost on process exit). Stays on the
+        #   training box (outside the published bundle subdir).
 
     write_progress(out, state="running", phase="evaluate")
 

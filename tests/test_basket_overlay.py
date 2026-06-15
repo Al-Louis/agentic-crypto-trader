@@ -74,6 +74,29 @@ def test_basket_default_cutting_off_the_basket_moves_equity():
     assert info["equity"] > rule_end                             # cutting before the crash beats holding it
 
 
+def test_basket_overlay_emits_opening_buy_markers():
+    """Chart-bug regression: the overlay buys the WHOLE basket in reset(); evaluate_event_policy must
+    emit that opening buy as the FIRST record. Before the fix it was lost (step() clears _trades), so
+    the dashboard showed sells-with-no-buy (e.g. a token with 10 sell markers and 0 buys)."""
+    import os
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    from train_event import evaluate_event_policy
+    returns, btc, vol, liq = _panel()
+    ekw = dict(k=3, warmup=30, ema_span=10, vol_mult=2.5, vol_spk=4, vol_base=20, vol_fast=4,
+               stop_k=0.1, cooldown=8, action_mode="discrete", n_action_levels=4, rule_default=True,
+               basket_default=True, reward_mode="relative", vol_target=0.005, cap_floor=0.02,
+               dd_lambda=0.0, episode_bars=200, seed=0)
+    _eq, records, universe, _fees, _raw, _tp = evaluate_event_policy(
+        lambda obs: np.array([0]), returns, btc, liq, vol, ekw)
+    assert records, "no records emitted"
+    opening = records[0]
+    assert all(f["usd"] > 0 for f in opening["fills"]), "the first record must be the opening BUY (usd>0)"
+    assert len(opening["fills"]) >= 2, "the whole basket is bought at once"
+    bought = {f["token"] for f in opening["fills"]}
+    assert set(universe) <= bought, "every held token must have an opening buy marker (no sell-without-buy)"
+
+
 def test_basket_default_off_is_byte_identical():
     """Sanity: with basket_default off the env never auto-buys — reset leaves it flat (the prior
     behavior every existing test relies on)."""
