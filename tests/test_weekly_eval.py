@@ -91,10 +91,19 @@ def test_weekly_gate_pass_and_binding():
                         rung0_rets=[0.0] * 5, activity_ok=[True] * 5)
     assert not dq["pass"] and dq["binding"] == "survives_dq"
 
-    # Loses to holding -> binds on beats_buyhold.
-    lose = we.weekly_gate([0.01] * 5, [0.05] * 5, bh_rets=[0.15] * 5, rung0_rets=[0.0] * 5,
-                          activity_ok=[True] * 5)
-    assert not lose["pass"] and lose["binding"] == "beats_buyhold"
+    # DIRECTION RESET 2026-06-15: B&H is NOT a binding gate (requiring it rewards holding-everything).
+    # A policy that LOSES to B&H but beats the rung-0 rule + survives still PASSES.
+    beats_rule_loses_bh = we.weekly_gate([0.05] * 5, [0.05] * 5, bh_rets=[0.15] * 5,
+                                         rung0_rets=[0.01] * 5, activity_ok=[True] * 5)
+    assert beats_rule_loses_bh["pass"] and beats_rule_loses_bh["edge_vs_buyhold"] < 0   # B&H reported, not binding
+    # Losing to the RULE binds on beats_rung0 (the real bar).
+    lose_rule = we.weekly_gate([0.01] * 5, [0.05] * 5, bh_rets=[0.0] * 5, rung0_rets=[0.10] * 5,
+                               activity_ok=[True] * 5)
+    assert not lose_rule["pass"] and lose_rule["binding"] == "beats_rung0"
+    # Opt-in: require_buyhold=True restores B&H as a binding check.
+    bh_required = we.weekly_gate([0.05] * 5, [0.05] * 5, bh_rets=[0.15] * 5, rung0_rets=[0.01] * 5,
+                                 activity_ok=[True] * 5, require_buyhold=True)
+    assert not bh_required["pass"] and bh_required["binding"] == "beats_buyhold"
 
     # Activity is informational by default (a deploy-time rebalance guardrail, not a strategy gate):
     # a policy that wins returns but misses a day still PASSES unless require_activity is set.

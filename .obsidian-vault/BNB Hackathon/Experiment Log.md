@@ -1379,3 +1379,62 @@ sweep config. Two ANTI-COSMETIC tests (the TradeSim #1 lesson): the sampler prov
 **OVERLAY-2 config = `overlay` + ONLY `--curriculum-horizon 672:0.0,336:0.40,168:0.70`** (ent_coef held
 at 0.2 — one variable). Gate: cold-weekly paired distribution gate; success = bull-gap closes from
 −27..−31% toward ≥−10%, seed-mean past the bars. Launching via the rl-loop.
+
+**RESULT (ppo-event-overlay-curh @e926e2e, 4×1M) — clean NEGATIVE on the core hypothesis.**
+
+| seed | weekly/wk | edge vs B&H | edge vs rung-0 | worst-wk DD | bull-gap |
+|------|-----------|-------------|----------------|-------------|----------|
+| s0 | +0.0% | −15.0% | −7.8% | 7% | −32.7% |
+| s1 | +4.5% | −10.5% (CI [−24.1,**+0.1**]) | −3.3% | 10% | −24.0% |
+| s2 | +2.5% | −12.6% | −5.4% | 7% | −28.6% |
+| s3 | +4.9% | −10.1% | −2.9% | 11% | −22.6% |
+| **mean** | **+3.0%** | **−12.3%** | **−4.8%** | 11% | **−27.0%** |
+
+**The BULL-GAP is unchanged: −27.0% vs OVERLAY-1's −27..−31%.** The horizon curriculum did NOT teach the
+agent to hold the bull → it hits the rl-ml-trainer's pre-registered **kill criterion** (bull-gap unchanged
+→ horizon is not the operative lever; the basin is reward-shape, not credit-horizon). What DID move:
+seed-mean +1.1%→+3.0% (marginal), worst-seed DD 21%→11% (safer — *more* defensive, wrong direction), and
+trade count 148/76/89/94 → 124/65/57/74 (~20% fewer trades). So the curriculum nudged it toward holding
+(fewer trades, lower DD, the smoke action-mean 1.31→0.41) but the trims it STILL makes are the wrong ones
+(bull winners) — a **SELECTIVITY** failure, not a churn-volume or credit-horizon one. This is the SAME
+"defensive-everywhere, not regime-adaptive" wall as GATE-2, the skeleton arc, and OVERLAY-1 — now hit a
+4th time, across two substrates and a curriculum. The agent has the universe-breadth obs to be selective
+(hold high-breadth/bull, trim low-breadth/bear) but won't condition on it.
+
+**Live confound (rl-ml risk #1, pre-registered):** ent_coef 0.2 may still be fighting the curriculum's
+hold-bias. The cheap disambiguator = OVERLAY-3 = curh + ent_coef 0.2→0.05 (ONE variable vs curh): if the
+bull-gap finally closes, entropy was masking it; if it's STILL −27%, horizon is truly dead → pivot to
+regime-conditioning (a breadth-conditioned reward, or RecurrentPPO — breadth-as-time-series — now earned
+after a feedforward curriculum failed to break the basin). Decision pending.
+
+## 2026-06-15 — DIRECTION RESET: shelve the overlay, drop the B&H gate, return to SELECTIVE ignition
+
+**The overlay was a wrong turn — corrected by user direction.** OVERLAY-1/2 chased the "beat Buy&Hold"
+gate, and because the selective ignition skeleton structurally can't out-return B&H in a bull (it sits in
+cash between ignitions), that gate drove the substrate to `basket_default` — *default = hold the whole
+risk-parity basket*. That is the **buy-everything** behavior the user has rejected all along; the B&H
+benchmark was the tail wagging the dog (it rewarded the agent we don't want).
+
+**The Q-trap is the proof (user-observed, all 4 overlay-curh seeds).** The overlay holds the ENTIRE
+basket regardless of quality, so it bought **Q** (the canonical detonation/trap token) in every seed and
+ate ~−$1,000 trades. Worse: `det_blacklist` — the probe-calibrated guard built to blacklist exactly the
+Q-pattern (surge-while-collapsing) — is **inert in the overlay**, because the overlay never enters via
+ignition. Buy-everything doesn't just abandon selective entry; it makes every trap-avoidance rule we built
+**irrelevant**. A selective ignition agent with `det_blacklist` on would never have touched that candle.
+
+**The corrected direction (confirmed):**
+1. **Shelve `basket_default` (the overlay).** Return to the SELECTIVE event-driven ignition substrate —
+   the rd/rdL lineage: enter only on real volume-ignition setups, trap guards (`det_blacklist`, loss-floor)
+   active and *meaningful*, RL learns the discretion (sizing, exit timing) on top.
+2. **Drop "beat Buy&Hold" as a GATE.** It's the wrong yardstick for a selective agent (it rewards holding
+   everything). The honest bar is **beat the rung-0 RULE OOS** (better discretion than the hand-coded
+   selective discipline) + survive the ~30% DD DQ + ≥1 trade/day. **B&H stays a REPORTED reference, never
+   a binding check.** (Operationalized: `weekly_gate` no longer requires `beats_buyhold`.)
+3. **KEEP the cold-weekly evaluation STRUCTURE** — that was a genuine improvement (grades how it deploys;
+   caught the s0 overfit). Only the B&H comparison is demoted, not the weekly shape.
+
+**Net:** a selective agent that earns each position through ignition logic + the rules, judged vs the rule
+it's trying to beat — not a basket-holder judged vs B&H. The overlay/curriculum code stays (flags default
+OFF, parked); the horizon curriculum remains a usable tool for the selective substrate. **Next: diagnose
+WHY the selective rd/rdL agent plateaued vs the rule (it couldn't reliably out-discriminate it; drift-alarm
+halt at iteration 12) — the real RL problem — and tune from there.** See [[AI Training]].

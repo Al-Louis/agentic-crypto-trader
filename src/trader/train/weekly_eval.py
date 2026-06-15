@@ -185,21 +185,21 @@ def bootstrap_mean_ci(values, n_boot: int = 2000, alpha: float = 0.05, seed: int
 
 
 def weekly_gate(policy_rets, policy_dds, bh_rets, rung0_rets, activity_ok,
-                dd_gate: float = DD_GATE, seed: int = 0, require_activity: bool = False) -> dict:
-    """The DEPLOYMENT-honest gate in the random-week frame (the 2026-06-14 fork). A config passes iff,
-    over the held-out cold weeks:
+                dd_gate: float = DD_GATE, seed: int = 0, require_activity: bool = False,
+                require_buyhold: bool = False) -> dict:
+    """The DEPLOYMENT-honest gate in the random-week frame (the 2026-06-14 fork; B&H demoted 2026-06-15).
+    A config passes iff, over the held-out cold weeks:
       1. SURVIVES — worst single-week maxDD < `dd_gate` (each cold week is a fresh-$10k session, so DD
          is within-week, exactly as the competition scores).
-      2. BEATS HOLDING — the PAIRED weekly edge (policy_week - bh_week) has a CI lower bound > 0. Pairing
-         is essential: policy and B&H see the SAME weeks, so the difference cancels the common (huge)
-         market variance and isolates the policy's edge — an unpaired policy-CI-vs-B&H-mean test is
-         swamped by one +85% week. B&H is the long-default-basket floor, the bar the skeleton failed.
-      3. BEATS THE RULE — the paired edge (policy_week - rung0_week) has a CI lower bound > 0.
-      4. ACTIVE (`require_activity`, default OFF / informational) — >=1-trade/day every week. This is a
-         UNIVERSAL daily requirement (passive B&H trips it too), satisfied at deploy by a forced minimal
-         daily rebalance — a guardrail, not a strategy discriminator — so it's reported, not binding,
-         unless explicitly required. `activity_fail_weeks` is always reported.
-    Returns the verdict packet (the binding constraint named on failure)."""
+      2. BEATS THE RULE — the PAIRED edge (policy_week - rung0_week) has a CI lower bound > 0. Pairing is
+         essential: policy and the rule see the SAME weeks, so the difference cancels the common (huge)
+         market variance and isolates the policy's edge. The rung-0 RULE is the SELECTIVE baseline RL
+         must out-discriminate — the project's real bar.
+      3. ACTIVE (`require_activity`, default OFF / informational) — >=1-trade/day every week. A guardrail
+         (a forced daily rebalance at deploy), not a strategy discriminator; reported, not binding.
+    `beats_buyhold` is REPORTED but NOT binding unless `require_buyhold=True` (DIRECTION RESET 2026-06-15):
+    requiring it rewards holding-everything — exactly the buy-everything basket-overlay the user rejected.
+    B&H stays a reference number, never a gate. Returns the verdict packet (binding constraint on failure)."""
     pol = np.asarray(policy_rets, dtype=float)
     bh = np.asarray(bh_rets, dtype=float)
     r0 = np.asarray(rung0_rets, dtype=float)
@@ -210,9 +210,10 @@ def weekly_gate(policy_rets, policy_dds, bh_rets, rung0_rets, activity_ok,
     activity_pass = all(activity_ok) if len(activity_ok) else False
     checks = {
         "survives_dq": worst_dd < dd_gate,
-        "beats_buyhold": bh_lo > 0.0,                          # paired weekly edge robustly positive
-        "beats_rung0": r0_lo > 0.0,
+        "beats_rung0": r0_lo > 0.0,                            # the SELECTIVE rule — the real bar
     }
+    if require_buyhold:                                        # opt-in only (DIRECTION RESET 2026-06-15)
+        checks["beats_buyhold"] = bh_lo > 0.0
     if require_activity:
         checks["activity_floor"] = activity_pass
     passed = all(checks.values())
