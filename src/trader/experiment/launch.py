@@ -59,6 +59,7 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "basket_default": ("--basket-default", bool),   # long-default OVERLAY: start long the basket, tilt off it
     "no_btc_obs": ("--no-btc-obs", bool),           # neutralize the btc_trend obs slot (BTC-decorrelated tokens)
     "eval_mode": ("--eval-mode", str),              # continuous | weekly (cold-session distribution gate)
+    "curriculum_horizon": ("--curriculum-horizon", str),   # horizon curriculum: ramp episode_bars down
     "exit_commit": ("--exit-commit", int),
     "dust_usd": ("--dust-usd", float),
     "rule_prior": ("--rule-prior", float),          # init logit bias on the rule action

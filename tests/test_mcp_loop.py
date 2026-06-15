@@ -47,6 +47,12 @@ def test_reward_args_accept_the_overlay_config():
     assert args[args.index("--eval-mode") + 1] == "weekly"
 
 
+def test_reward_args_accept_curriculum_horizon():
+    args = L.build_reward_args({**OVERLAY_CONFIG, "curriculum_horizon": "672:0.0,336:0.40,168:0.70"})
+    assert "--curriculum-horizon" in args
+    assert args[args.index("--curriculum-horizon") + 1] == "672:0.0,336:0.40,168:0.70"
+
+
 def test_smoke_forces_continuous_but_sweep_keeps_weekly():
     """The smoke must run the fast, parseable CONTINUOUS eval (its [eval] line carries the action
     distribution the gate reads); the real sweep keeps --eval-mode weekly."""

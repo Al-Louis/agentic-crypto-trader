@@ -1285,3 +1285,97 @@ daily activity; risk-parity B&H breached the DQ in only 1/28 weeks, so survival 
 discretion as a **tilt** (its defensive edge in chop/bear weeks becomes additive, not the whole policy).
 The from-scratch curriculum then trains *within* a substrate that can structurally reach the gate,
 instead of one provably ≥13pp short of it in bulls. Recommendation pending user confirmation.
+
+## 2026-06-14 — OVERLAY-1: the long-default basket overlay, first weekly-gate sweep (FAIL, informative)
+
+The overlay built + launched from scratch via the rl-loop (feedforward MLP, 4×1M, sha `c83312b`,
+`ppo-event-overlay`): basket_default + `--eval-mode weekly` + `--no-btc-obs`, voltopk k=8 risk-parity,
+rule_prior 2.0, ent_coef 0.2, dd_lambda 0, episode_bars 168. Graded on the cold-weekly **distribution**
+gate (paired bootstrap, OOS weeks). Smoke passed (alive 59 trades, straddle full-range).
+
+| seed | weekly policy/wk | paired edge vs B&H | edge vs rung-0 | worst-wk DD | gate |
+|------|------------------|--------------------|----------------|-------------|------|
+| s0 | −0.2% | **−15.2%** (CI [−30.6,−4.0]) | −8.0% | 19% | FAIL |
+| s1 | +2.3% | −12.7% (CI [−27.2,−2.3]) | −5.5% | 19% | FAIL |
+| s2 | +1.9% | −13.1% (CI [−23.0,−4.5]) | −6.0% | 21% | FAIL |
+| s3 | +0.6% | −14.4% (CI [−28.9,−4.1]) | −7.2% | 18% | FAIL |
+| **mean** | **+1.1%** | **−13.9%** | **−6.7%** | 21% | **0/4** |
+
+**The read — substrate validated, the trained tilts are value-destructive.** The overlay's *default*
+(hold the basket) IS B&H (+15.0%/wk, proven reachable to 5 decimals). But the trained policy tilts OFF
+that winning default down to **+1.1%/wk** — capturing almost none of the basket's return, and landing
+**below even the rung-0 skeleton** (+7.8%). It's gate-safe (worst DD 21% < 30%) but a clear PnL failure:
+the learned tilts (trim-on-weakness in a bull-heavy OOS sample) sell winners and miss upside — the SAME
+"discretion destroys value vs holding" pathology as s0, now on a substrate where doing nothing would
+have scored +15%.
+
+**Leading hypothesis (UNVERIFIED): exploration pushes the policy OFF the good default.** ent_coef 0.2 +
+the tiny noisy relative reward + the entropy bonus actively drive the policy away from the deterministic
+hold toward uniform-over-levels (the smoke already tilted heavily, action mean 1.31). ent 0.2–0.4 was
+tuned for the SKELETON, where idx0 = execute-the-rule = TRADE and exploration was needed; in the OVERLAY
+idx0 = HOLD = already-good, so high entropy is *harmful* — the opposite regime. **Next lever (one
+variable): ent_coef 0.2 → ~0.05** (let it settle on hold + only beating tilts); confirm the failure mode
+first with forensics (are the tilts lossy trims that miss upside?). Stronger rule_prior is the adjacent lever.
+
+**Integration gap noted:** the rl-loop verdict + `build_ledger` read the bundle's `regimes` block; in
+weekly mode the real result is `metrics["weekly"]` (fetched directly here). Wire the weekly block into
+`regime_verdict`/the ledger before the loop drives weekly-mode iterations.
+
+**FORENSIC (per-week gap-vs-B&H by regime, s0/s1) — the failure is a coherent DEFENSIVE basin.** The
+underperformance is *entirely* in bull weeks; the policy WINS in bear:
+
+| regime | s0 mean gap vs B&H | s1 |
+|--------|--------------------|----|
+| bull (n5) | **−31.0%** | **−26.8%** |
+| flat (n5) | −3.4% | −1.7% |
+| bear (n1) | **+4.3%** | **+2.6%** |
+
+Worst week: a test bull week, B&H **+84.5%** vs policy **+6.3%** (−78pp). `avgLoss` ≫ `avgWin` (s0 −27% vs
++10%); s0 trades 148x and does worse than s1 at 76x — more trading, more destruction. All 4 seeds land in
+the SAME basin (bull −27..−31%), so this is a learned strategy, not exploration noise: **"trim on weakness
+everywhere"** — protective in bear/flat, ruinous in bull. The overlay made HOLD the winning default and the
+agent trained its way into the defensive corner anyway — the *identical* "defensive-everywhere, can't ride
+the bull" failure as GATE-2/the skeleton arc. The agent has the universe-**breadth** obs (it COULD trim only
+when breadth is low = bear) but trims uniformly instead → it is not conditioning risk on regime. **Next
+levers, in order:** (1) cheapest — push it back toward the winning default: lower `ent_coef` 0.2→0.05 (less
+churn) ± stronger `rule_prior` (hold-bias); (2) if the defensive basin holds, the real gap is
+regime-conditioning (trim only on low breadth) — a reward/credit problem (short 1-wk episodes reward
+within-week dip-avoidance over riding the multi-week run; cf. s0's "336-bar episodes never taught
+long-horizon holding") or the LSTM (breadth-as-time-series), earned only after the cheap lever.
+
+### OVERLAY-2 — the horizon curriculum (rl-ml-trainer design + probe PASS + built)
+
+The `rl-ml-trainer` was consulted and designed a **horizon curriculum** against the measured failure:
+ramp `episode_bars` **DOWN** (672→336→168 over 40/30/30% of training). Long episodes first — where a
+held bull run matures *inside* the episode so the missed-run cost of trimming is creditable (teach
+ride-the-bull) — then anneal to the 1-week deploy shape (the fork's "curriculum toward" deployment).
+Down (not up) because the hard skill here is holding through within-episode noise to capture
+cross-episode trend; a long episode makes that *easier to credit*. (Implementation forced down anyway:
+`_max_start` is fixed in `__init__`, so the env is built at the largest horizon and only shrinks.)
+
+**Probe BEFORE build (`scripts/probe_horizon_credit.py`, torch-free) — PASS.** Forward return of a held
+name from a rung-0 weakness bar, on the train split (89,796 samples):
+
+| regime | H168 (1wk) | H336 (2wk) | H672 (4wk) |
+|--------|-----------|-----------|-----------|
+| **bull** | +10.3% | +19.9% | **+30.2%** |
+| flat | +2.2% | +2.2% | +2.3% |
+| bear | −0.6% | −1.6% | +4.9% |
+
+The lever exists and is concentrated exactly where OVERLAY-1 failed: in **bull** windows, holding
+through a weakness bar pays **3× more** at 4wk (+30%) than 1wk (+10%) — so a 1-week episode badly
+under-credits holding-the-bull; a 4-week episode credits it fully. Flat is horizon-neutral; bear is
+correctly negative short-horizon (the agent's bear-trim edge survives). Caveat: the signal is in the
+MEAN (fat tail — median goes −1.5% at 672, hold-pays <50%), i.e. a minority of bull moonshots dominate
+EV → the win is *selective* hold-the-bull-winners, not blanket hold (sharpens the overshoot risk).
+Data guard: 2,233 valid 672-starts on train (≫100) → the 672 phase stands.
+
+**Built (387 tests green, all flags default OFF / byte-identical):** `EventRungEnv.set_episode_bars`
+(shrink-only safe) + gym delegate; `trader.train.curriculum` (parse + `horizon_at`, torch-free, tested);
+`HorizonCurriculumCallback` in `train_event.py` (pushes the horizon into every sub-env via
+`env_method`); `--curriculum-horizon` flag + provenance; `launch.py` REWARD_KEYS knob; `overlay-curh`
+sweep config. Two ANTI-COSMETIC tests (the TradeSim #1 lesson): the sampler provably MOVES on
+`set_episode_bars`, and the schedule drives each phase once in DOWN order at the right thresholds.
+**OVERLAY-2 config = `overlay` + ONLY `--curriculum-horizon 672:0.0,336:0.40,168:0.70`** (ent_coef held
+at 0.2 — one variable). Gate: cold-weekly paired distribution gate; success = bull-gap closes from
+−27..−31% toward ≥−10%, seed-mean past the bars. Launching via the rl-loop.

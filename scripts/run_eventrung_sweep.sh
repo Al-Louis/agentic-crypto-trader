@@ -25,6 +25,12 @@ if [ "$REWARD_MODE" = "overlay" ]; then               # 2026-06-14 FORK: long-de
   # Default = HOLD the risk-parity basket (= B&H floor); the policy learns to TILT off it. Feedforward
   # first (earn the LSTM): weekly episodes (168), the substrate guards, vs the random-week gate.
   EXTRA="--reward-mode relative --rule-default --basket-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --eval-prepad --loss-floor 0.2 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --no-btc-obs --eval-mode weekly --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 168"
+elif [ "$REWARD_MODE" = "overlay-curh" ]; then        # OVERLAY-2: overlay + HORIZON CURRICULUM (ramp
+  PFX="ppo-event-overlay-curh"                        # episode_bars 672->336->168 over training). Long
+  # episodes first teach holding the bull (the missed-run cost is in-episode/creditable — probe-confirmed:
+  # bull fwd-return from a weakness bar triples 10%->30% over 1wk->4wk), anneal to the 1wk deploy shape.
+  # ONE variable vs `overlay`: + --curriculum-horizon. Targets the OVERLAY-1 defensive-trim basin.
+  EXTRA="--reward-mode relative --rule-default --basket-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --eval-prepad --loss-floor 0.2 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --no-btc-obs --eval-mode weekly --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --curriculum-horizon 672:0.0,336:0.40,168:0.70"
 elif [ "$REWARD_MODE" = "rdL" ]; then                 # RecurrentPPO: rd9 config at 1M + LSTM-256 memory —
   PFX="ppo-event-rdL"                                  # the sequence skills (walk-away, hold-the-winner,
   EXTRA="--reward-mode relative --recurrent --lstm-size 256 --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --harvest-obs --eval-prepad --loss-floor 0.2 --det-blacklist 672 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --crash-train 1 --crash-eval --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 336"

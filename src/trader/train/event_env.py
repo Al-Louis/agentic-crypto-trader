@@ -197,6 +197,21 @@ class EventRungEnv:
             raise ValueError("series too short for episode_bars/warmup")
         self.rng = np.random.default_rng(seed)
 
+    # -- curriculum ---------------------------------------------------------
+    def set_episode_bars(self, n: int) -> None:
+        """Horizon-curriculum hook: change the episode length BETWEEN episodes (takes effect on the
+        next `reset()`, never mid-episode). SHRINKING is always safe — a shorter episode fits any
+        window the longer one did, so `_max_start` only widens. The env must be CONSTRUCTED at the
+        LARGEST horizon the schedule uses (its `__init__` `_max_start` is the tightest bound);
+        growing past that would index past the panel. See `trader.train.curriculum`."""
+        n = int(n)
+        new_max = self.n_bars - n - 1
+        if new_max < self._min_start:
+            raise ValueError(f"episode_bars {n} too large for series (n_bars={self.n_bars}, "
+                             f"warmup={self.warmup})")
+        self.episode_bars = n
+        self._max_start = new_max
+
     # -- lifecycle ----------------------------------------------------------
     def reset(self, *, start: int | None = None, seed: int | None = None) -> np.ndarray:
         if seed is not None:

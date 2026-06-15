@@ -69,3 +69,7 @@ class GymEventRungEnv(gym.Env):
     def step(self, action):
         obs, reward, done, info = self.core.step(action)
         return obs.astype(np.float32), reward, done, False, info
+
+    def set_episode_bars(self, n):
+        """Delegate the horizon-curriculum hook to the core env (reached via VecEnv.env_method)."""
+        self.core.set_episode_bars(n)

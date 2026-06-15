@@ -27,6 +27,7 @@ from trader import config  # noqa: E402
 from trader.report import apentic as ap  # noqa: E402
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd  # noqa: E402
 from trader.sim.metrics import PerformanceMetrics  # noqa: E402
+from trader.train.curriculum import horizon_at, max_horizon, parse_horizon_schedule  # noqa: E402
 
 HOURS_PER_YEAR = 24 * 365
 WARMUP = 168
@@ -243,6 +244,11 @@ def main() -> None:
     p.add_argument("--out", default=None)
     p.add_argument("--publish-target", default=None)
     p.add_argument("--episode-bars", type=int, default=168, help="weekly episodes by default")
+    p.add_argument("--curriculum-horizon", default="", help="horizon curriculum (2026-06-14): ramp "
+                   "episode_bars DOWN over training as 'bars:progress' pairs, e.g. "
+                   "'672:0.0,336:0.40,168:0.70' (long episodes first teach holding the bull where the "
+                   "missed-run cost is in-episode/creditable; anneal to the 1wk deploy shape). '' = OFF "
+                   "(constant --episode-bars). The env is built at the LARGEST horizon; it only shrinks.")
     p.add_argument("--max-entry-frac", type=float, default=0.34)
     p.add_argument("--stop-k", type=float, default=0.25)
     p.add_argument("--cooldown", type=int, default=48)
@@ -339,6 +345,8 @@ def main() -> None:
     config.load_dotenv()
     out = args.out or os.path.join("runs-rl", args.run_id)
     os.makedirs(out, exist_ok=True)
+    hsched = parse_horizon_schedule(args.curriculum_horizon)        # [] when OFF
+    construct_bars = max_horizon(hsched) if hsched else args.episode_bars   # build env at the LARGEST horizon
 
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import BaseCallback
@@ -386,7 +394,7 @@ def main() -> None:
     def make_env(rank):
         def _f():
             return Monitor(GymEventRungEnv(train_r, btc, liq, volume=vol,
-                                           episode_bars=args.episode_bars,
+                                           episode_bars=construct_bars,   # max horizon; curriculum shrinks it
                                            **{**env_kwargs, "seed": args.seed + rank}))
         return _f
 
@@ -400,6 +408,21 @@ def main() -> None:
                 write_progress(out, state="running", phase="train", timesteps=self.num_timesteps,
                                total=args.timesteps,
                                mean_reward=float(np.mean(rews)) if rews else None, history_key="curve")
+            return True
+
+    class HorizonCurriculumCallback(BaseCallback):
+        """Push the scheduled episode horizon into EVERY sub-env between episodes — the REAL,
+        non-cosmetic curriculum (it mutates the sampler via `EventRungEnv.set_episode_bars`; the
+        TradeSim post-mortem's #1 lesson was a curriculum that only logged phase names). Only fires
+        when the target changes (next reset() picks it up; never mid-episode)."""
+        def __init__(self, schedule, total):
+            super().__init__()
+            self._sched, self._total, self._cur = schedule, max(int(total), 1), None
+        def _on_step(self) -> bool:
+            target = horizon_at(self._sched, self.num_timesteps / self._total)
+            if target != self._cur:
+                self.training_env.env_method("set_episode_bars", target)
+                self._cur = target
             return True
 
     lr = args.lr
@@ -420,7 +443,11 @@ def main() -> None:
         import torch                                   # categorical head toward idx 0 at init, so the
         with torch.no_grad():                          # untrained policy ~= rung-0 and deviation is learned
             model.policy.action_net.bias[0] += args.rule_prior
-    model.learn(total_timesteps=args.timesteps, callback=ProgressCb())
+    callbacks = [ProgressCb()]
+    if hsched:                                             # ramp episode_bars down across training
+        callbacks.append(HorizonCurriculumCallback(hsched, args.timesteps))
+        print(f"[curriculum] horizon schedule {hsched} (env built at {construct_bars} bars)")
+    model.learn(total_timesteps=args.timesteps, callback=callbacks)
     model.save(os.path.join(out, "policy.zip"))           # persist the trained policy + the obs-
     venv.save(os.path.join(out, "vecnormalize.pkl"))      # normalization stats: re-loadable for the
     #   simulator/deployment (every pre-2026-06-12 policy was lost on process exit). Stays on the
@@ -531,6 +558,7 @@ def main() -> None:
                              "dd_lambda": args.dd_lambda, "dd_soft": args.dd_soft,
                              "ent_coef": args.ent_coef, "n_epochs": args.n_epochs, "target_kl": args.target_kl, "lr": args.lr, "lr_end": args.lr_end,
                              "no_btc_obs": args.no_btc_obs, "eval_mode": args.eval_mode,
+                             "curriculum_horizon": args.curriculum_horizon,
                              "eval_split": args.eval_split}
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows
