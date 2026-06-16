@@ -79,6 +79,10 @@ Output (per [[MCP Server]]): `pnl`, an `hourly` return series, and `drawdown`. I
 tool — derived, no side effects. Lineage: [[TradeSim]] carried PnL/drawdown tracking and
 streaming-sim infrastructure that this reuses.
 
+The competition-DQ responses these two signals drive — the ~25% **force-de-risk drawdown backstop**
+and the daily **XAUt keep-alive trade** (≥1-trade/day) — are designed in [[Security and Encryption]]
+§"Competition DQ guardrails".
+
 ## Alerting
 
 Thresholds that turn the tracker into action; alarms are logged and can gate the loop.

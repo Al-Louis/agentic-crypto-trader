@@ -88,6 +88,72 @@ the quote's realized USD/route/implied-slippage are re-judged under the same cap
 signing). Fail closed throughout: unreadable ledger, unvaluable quote, or twak error ⇒
 `STATE_UNAVAILABLE` refusal. 43 tests pin the refusal matrix.
 
+## Competition DQ guardrails — keep-alive + drawdown backstop (design, not yet built)
+
+The competition ([[BNB Hack - AI Trading Agent Edition]]) has two hard disqualifiers, scored
+**mechanically** on Track 1 (total return + a max-drawdown cap + a minimum-trade count + simulated
+tx costs — no discretionary "genuine activity" judgment on the leaderboard): **(1) ≥1 trade per UTC
+day** (7 over the week) and **(2) a ~30% max-drawdown cap**. Both are handled as **hard external
+guardrails in the deploy layer (`trader.risk` + `trader.execution`/the agent loop), never as RL
+reward terms** — the reward stays focused purely on profit (beat the rung-0 RULE), so DQ-prevention
+is *immune to reward tuning* (as we tune for higher profit/aggression, the guardrails still cap the
+risk). This extends the `SPIKE_POLICY` skeleton above to a **competition `Policy`** sized for the
+live wallet of **≤ $500** (not the $10k training capital).
+
+**DQ 1 — the daily keep-alive.** The selective event-driven agent sits in cash between ignitions, so
+a no-ignition day = no trade (the cold-weekly sim flagged ~24 of 26 weeks with a no-trade day; the
+skeleton runs ~0.3 round-trips/day — [[Experiment Log]]). Forcing daily trades *in the reward* would
+reintroduce the chop-churn the selective thesis exists to avoid, so the fix is a **scheduled
+deploy-layer keep-alive, decoupled from the strategy**: **buy XAUt at 01:00 UTC, sell at 23:00 UTC,
+~3% of the portfolio, every day** — two trades, deliberately spread in time so a single RPC/gas
+failure cannot cost a (fatal) missed day. XAUt is chosen because it is on the eligible list and
+price-stable (gold), so the held sleeve adds ~zero drawdown risk and is marginally *stabilising* for
+DQ 2. At a ≤$500 wallet the round-trip is ~$15, so XAUt pool-depth / slippage is a non-issue; the
+keep-alive cost is therefore **gas-dominated** (≈$0.20–0.30/swap on BSC; ~14 swaps/week ≈ 0.6–0.8% of
+$500) — the price of eligibility plus the redundancy, and *size-independent* (the only lever is swap
+count, held at 2/day). Rules-clean: the rule is a literal count ("at least 1 trade per day"), there
+is **no** wash-trading / minimum-size / genuine-activity clause, XAUt is on the eligible 149-token
+list ("trades outside the list do not count"), and Track 1 is scored mechanically (no judge to flag a
+compliance round-trip).
+
+**DQ 2 — the drawdown backstop (defence-in-depth).** Drawdown is currently safe *structurally* —
+worst-seed within-week maxDD ~10% via selective entry + risk-parity caps + per-position `loss_floor`
++ `det_blacklist`, with `dd_lambda=0` (no reward penalty). Because the low DD is structural, not
+reward-driven, profit-tuning genuinely threatens it, so three layers defend the cap:
+
+1. **Selection gate (built):** the cold-weekly honest gate (`trader.train.weekly_eval`) binds
+   worst-week maxDD < 30% — any reward-tuned config that breaches is rejected *before* deployment.
+   Non-negotiable.
+2. **Runtime backstop (the upgrade):** a competition `Policy` drawdown stop at **~25% (a margin below
+   the ~30% DQ for slippage/gap headroom)** that **forces de-risk to USDT (cash)** — external to the
+   reward, uncompromising, rarely fired (primary DD management stays structural/learned). NOTE the
+   current `check_trade` drawdown stop only *refuses* trades (a freeze) — but a sell is also a trade,
+   so at the threshold it cannot liquidate and held positions keep bleeding past 30%; the competition
+   stop must **force liquidation**, not freeze (the execution-loop force-liquidate path in
+   `trader.agent` / `trader.execution` is to be confirmed/built).
+3. **Soft `dd_lambda` reward penalty:** turned on *only if* the backstop starts firing often —
+   secondary; the hard stop is the guarantee.
+
+The trade-off is explicit: a force-de-risk backstop **locks in the loss** (sells the drawdown, misses
+any bounce) — the correct trade, because a DQ is fatal and a missed bounce is not. De-risking to USDT
+keeps capital ranked: USDT is in-scope, and the rules' "any hour beginning with a sub-$1 portfolio =
+0%" penalty only bites dust-drained wallets, so flat-to-cash scores 0% for those hours but is not
+penalised.
+
+**The competition `Policy` (numbers TBD when building):** `allowlist` = the traded eligible tokens +
+XAUt (keep-alive) + USDT (de-risk cash leg); `per_trade_usd` / `daily_usd` caps sized for the ≤$500
+wallet (covering both the strategy's max-entry trades and the ~$15 keep-alive); `drawdown_stop_pct`
+~25% with force-de-risk semantics; a lifetime ceiling. The exact DQ threshold is *illustrative* in the
+rules ("for example 30%") — treat 30% as the working assumption and **confirm the exact number closer
+to the event**, since it sets the backstop margin.
+
+**Status:** design only, not built; the reward/training work is separate and ongoing. Scale-aware
+validation (re-running the cold-weekly eval at the deployment capital with the keep-alive modelled) is
+deferred future work. Open items: the exact DQ threshold; the competition `Policy` numbers; the
+execution-loop force-liquidate path; XAUt's current pool depth (expected fine at ~$15). Limit values +
+risk-module design coordinate with [[Trading Strategies]] / risk; runtime monitoring of the keep-alive
+schedule and the drawdown stop is [[Real-time Monitoring]].
+
 ## x402 signing safety
 
 x402 (pay-per-request) is the one place an external server influences what we sign, so it gets
