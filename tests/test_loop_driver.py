@@ -9,8 +9,10 @@ from trader.experiment.loop_control import result_from_verdict
 
 
 def _verdict(margin=-0.05, overall=False, dd=0.10):
+    # `margin` is the policy's margin-vs-Buy&Hold (B&H=0.05). The NORTH STAR is margin-vs-rung-0
+    # (rung0=0.0), so margin_vs_rung0 = mean_return = 0.05 + margin.
     return {"regimes": {"val": {"mean_return": 0.05 + margin, "worst_maxdd": dd,
-                                "mean_gate_pass": overall, "binding": None if overall else "Buy&Hold",
+                                "mean_gate_pass": overall, "binding": None if overall else "rung-0",
                                 "bars": {"buyhold": 0.05, "rung0": 0.0, "random": 0.0},
                                 "per_seed": []}},
             "overall_pass": overall, "missing": []}
@@ -59,6 +61,8 @@ def test_full_cycle_launch_run_verdict_continue(tmp_path):
     assert deps["_calls"]["record"] == 1
     st = driver.load_state(tmp_path)
     assert st["iteration"] == 1 and st["active"] is None and len(st["history"]) == 1
+    # north star = margin_vs_rung0 (mean 0.0 − rung0 0.0); margin_vs_buyhold carried as reported-only.
+    assert st["history"][0]["margin_vs_rung0"] == pytest.approx(0.0)
     assert st["history"][0]["margin_vs_buyhold"] == pytest.approx(-0.05)
 
 
@@ -108,12 +112,14 @@ def test_partial_sweep_death_halts_but_unreachable_box_waits(tmp_path):
 
 
 def test_result_from_verdict_worst_regime_margin():
+    # north star = WORST regime's margin-vs-the-rung-0-RULE; margin_vs_buyhold carried as reported.
     v = {"regimes": {"val": {"mean_return": 0.10, "worst_maxdd": 0.1, "mean_gate_pass": True,
-                             "binding": None, "bars": {"buyhold": 0.05}},
+                             "binding": None, "bars": {"buyhold": 0.05, "rung0": 0.08}},
                      "crash": {"mean_return": -0.02, "worst_maxdd": 0.1, "mean_gate_pass": False,
-                               "binding": "rung-0", "bars": {"buyhold": -0.80}}},
+                               "binding": "rung-0", "bars": {"buyhold": -0.80, "rung0": 0.01}}},
          "overall_pass": False}
     r = result_from_verdict("x", "val", v)
-    assert r.margin_vs_buyhold == pytest.approx(0.05)       # min(0.05, +0.78) = the worst regime
+    assert r.margin_vs_rung0 == pytest.approx(-0.03)        # min(0.10−0.08, −0.02−0.01) = the worst
+    assert r.margin_vs_buyhold == pytest.approx(0.05)       # min(0.05, +0.78), reported only
     assert r.binding == "crash:rung-0"
     assert not r.honest_gate_pass

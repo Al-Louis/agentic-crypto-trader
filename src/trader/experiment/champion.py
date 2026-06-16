@@ -7,10 +7,12 @@ carries a `provenance` block: git commit + every hyperparameter).
 
 Runs group by **config label** = the run_id with its `-s<seed>` suffix stripped. The **champion**
 is the highest mean-return config that has PASSED the **honest gate** on the frozen test (vault
-"Agent Communication Contract"): `split == test`, worst-seed maxDD under the DQ gate, AND the
-seed-mean beats rung-0 AND Buy&Hold AND Random — Buy&Hold non-negotiable. `None` ⇒ nothing has
-generalized out-of-sample yet (the honest state). `read_champion` reads the committed artifact
-instantly (no network); `rebuild_ledger` re-derives everything from the CDN (`fetch` injected).
+"Agent Communication Contract"; DIRECTION RESET 2026-06-15): `split == test`, worst-seed maxDD under
+the DQ gate, AND the seed-mean beats the rung-0 RULE baseline (if present). Buy&Hold and Random are
+COMPUTED and REPORTED but are NEVER binding — requiring "beat Buy&Hold" rewards holding-everything.
+`None` ⇒ nothing has generalized out-of-sample yet (the honest state). `read_champion` reads the
+committed artifact instantly (no network); `rebuild_ledger` re-derives everything from the CDN
+(`fetch` injected).
 
 scripts/build_ledger.py is now a thin CLI over these functions.
 """
@@ -113,24 +115,27 @@ def _summarize(rows: list[dict], dd_gate: float) -> tuple[dict, dict]:
 
 
 def _honest_gate(v: dict, dd_gate: float) -> tuple[bool, str | None]:
-    """The honest gate on a config's seed-mean (vault "Agent Communication Contract").
+    """The honest gate on a config's seed-mean (vault "Agent Communication Contract"; DIRECTION
+    RESET 2026-06-15).
 
-    Pass = frozen test + worst-seed DD under the gate + seed-mean beats ALL present baselines
-    { rung-0, Buy&Hold, Random }. **Buy&Hold is non-negotiable** — a config with no Buy&Hold
-    number cannot pass. Returns (passed, binding) where `binding` is the first baseline it fails
-    (or "no-buyhold" / "drawdown" / "not-test").
+    Pass = frozen test + worst-seed DD under the gate + seed-mean beats the rung-0 RULE baseline
+    (if present). Buy&Hold and Random are computed + reported but NEVER binding — requiring "beat
+    Buy&Hold" rewards holding-everything (the rejected basket overlay); the rung-0 RULE is the real
+    bar. Returns (passed, binding) where `binding` is the first failing check ("not-test" /
+    "drawdown" / "rung-0").
+
+    Caveat (pre-existing): unlike weekly_gate / train_event.honest_gate, this cannot exempt a DQ'd
+    rung-0 — the ledger carries `baseline_return` but not rung-0's maxDD — so a rung-0 that itself
+    breaches the DQ on the test window is still treated as a return bar here. In practice rung-0
+    rarely DQs on the frozen test; plumb baseline_maxdd through `_row`/`_summarize` for full parity.
     """
     if v.get("split") != "test":
         return False, "not-test"
     if v.get("worst_maxdd") is None or v["worst_maxdd"] >= dd_gate:
         return False, "drawdown"
-    if v.get("buyhold") is None:                  # B&H non-negotiable
-        return False, "no-buyhold"
-    mr = v["mean_return"]
-    for name, b in (("rung-0", v.get("baseline")), ("Buy&Hold", v.get("buyhold")),
-                    ("Random", v.get("random"))):
-        if b is not None and not mr > b:
-            return False, name
+    base = v.get("baseline")
+    if base is not None and not v["mean_return"] > base:
+        return False, "rung-0"
     return True, None
 
 
@@ -188,7 +193,7 @@ def rebuild_ledger(*, host: str = DEFAULT_HOST, dd_gate: float = DD_GATE,
             "legal_mean": v["legal_mean"],
             "gate_safe_worst": v["worst_maxdd"] is not None and v["worst_maxdd"] < dd_gate,
             "beats_baseline": cfg_base is not None and v["mean_return"] > cfg_base,
-            "honest_gate_pass": passed, "honest_gate_binding": binding,   # beats rung-0+B&H+Random
+            "honest_gate_pass": passed, "honest_gate_binding": binding,   # beats the rung-0 RULE + survives DQ
             "git": v["git"], "reproduce": v["reproduce"],
             "seeds_detail": [{"seed": r["seed"], "return": r["return"], "maxdd": r["maxdd"],
                               "sharpe": r["sharpe"], "pf": r["pf"], "run_id": r["run_id"]}
@@ -202,8 +207,9 @@ def rebuild_ledger(*, host: str = DEFAULT_HOST, dd_gate: float = DD_GATE,
         "baseline": {"name": "vol-tilt(trend50)", "return_pct": baseline_ret, "window": "val"},
         "champion": champion,
         "champion_criterion": ("PASSED the honest gate on frozen test: split=test, worst-seed maxDD "
-                               "under the gate, AND seed-mean beats rung-0 AND Buy&Hold AND Random "
-                               "(Buy&Hold non-negotiable). null = nothing generalized yet."),
+                               "under the gate, AND seed-mean beats the rung-0 RULE (DIRECTION RESET "
+                               "2026-06-15; Buy&Hold/Random reported but never binding). null = "
+                               "nothing generalized yet."),
         "configs": [cfg_card(label, v) for label, v in
                     sorted(summary.items(), key=lambda x: -x[1]["mean_return"])],
     }

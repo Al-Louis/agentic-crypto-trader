@@ -118,8 +118,9 @@ def test_deviation_alpha_degenerate_is_inconclusive():
 
 def _man_fetch(configs):
     """Build a fetch serving manifest + per-run metrics. Config tuple: (split, ret, dd, base[,
-    buyhold, random]). buyhold/random default BELOW base so a beats-rung-0 config also clears the
-    honest gate; pass them explicitly to exercise a Buy&Hold/Random failure."""
+    buyhold, random]). `base` is the rung-0 RULE — the only binding return bar (DIRECTION RESET
+    2026-06-15). buyhold/random default below base and are REPORTED only; pass them explicitly to
+    show a config can pass while losing to B&H, or fail by losing to the rung-0 RULE."""
     runs = {}
     for label, cfg in configs.items():
         split, ret, dd, base = cfg[:4]
@@ -146,10 +147,10 @@ def _man_fetch(configs):
 
 def test_champion_requires_frozen_test_honest_gate():
     # A val config with great returns must NOT be champion; only a test config that clears the
-    # HONEST gate (beats rung-0 + Buy&Hold + Random, DD ok) qualifies.
+    # HONEST gate (beats the rung-0 RULE, DD ok; DIRECTION RESET 2026-06-15) qualifies.
     fetch = _man_fetch({
         "val-great": ("val", 1.50, 0.20, 0.30),       # huge but val -> ineligible
-        "test-win": ("test", 0.40, 0.25, 0.30),       # test, beats all 3, DD<gate -> champion
+        "test-win": ("test", 0.40, 0.25, 0.30),       # test, beats rung-0, DD<gate -> champion
         "test-dd": ("test", 0.90, 0.45, 0.30),         # test but worst DD>gate -> ineligible
     })
     res = champion.rebuild_ledger(fetch=fetch, generated="t")
@@ -157,14 +158,27 @@ def test_champion_requires_frozen_test_honest_gate():
     assert res["leaderboard"]["totals"]["configs"] == 3
 
 
-def test_champion_blocked_when_loses_to_buyhold():
-    # Beats rung-0 but LOSES to Buy&Hold on test -> honest gate fails -> NO champion (the contract).
-    fetch = _man_fetch({"test-proxy": ("test", 0.40, 0.25, 0.30, 0.55, 0.10)})  # buyhold 0.55 > mean
+def test_champion_blocked_when_loses_to_rung0():
+    # Beats Buy&Hold but LOSES to the rung-0 RULE on test -> honest gate fails -> NO champion.
+    # mean ~0.40, rung-0 0.55 (> mean), buyhold 0.10 (< mean): rule is the binding bar.
+    fetch = _man_fetch({"test-proxy": ("test", 0.40, 0.25, 0.55, 0.10, 0.05)})  # rung-0 0.55 > mean
     res = champion.rebuild_ledger(fetch=fetch, generated="t")
     assert res["champion"] is None
     card = res["leaderboard"]["configs"][0]
-    assert card["honest_gate_pass"] is False and card["honest_gate_binding"] == "Buy&Hold"
-    assert card["beats_baseline"] is True              # beats rung-0, but that's not enough
+    assert card["honest_gate_pass"] is False and card["honest_gate_binding"] == "rung-0"
+    assert card["beats_baseline"] is False             # loses to the rung-0 RULE
+
+
+def test_champion_qualifies_when_beats_rule_loses_buyhold():
+    # DIRECTION RESET: beats the rung-0 RULE but LOSES to Buy&Hold on test -> now QUALIFIES
+    # (B&H is a reported reference, never binding). rung-0 0.10 (< mean ~0.40), buyhold 0.55 (> mean).
+    fetch = _man_fetch({"test-sel": ("test", 0.40, 0.25, 0.10, 0.55, 0.05)})  # buyhold 0.55 > mean
+    res = champion.rebuild_ledger(fetch=fetch, generated="t")
+    assert res["champion"]["config_label"] == "test-sel"
+    card = res["leaderboard"]["configs"][0]
+    assert card["honest_gate_pass"] is True and card["honest_gate_binding"] is None
+    assert card["beats_baseline"] is True              # beats the rung-0 RULE — enough
+    assert card["buyhold"] == 0.55                     # B&H still reported on the card
 
 
 def test_champion_none_when_nothing_generalizes():
@@ -192,7 +206,7 @@ def test_write_then_read_champion(tmp_path):
 
 def test_rl_diagnose_data_uses_honest_gate(monkeypatch):
     from trader.mcp_server import server
-    # Honest gate clears (beats all 3) + DD ok ⇒ gate_pass. Note beats_baseline alone is NOT enough.
+    # Honest gate clears (beats the rung-0 RULE) + DD ok ⇒ gate_pass. B&H/Random reported, not binding.
     monkeypatch.setattr("trader.experiment.diagnostics.compare_seeds",
                         lambda *a, **k: {"n": 4, "mean_return": 0.15, "spread": 0.02,
                                          "worst_return": 0.13, "best_return": 0.18,
@@ -209,36 +223,41 @@ def test_rl_diagnose_data_uses_honest_gate(monkeypatch):
     assert pkt["performance"]["buyhold"] == 0.12 and pkt["performance"]["random"] == 0.05
 
 
-def test_rl_diagnose_fails_gate_when_loses_to_buyhold(monkeypatch):
+def test_rl_diagnose_fails_gate_when_loses_to_rung0(monkeypatch):
     from trader.mcp_server import server
-    # Beats rung-0 but LOSES to Buy&Hold ⇒ honest gate FAILS even though beats_baseline is True.
+    # DIRECTION RESET: LOSES to the rung-0 RULE ⇒ honest gate FAILS, binding rung-0 (even though it
+    # beats Buy&Hold here — B&H is reported, never binding).
     monkeypatch.setattr("trader.experiment.diagnostics.compare_seeds",
                         lambda *a, **k: {"n": 4, "mean_return": -0.047, "worst_maxdd": 0.13,
-                                         "baseline": -0.094, "buyhold": 0.07, "random": -0.10,
-                                         "regime": {"label": "bull"}, "beats_baseline": True,
-                                         "beats_buyhold": False, "gate_pass_mean": False,
-                                         "gate_binding": "Buy&Hold", "gate_pass_all_seeds": False})
+                                         "baseline": 0.02, "buyhold": -0.20, "random": -0.10,
+                                         "regime": {"label": "bull"}, "beats_baseline": False,
+                                         "beats_buyhold": True, "gate_pass_mean": False,
+                                         "gate_binding": "rung-0", "gate_pass_all_seeds": False})
     monkeypatch.setattr("trader.experiment.diagnostics.deviation_alpha",
                         lambda *a, **k: {"n_entries": 6, "verdict": "reward-bound"})
     pkt = server.rl_diagnose_data("pfx", ["0", "1", "2", "3"])
-    assert pkt["honest_gate"]["gate_pass"] is False            # the exp1→exp5 drift, now caught
-    assert pkt["honest_gate"]["binding"] == "Buy&Hold"
-    assert pkt["honest_gate"]["beats_rung0"] is True
+    assert pkt["honest_gate"]["gate_pass"] is False            # loses to the rung-0 RULE
+    assert pkt["honest_gate"]["binding"] == "rung-0"
+    assert pkt["honest_gate"]["beats_rung0"] is False
+    assert pkt["honest_gate"]["beats_buyhold"] is True         # B&H reported, not binding
 
 
 # ---- North-Star Header (Agent Communication Contract) ---------------------------------------
 
 def test_north_star_header_carries_goal_metric_and_state():
     from trader.experiment.contract import north_star_header
+    # DIRECTION RESET: the binding bar is now the rung-0 RULE; the policy LOSES to it here. B&H is
+    # still REPORTED in the live-state line and the success metric, just never the gate.
     diag = {"prefix": "ppo-event-sel", "performance": {"n": 4, "mean_return": -0.047,
-            "buyhold": 0.07, "baseline": -0.094, "random": -0.10, "worst_maxdd": 0.13},
+            "buyhold": 0.07, "baseline": 0.02, "random": -0.10, "worst_maxdd": 0.13},
             "regime": {"label": "bull"},
-            "honest_gate": {"gate_pass": False, "binding": "Buy&Hold", "dd_ok": True}}
+            "honest_gate": {"gate_pass": False, "binding": "rung-0", "dd_ok": True}}
     h = north_star_header("redesign the sizing reward", diag, split="val")
-    assert "SUCCESS METRIC" in h and "Buy&Hold" in h and "honest_gate" in h
-    assert "policy -4.7% vs B&H +7.0%" in h          # live state, all baselines
-    assert "loses to Buy&Hold" in h                  # the binding blocker
-    assert "DRIFT ALARM" in h and "RESTATE" in h     # the agent's obligations
+    assert "SUCCESS METRIC" in h and "rung-0" in h and "honest_gate" in h
+    assert "Buy&Hold" in h                            # B&H still surfaced as a reported reference
+    assert "policy -4.7% vs B&H +7.0%" in h           # live state, all baselines reported
+    assert "loses to rung-0" in h                     # the binding blocker is the rung-0 RULE
+    assert "DRIFT ALARM" in h and "RESTATE" in h      # the agent's obligations
 
 
 def test_north_star_header_handles_no_run():
@@ -286,10 +305,12 @@ def test_loop_escalates_when_budget_exhausted():
 
 def test_result_from_diagnose_bridge():
     from trader.experiment.loop_control import decide, result_from_diagnose
-    diag = {"performance": {"mean_return": -0.047, "buyhold": 0.07},
-            "honest_gate": {"gate_pass": False, "binding": "Buy&Hold"}}
+    # north star = margin_vs_rung0 (mean − baseline); margin_vs_buyhold carried as reported-only.
+    diag = {"performance": {"mean_return": -0.047, "baseline": 0.02, "buyhold": 0.07},
+            "honest_gate": {"gate_pass": False, "binding": "rung-0"}}
     r = result_from_diagnose("ppo-event-sel", "val", diag)
-    assert r.margin_vs_buyhold == pytest.approx(-0.117) and r.binding == "Buy&Hold"
+    assert r.margin_vs_rung0 == pytest.approx(-0.067) and r.binding == "rung-0"
+    assert r.margin_vs_buyhold == pytest.approx(-0.117)   # reported, not the gate
     assert decide([r])["action"] == "continue"
 
 

@@ -134,17 +134,23 @@ def random_baseline_return(eval_r, btc, liq, vol, env_kwargs, n=3, seed=0):
 
 
 def honest_gate(pol, rung0, buyhold, random_, pol_maxdd=0.0, rung0_maxdd=0.0, dq_gate=0.30):
-    """The structural gate ([[AI Training]]): a model earns a version only if it survives the DQ gate
-    AND beats Buy&Hold AND Random AND a SURVIVING rung-0. Returns (passed, binding).
+    """The structural gate ([[AI Training]]; DIRECTION RESET 2026-06-15, 6eda1d5): a model earns a
+    version only if it (1) survives the DQ gate AND (2) beats a SURVIVING rung-0 RULE. Returns
+    (passed, binding).
 
     Competition reality (PnL scored under a hard ~30% max-drawdown DQ): (1) the POLICY itself must keep
-    maxDD < dq_gate — a higher return that breaches the gate is worthless (DQ'd). (2) A baseline that is
-    itself DQ'd is not a valid live competitor, so beating its (unsurvivable) return is NOT required —
-    this is what stops a concentrated, DQ-prone rung-0 from setting an unbeatable bar that only risk
-    *avoidance* could clear. Buy&Hold and Random remain return bars (risk-parity B&H is low-DD by design)."""
+    maxDD < dq_gate — a higher return that breaches the gate is worthless (DQ'd). (2) The rung-0 RULE is
+    the only binding return bar, and only when it itself SURVIVES the DQ gate — a baseline that is itself
+    DQ'd is not a valid live competitor, so beating its (unsurvivable) return is NOT required (this is what
+    stops a concentrated, DQ-prone rung-0 from setting an unbeatable bar that only risk *avoidance* could
+    clear). `buyhold` and `random_` are still ACCEPTED (callers pass them; they are computed and REPORTED
+    everywhere — numbers/bars/dashboards) but are NEVER binding gate checks: requiring "beat Buy&Hold"
+    rewards holding-everything (the buy-everything basket overlay the user rejected). The selective
+    event-driven agent sits in cash between ignitions and structurally cannot out-return B&H in a bull, by
+    design. The rung-0 RULE is the real bar."""
     if pol_maxdd > dq_gate:
         return False, f"DQ: policy maxDD {pol_maxdd:.0%} > {dq_gate:.0%}"
-    beats = {"Buy&Hold": pol > buyhold, "Random": pol > random_}
+    beats = {}
     if rung0_maxdd <= dq_gate:                              # only a SURVIVING rung-0 is a bar to beat
         beats["rung-0"] = pol > rung0
     passed = all(beats.values())
@@ -561,8 +567,8 @@ def main() -> None:
         for nm in results:
             print_verdict(results[nm])
         overall_gate = all(r["gate_pass"] for r in results.values())
-        print(f"[gate] OVERALL: {'PASS - beats every baseline on EVERY held-out regime' if overall_gate else 'FAIL'}"
-              + ("" if overall_gate else " - must clear rung-0 + Buy&Hold + Random on val AND test"))
+        print(f"[gate] OVERALL: {'PASS - beats the rung-0 RULE + survives DQ on EVERY held-out regime' if overall_gate else 'FAIL'}"
+              + ("" if overall_gate else " - must beat the rung-0 RULE + survive DQ on val AND test (Buy&Hold/Random reported)"))
 
     eq, records, universe, fees, raw, report = (pr["eq"], pr["records"], pr["universe"], pr["fees"],
                                                 pr["raw"], pr["report"])

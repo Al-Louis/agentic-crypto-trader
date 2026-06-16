@@ -78,10 +78,14 @@ def reset(state_dir: Path | str = EXPERIMENTS, *, hard: bool = False) -> dict:
 
 
 def _history_results(st: dict) -> list[ExperimentResult]:
+    # None-safe on EXISTING loop state: pre-reset entries carry margin_vs_buyhold but no
+    # margin_vs_rung0 (DIRECTION RESET 2026-06-15) — read it back as None, never crash.
     return [ExperimentResult(exp_id=h["exp_id"], split=h["split"],
                              honest_gate_pass=h["honest_gate_pass"],
-                             margin_vs_buyhold=h.get("margin_vs_buyhold"),
-                             binding=h.get("binding")) for h in st["history"]]
+                             margin_vs_rung0=h.get("margin_vs_rung0"),
+                             binding=h.get("binding"),
+                             margin_vs_buyhold=h.get("margin_vs_buyhold"))
+            for h in st["history"]]
 
 
 def real_deps() -> dict[str, Callable[..., Any]]:
@@ -150,7 +154,8 @@ def step(state_dir: Path | str = EXPERIMENTS, *, deps: dict | None = None) -> di
         res = result_from_verdict(a["stamped"], "val", v)
         st["history"].append({
             "exp_id": res.exp_id, "split": res.split, "iteration": st["iteration"],
-            "honest_gate_pass": res.honest_gate_pass, "margin_vs_buyhold": res.margin_vs_buyhold,
+            "honest_gate_pass": res.honest_gate_pass, "margin_vs_rung0": res.margin_vs_rung0,
+            "margin_vs_buyhold": res.margin_vs_buyhold,   # reported only (DIRECTION RESET 2026-06-15)
             "binding": res.binding, "note": a.get("note", ""), "config": a.get("config"),
             "regimes": {n: {"mean_return": t["mean_return"], "worst_maxdd": t["worst_maxdd"],
                             "mean_gate_pass": t["mean_gate_pass"], "binding": t["binding"]}

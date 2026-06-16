@@ -35,11 +35,16 @@ def _http_fetch(url: str) -> Any:
 
 
 def compare_seeds(prefix: str, seeds: list[int] | list[str], *, host: str = DATA_CDN,
-                  fetch: Fetch = _http_fetch) -> dict:
+                  fetch: Fetch = _http_fetch, dd_gate: float = 0.30) -> dict:
     """Average a seed sweep's published metrics. Returns per-seed rows + the across-seed summary.
 
     Skipped (not-yet-published / missing) seeds appear in `per_seed` with a `skip` note and are
     excluded from the mean. `baseline` is the config's own split baseline (e.g. vol-tilt on val).
+
+    The sweep-level honest gate (DIRECTION RESET 2026-06-15): the seed-mean PASSES iff it beats the
+    rung-0 RULE baseline (if present) AND the worst-seed maxDD is under `dd_gate`. Buy&Hold and Random
+    are still COMPUTED and REPORTED (beats_buyhold / buyhold / random fields) but are NEVER binding —
+    requiring "beat Buy&Hold" rewards holding-everything; the rung-0 RULE is the real bar.
     """
     per_seed: list[dict] = []
     rets: list[float] = []
@@ -90,22 +95,18 @@ def compare_seeds(prefix: str, seeds: list[int] | list[str], *, host: str = DATA
     if rets:
         mean = sum(rets) / len(rets)
         mean_rnd = (sum(randoms) / len(randoms)) if randoms else None
-        # the honest gate at the sweep level: the seed-mean must beat rung-0 AND Buy&Hold AND Random.
+        worst_dd = max(dds) if dds else None
+        # the honest gate at the sweep level (DIRECTION RESET 2026-06-15): the seed-mean must beat the
+        # rung-0 RULE baseline (if present) AND the worst-seed maxDD must clear the DQ gate. Buy&Hold and
+        # Random are computed + reported (below) but NEVER binding — "beat Buy&Hold" rewards holding-
+        # everything (the rejected basket overlay); the rung-0 RULE is the real bar.
         beats_bh = (buyhold is not None and mean > buyhold)
         beats_rnd = (mean_rnd is not None and mean > mean_rnd)
         beats_base = (baseline is not None and mean > baseline)
-        # Buy&Hold (the market) is NON-NEGOTIABLE: a bundle without it predates the honest gate and
-        # CANNOT pass — silently checking only rung-0 is exactly the drift the gate exists to kill.
-        if buyhold is None:
-            gate_pass_mean, binding = False, "Buy&Hold (not computed - re-run on the gated build)"
-        else:
-            checks = {"Buy&Hold": beats_bh, "Random": beats_rnd, "rung-0": beats_base}
-            # only enforce baselines that are present, but Buy&Hold is guaranteed present here
-            present = {k: ok for k, ok in checks.items()
-                       if k == "Buy&Hold" or (k == "Random" and mean_rnd is not None)
-                       or (k == "rung-0" and baseline is not None)}
-            gate_pass_mean = all(present.values())
-            binding = None if gate_pass_mean else next(k for k, ok in present.items() if not ok)
+        checks = {"drawdown": worst_dd is not None and worst_dd < dd_gate,
+                  "rung-0": baseline is None or beats_base}   # DQ binds first (matches weekly_gate)
+        gate_pass_mean = all(checks.values())
+        binding = None if gate_pass_mean else next(k for k, ok in checks.items() if not ok)
         out.update({
             "mean_return": mean,
             "spread": statistics.pstdev(rets) if len(rets) > 1 else 0.0,
@@ -196,7 +197,8 @@ def regime_verdict(prefix: str, seeds: list[int] | list[str], *, host: str = DAT
     Reads each seed bundle's `regimes` block (post-GATE-2 bundles carry per-regime
     return/baselines/maxdd/gate verdicts; older bundles fall back to the primary split only).
     Per regime: per-seed rows, the seed-MEAN return / worst-seed maxDD, and the mean-level gate
-    (seed-mean beats Buy&Hold AND Random-mean AND rung-0, worst-seed DD under `dd_gate`).
+    (seed-mean beats the rung-0 RULE, worst-seed DD under `dd_gate`; DIRECTION RESET 2026-06-15).
+    Buy&Hold and Random are reported in `bars` but are NEVER binding.
     `overall_pass` = every regime's mean gate passes - the exact table the manual verdicts used.
     """
     regs: dict[str, list[dict]] = {}
@@ -229,8 +231,6 @@ def regime_verdict(prefix: str, seeds: list[int] | list[str], *, host: str = DAT
         rule = next((r["baseline_return"] for r in rows if r["baseline_return"] is not None), None)
         rnd = sum(rnds) / len(rnds) if rnds else None
         checks = {"drawdown": worst_dd is not None and worst_dd < dd_gate,
-                  "Buy&Hold": bh is not None and mean is not None and mean > bh,
-                  "Random": rnd is None or (mean is not None and mean > rnd),
                   "rung-0": rule is None or (mean is not None and mean > rule)}
         table[name] = {
             "per_seed": rows, "mean_return": mean, "worst_maxdd": worst_dd,
@@ -241,6 +241,7 @@ def regime_verdict(prefix: str, seeds: list[int] | list[str], *, host: str = DAT
         }
     return {"prefix": prefix, "n_seeds": len(seeds), "missing": missing, "regimes": table,
             "overall_pass": bool(table) and all(v["mean_gate_pass"] for v in table.values()),
-            "note": ("overall_pass = every regime's seed-mean beats Buy&Hold AND Random AND "
-                     "rung-0 with worst-seed maxDD under the DQ gate (Agent Communication "
-                     "Contract). Older pre-regime bundles judge the primary split only.")}
+            "note": ("overall_pass = every regime's seed-mean beats the rung-0 RULE with worst-seed "
+                     "maxDD under the DQ gate (DIRECTION RESET 2026-06-15; Agent Communication "
+                     "Contract). Buy&Hold and Random are reported in 'bars' but never binding. "
+                     "Older pre-regime bundles judge the primary split only.")}

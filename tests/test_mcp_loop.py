@@ -120,7 +120,9 @@ def test_regime_verdict_means_and_overall_gate():
 
 
 def test_regime_verdict_binding_and_missing_seed():
-    bundles = {"p-s0": _bundle(0.01, 0.08)}                # val mean 0.01 < buyhold 0.05
+    # DIRECTION RESET: val mean 0.01 LOSES to the rung-0 RULE (0.02) -> binds 'rung-0'. It also
+    # loses to Buy&Hold (0.05) but that is reported in 'bars', never binding.
+    bundles = {"p-s0": _bundle(0.01, 0.08)}               # val mean 0.01 < rung-0 0.02
 
     def fetch(url):
         rid = url.rsplit("/", 2)[-2]
@@ -131,7 +133,8 @@ def test_regime_verdict_binding_and_missing_seed():
     v = regime_verdict("p", [0, 1], fetch=fetch)
     assert len(v["missing"]) == 1
     assert not v["regimes"]["val"]["mean_gate_pass"]
-    assert v["regimes"]["val"]["binding"] == "Buy&Hold"
+    assert v["regimes"]["val"]["binding"] == "rung-0"
+    assert v["regimes"]["val"]["bars"]["buyhold"] == 0.05   # B&H still reported, not binding
     assert not v["overall_pass"]
 
 

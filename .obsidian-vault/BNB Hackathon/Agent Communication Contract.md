@@ -16,6 +16,20 @@ MCP train-loop all reference it, and the orchestrator (whoever is driving) is bo
 > proposing the next config) still gets the `rl_north_star` header, and this note remains the
 > spec for what that header must carry. Do not delete while the loop spawns consults.
 
+> **DIRECTION RESET (2026-06-15, commits 6eda1d5 + this refactor) — Buy&Hold is DEMOTED from a
+> binding gate to a REPORTED reference, everywhere.** Requiring "beat Buy&Hold" rewards
+> holding-everything — it drove a session into the buy-everything basket overlay the user
+> rejected. The selective event-driven agent sits in cash between ignitions and **structurally
+> cannot out-return B&H in a bull, by design**. So the corrected honest gate is: a model/config
+> PASSES iff, on held-out data, **(1) it SURVIVES the DQ gate (maxDD < 30%) AND (2) it BEATS a
+> SURVIVING rung-0 RULE** (a DQ'd rung-0 is exempt — not a valid bar). **Buy&Hold and Random are
+> still COMPUTED and SURFACED in every output** (numbers, bars, edge fields, dashboards, the
+> North-Star live-state line) — they are just **never binding**. The loop's north-star metric is
+> now `margin_vs_rung0` (policy − rung-0 RULE), not `margin_vs_buyhold`. The canonical reference
+> is `weekly_eval.py::weekly_gate`; the rest of the gate sites now match it. The exp1→exp5
+> post-mortem below is **kept as history** — the *orchestration* lessons (stateless agents, prose
+> gates, narrow frames) stand; only the binding *bar* changed from B&H to the rung-0 RULE.
+
 ## Why this exists (the receipts)
 
 exp1→exp5 (see [[Experiment Log]]) spent ~a day and four overnight sweeps optimizing a reward
@@ -61,9 +75,10 @@ with this block, filled in with live values. No bare sub-problems.
 GOAL: a self-custody RL trading agent that is PROFITABLE and risk-managed on live PnL
       (June 22–28), under the ~30% max-drawdown DQ gate. rung-0 is the baseline to BEAT,
       never a destination.
-SUCCESS METRIC (non-negotiable): on HELD-OUT data, the policy must beat ALL of
-      { rung-0 rule, Buy&Hold of the traded universe, Random discretion } — reported
-      PER REGIME (bull/bear/flat). This is `honest_gate()` in scripts/train_event.py.
+SUCCESS METRIC (non-negotiable): on HELD-OUT data, the policy must (1) SURVIVE the DQ
+      gate (maxDD < ~30%) and (2) BEAT the rung-0 RULE — reported PER REGIME (bull/bear/
+      flat). Buy&Hold and Random are COMPUTED and REPORTED references, NEVER binding
+      (DIRECTION RESET 2026-06-15). This is `honest_gate()` in scripts/train_event.py.
       A reward proxy is legitimate ONLY with evidence that proxy ⇒ this metric.
 LIVE STATE: <current experiment id> | last result: policy <x%> vs B&H <y%> / rung-0 <z%> /
       Random <w%> on <split>, regime <bull/bear/flat> | open blocker: <…>
@@ -103,10 +118,12 @@ proposing anything** — that read-back is the proof the frame landed.
 - `random_baseline_return` — random discretion through the **same** event env (the floor).
 - `eval_regime` — BTC + universe-EW return with a bull/bear/flat label, printed every run.
 - `honest_gate(pol, rung0, buyhold, random) -> (passed, binding)` — the **single source of
-  truth**: a model earns a version only if it beats all three. Reused by the MCP train-loop's
-  continue/stop decision. **Buy&Hold is non-negotiable** — a result without it cannot pass.
+  truth**: a model earns a version only if it **survives the DQ gate AND beats a surviving
+  rung-0 RULE** (DIRECTION RESET 2026-06-15). `buyhold`/`random` are still **accepted, computed,
+  and reported** but are **never binding**. Reused by the MCP train-loop's continue/stop decision.
 
-`compare_seeds` surfaces the same gate on the seed-mean. Tests: `tests/test_honest_gate.py`.
+`compare_seeds` surfaces the same gate on the seed-mean (binds on rung-0 + drawdown; B&H/Random
+reported). The loop's north-star is `margin_vs_rung0`. Tests: `tests/test_honest_gate.py`.
 
 ## The re-grounding checkpoint (before any reward/objective change)
 
@@ -125,10 +142,11 @@ compound with **no human to catch them**. So the loop MUST:
 
 - **Inject the North-Star Header into every agent it spawns**, with live state pulled from the
   last bundle's metrics (`gate_pass`, `buyhold_return`, `regime`, …).
-- **Gate continue/stop on `honest_gate`, never on the proxy reward or "beat rung-0."** The loop's
-  notion of "better" is the held-out gate across regimes — nothing else.
+- **Gate continue/stop on `honest_gate`, never on the proxy reward.** The loop's notion of
+  "better" is the held-out gate across regimes (survive DQ + beat the rung-0 RULE) — nothing else.
 - **Sound a drift alarm and halt → escalate to a human** after N consecutive experiments with no
-  improvement in policy-vs-Buy&Hold. Silent iteration toward a proxy is the exact rabbit hole.
+  improvement in policy-vs-the-rung-0-RULE (`margin_vs_rung0`). Silent iteration toward a proxy is
+  the exact rabbit hole.
 - **Never auto-promote a champion that hasn't cleared the gate on held-out test across regimes.**
 
 ## Related

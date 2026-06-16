@@ -121,19 +121,20 @@ def rl_compare(prefix: str, seeds: str = "0 1 2 3") -> dict:
 
 
 def rl_diagnose_data(prefix: str, seeds: list[str], *, dd_gate: float = 0.30) -> dict:
-    """Assemble the verdict packet the agent/loop reads — judged on the HONEST gate, not beat-rung-0.
+    """Assemble the verdict packet the agent/loop reads — judged on the HONEST gate.
 
-    Success = `honest_gate` (vault "Agent Communication Contract"): the seed-mean must beat ALL of
-    { rung-0, Buy&Hold, Random } reported per regime, AND clear the drawdown DQ. Reporting
-    "beats rung-0" alone is the exact drift that lost exp1→exp5 a day, so the gate here is
-    `compare_seeds.gate_pass_mean` (the in-code `honest_gate`) AND the DD guard — never beat-rung-0.
+    Success = `honest_gate` (vault "Agent Communication Contract"; DIRECTION RESET 2026-06-15): the
+    seed-mean must BEAT the rung-0 RULE AND clear the drawdown DQ. Buy&Hold and Random are COMPUTED
+    and REPORTED (numbers/bars below) but are NEVER binding — requiring "beat Buy&Hold" rewards
+    holding-everything (the rejected basket overlay). The gate here is `compare_seeds.gate_pass_mean`
+    (the in-code `honest_gate`: beats rung-0 + worst-seed DD under the gate).
     """
     from trader.experiment.diagnostics import compare_seeds, deviation_alpha
     cmp = compare_seeds(prefix, seeds, host=DATA_CDN)
     dev = deviation_alpha(prefix, seeds, host=DATA_CDN)
     worst_dd = cmp.get("worst_maxdd")
     dd_ok = worst_dd is not None and worst_dd < dd_gate
-    honest = bool(cmp.get("gate_pass_mean"))       # beats rung-0 AND Buy&Hold AND Random (per regime)
+    honest = bool(cmp.get("gate_pass_mean"))       # beats the rung-0 RULE + worst-seed DD under the gate
     gate_pass = cmp.get("n", 0) > 0 and honest and dd_ok
     return {
         "prefix": prefix,
@@ -146,15 +147,16 @@ def rl_diagnose_data(prefix: str, seeds: list[str], *, dd_gate: float = 0.30) ->
         "regime": cmp.get("regime"),
         "honest_gate": {
             "gate_pass": gate_pass,                  # the SINGLE source of truth: honest gate AND DD
-            "honest_gate_mean": honest,              # honest_gate on the seed-mean (beats all 3)
-            "binding": cmp.get("gate_binding"),      # which baseline it fails: rung-0 / Buy&Hold / Random
+            "honest_gate_mean": honest,              # honest_gate on the seed-mean (beats the rung-0 RULE)
+            "binding": cmp.get("gate_binding"),      # which check it fails: rung-0 / drawdown
             "beats_rung0": cmp.get("beats_baseline"),
             "beats_buyhold": cmp.get("beats_buyhold"),
             "all_seeds_pass": cmp.get("gate_pass_all_seeds"),
             "dd_ok": dd_ok, "worst_maxdd": worst_dd, "dd_gate": dd_gate,
         },
-        "note": ("success = honest_gate: beat rung-0 AND Buy&Hold AND Random, per regime, on "
-                 "held-out data — NOT beat-rung-0 alone (vault 'Agent Communication Contract')."),
+        "note": ("success = honest_gate: BEAT the rung-0 RULE + survive the DQ gate, per regime, on "
+                 "held-out data (DIRECTION RESET 2026-06-15). Buy&Hold/Random are reported but never "
+                 "binding (vault 'Agent Communication Contract')."),
     }
 
 
