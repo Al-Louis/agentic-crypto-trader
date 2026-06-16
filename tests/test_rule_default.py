@@ -289,6 +289,86 @@ def test_intrabar_floor_fills_at_the_stop_not_the_close():
     assert env.cool["RUN"] >= 95                             # bar's path low (-50%+)
 
 
+def _late_ignite_panel(n=260):
+    """RUN ignites LATE (near the top of a short, sharp runup) so the entry price is HIGH, then a long
+    monotone crash takes the position deep BELOW entry*(1-floor) — the SIREN/Q pattern (bought near the
+    top, rode −60..−79% BELOW ENTRY). The shared `_panel` ignites at the runup base, so entry sits too
+    low for the floor (measured vs entry) to ever bind; this fixture is what the forensic actually hit."""
+    idx = pd.RangeIndex(n) * 3600
+    rng = np.random.default_rng(0)
+    px = np.ones(n)
+    for i in range(50, 60):          # short, sharp runup -> ignite late, entry near the peak
+        px[i] = px[i - 1] * 1.05
+    for i in range(60, 110):         # long monotone crash -> deep below entry (well past −20%)
+        px[i] = px[i - 1] * 0.95
+    for i in range(110, n):          # sideways far below origin
+        px[i] = px[i - 1] * (1.001 if i % 2 else 0.999)
+    cols = {"RUN": pd.Series(px, index=idx).pct_change().fillna(0.0),
+            "C1": pd.Series(rng.normal(0, 0.003, n), index=idx),
+            "C2": pd.Series(rng.normal(0, 0.003, n), index=idx)}
+    returns = pd.DataFrame(cols)
+    btc = pd.Series(np.cumprod(1 + rng.normal(0, 0.004, n)) * 1e4, index=idx)
+    vol = pd.DataFrame({c: pd.Series(100.0, index=idx) for c in cols})
+    vol.loc[idx[52:60], "RUN"] = 500.0   # volume spike LATE in the runup -> ignite near the top
+    liq = {c: 1e9 for c in cols}
+    return returns, btc, vol, liq
+
+
+@pytest.mark.parametrize("intrabar", [True, False])
+def test_floor_force_cuts_overridden_position_and_emits_the_sell_marker(intrabar):
+    """FULL-FLOW regression (the test that would have caught the ppo-event-rdLe4-ef forensic): a
+    position ENTERED via _do_entry on an ignition, then OVERRIDDEN on every exit prompt (rule_default
+    idx3 = keep-all) so it rides a monotone crash deep past entry*(1-loss_floor). The disaster floor
+    MUST force-cut it — AND the closing SELL MARKER must reach `info["trades"]` (the recorded stream).
+
+    The bug: the intrabar floor (path A) fires inside `_advance_to_event`, which runs in step() AFTER
+    `traded = list(self._trades)` was snapshotted; the closing marker was appended too late and wiped by
+    the next step's `self._trades = []`. So the floor cut equity but the position rode OPEN with no sell
+    in the marker/weights stream — exactly the SIREN/Q to −78% the forensic saw on every seed. The fix
+    captures `traded` AFTER the advance, in both the intrabar (A) and close (B/C) paths."""
+    returns, btc, vol, liq = _late_ignite_panel()
+    lowf = _frac_panel(returns, 1.0)   # low == close: isolate the floor from any intra-bar gap
+    env = EventRungEnv(returns, btc, liq, volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200,
+                       vol_mult=2.5, vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0,
+                       action_mode="discrete", n_action_levels=4, rule_default=True, exit_commit=12,
+                       loss_floor=0.2, intrabar_floor=intrabar,
+                       low_frac=(lowf if intrabar else None), record_trace=True)
+    env.reset(start=40)
+    j = env.col_ix["RUN"]
+
+    markers, entered, rode_below_floor = [], False, False
+    for _ in range(800):
+        etype, _ = env._pending
+        if etype == "none":
+            break
+        a = 0 if etype == "entry" else 3 if etype == "exit" else 0   # enter, OVERRIDE every exit, hold profits
+        if etype == "entry":
+            entered = True
+        # snapshot the held position's underwater ratio BEFORE the step's forward roll
+        if "RUN" in env.pos:
+            p = env.pos["RUN"]
+            if env._px[env.bar, j] / env._px[p["entry_bar"], j] - 1.0 <= -env.loss_floor:
+                rode_below_floor = True
+        _, _, done, info = env.step([a])
+        markers.extend(info.get("trades", []))
+        if done:
+            break
+
+    assert entered, "RUN's late ignition must produce an entry the agent takes"
+    # the position is force-cut: gone from the live book...
+    assert "RUN" not in env.pos, "the disaster floor must force-cut the deep-underwater overridden position"
+    # ...AND the close is in the RECORDED marker stream (the bug dropped this in the intrabar path).
+    buys = [m for m in markers if m[0] == "RUN" and m[1] > 0]
+    sells = [m for m in markers if m[0] == "RUN" and m[1] < 0]
+    assert buys, "the entry buy must be recorded"
+    assert sells, "the floor's force-cut SELL marker must reach info['trades'] (not be dropped post-advance)"
+    assert len(buys) == len(sells), "the RUN marker stream must net flat (every buy has a matching sell)"
+    # the cut lands AT or below the floor price (entry*(1-loss_floor)), not deep underwater
+    entry_px = buys[0][4]
+    fill_px = sells[-1][4]
+    assert fill_px <= entry_px * (1.0 - env.loss_floor) + 1e-9, "the fill must be at/under the floor price"
+
+
 def test_intrabar_floor_requires_data_and_floor():
     with pytest.raises(ValueError):
         _rd_env(intrabar_floor=True, loss_floor=0.2)         # no low_frac data

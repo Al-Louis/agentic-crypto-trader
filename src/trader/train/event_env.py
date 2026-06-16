@@ -314,8 +314,6 @@ class EventRungEnv:
         else:
             self._do_exit(tok, m)
         eq_post = self._equity()
-        traded = list(self._trades)
-        weights = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
         self._eq_mark = eq_post
         if self.reward_mode == "relative":
             self._rule_eq_mark = float(self._rule_eq[min(self.bar - self.start, len(self._rule_eq) - 1)])
@@ -323,6 +321,16 @@ class EventRungEnv:
             self._agent_w_snap = {t: self._pos_value(t) / max(eq_post, 1.0) for t in self.pos}
             self._prev_bar = self.bar
         self._advance_to_event()
+        # capture markers AFTER the advance: the intrabar resting-stop floor (_advance_to_event's
+        # path A) force-cuts deep losers DURING the forward roll and appends the closing SELL to
+        # self._trades. Snapshotting before the advance (the old bug) dropped that marker — the next
+        # step's `self._trades = []` wiped it — so a floored position vanished from equity but rode
+        # OPEN with no sell in the recorded marker/weights stream (ppo-event-rdLe4-ef: SIREN/Q to
+        # −78%). Capturing here folds the floor fill into THIS step's record. Weights are read post-
+        # advance too, so a position the floor closed correctly drops out of the recorded book.
+        traded = list(self._trades)
+        eq_end = self._equity()
+        weights = {t: self._pos_value(t) / max(eq_end, 1.0) for t in self.pos}
         info = self._info()
         info.update({"trades": traded, "trade_time": decision_time, "weights": weights})
         return self._obs(), float(reward), bool(self._done), info
