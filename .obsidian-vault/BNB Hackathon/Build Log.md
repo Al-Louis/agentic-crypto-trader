@@ -930,3 +930,117 @@ vs +151%); (b) loses to its OWN rung-0 rule OOS in every window; (c) bleeds/chur
   continuous eval + the known overfit, NOT a bug (recon exact, ignition fires, cash free). **Decision:
   return to the training loop and train+evaluate in the deployment (weekly/cold) structure to the honest
   gate.** Full reckoning → [[Experiment Log]] §2026-06-14, [[AI Training]] §the-fork.
+
+## 2026-06-14 (cont.) — cold-weekly deployment gate + the long-default basket overlay
+
+The fork made concrete in code: train AND grade in the deployment structure, and widen the
+substrate so the agent CAN hold the basket (the +13% bull-gap the event-only skeleton bled).
+**This overlay direction was subsequently SHELVED on 06-15 (benchmark-driven drift — see below);
+recorded here for the engineering trail.**
+
+- **`src/trader/train/weekly_eval.py`** (`c83312b`) — a torch-free **cold-weekly grader**
+  (Mon-00:00-UTC weeks, fresh $10k, per-week causal vol-top-8) + a **random-week distribution
+  gate** (PAIRED bootstrap policy-vs-baseline, CI-low > 0; activity informational).
+  `scripts/eval_weekly_baselines.py` measures the deployment bar (rung-0 trails B&H by the +13.2%
+  bull-gap OOS, DQ'd on the ≥1-trade/day rule most weeks).
+- **`EventRungEnv.basket_default`** (`c83312b`) — reset buys the risk-parity basket (= B&H), the
+  exit/profit tables invert (idx0 = hold), benchmark becomes the held basket, so do-nothing == B&H
+  and only correct tilts score. + `no_btc_obs` (the universe is BTC-decorrelated by selection).
+  Both flags default OFF → byte-identical. `train_event.py` gains `--eval-mode weekly`,
+  `--basket-default`, `--no-btc-obs`; policy return measured from the $10k deposit (not post-cost
+  `eq[0]`) so hold == B&H. `launch.REWARD_KEYS` registers the knobs. Validated: hold-overlay == B&H
+  to 5 decimals; 380 tests green.
+- **`d819025`** — emit the **opening basket-buy markers**: `evaluate_event_policy` only collected
+  trades from `step()` (which clears its buffer each call), so the `reset()` basket buy was dropped
+  and the dashboard showed every token selling at the start with no preceding buy (HUMA: 10 sells,
+  0 buys, yet held from step 0). Emit the reset buy as the first record (overlay-only; off =
+  byte-identical). + **`--reexport`**: regenerate + republish a bundle from the SAVED `policy.zip`
+  (no retrain), reading config from saved provenance so the eval is byte-identical and only the
+  artifacts change — used to repair the already-published OVERLAY-1/2 bundles.
+
+Numbers/standings for the overlay runs → [[Experiment Log]]; the overlay's defensive-basin
+failure and its shelving → [[AI Training]].
+
+## 2026-06-15 — horizon curriculum, the B&H demotion (weekly_gate only), drift post-mortem
+
+- **Horizon curriculum** (`e926e2e`) — OVERLAY-1 learned a defensive trim-everywhere basin (gives
+  back the bull, per-week gap vs B&H −27..−31%); root cause = a 1-week episode credits trimming a
+  dip but truncates the cost (the missed multi-week run). Fix = train on LONG episodes first
+  (holding the bull is creditable), anneal to the 1wk deploy shape. Built: `probe_horizon_credit.py`
+  (torch-free, no training — PROVES the lever: fwd-return holding from a weakness bar triples in
+  bull windows, 10%→30% over 1wk→4wk); `EventRungEnv.set_episode_bars` (shrink-only safe; env built
+  at the largest horizon) + gym delegate; `trader.train.curriculum.parse_horizon_schedule`/
+  `horizon_at` (torch-free); `HorizonCurriculumCallback` + `--curriculum-horizon` flag + provenance;
+  `launch.REWARD_KEYS` knob. **Two ANTI-COSMETIC tests** (TradeSim's #1 lesson — the sampler
+  provably MOVES on `set_episode_bars`; the schedule drives each phase once, descending). Flags
+  default OFF (byte-identical); 387 tests green.
+- **B&H demoted to a reported reference — in `weekly_gate` ONLY** (`6eda1d5`) — the **DIRECTION
+  RESET** (user). The "beat B&H" gate drove the substrate to the buy-everything overlay (it
+  structurally rewards holding everything), which abandoned selective-ignition entry and made the
+  trap guards (`det_blacklist`) inert (all 4 overlay-curh seeds bought the Q trap, ~−$1k each).
+  `weekly_gate` now binds on `survives_dq + beats_rung0` (the SELECTIVE rule is the bar);
+  `beats_buyhold` becomes a reported `edge_vs_buyhold`, binding only under `require_buyhold=True`.
+  **Note: this fixed only `weekly_gate` — every other gate site still required beat-B&H** (finished
+  the next day, `503b784`). The overlay is shelved; return to the selective rd/rdL ignition
+  substrate, keep the cold-weekly eval structure.
+- **Drift post-mortem + current-direction banner** (`0f7b965`) — captured in [[AI Training]] how the
+  session drifted (the benchmark drove us off the thesis), added a top CURRENT-DIRECTION banner
+  (selective rd/rdL, beat-the-rule bar, overlay shelved) and the durable lesson: don't let a
+  benchmark define the agent; when the metric drives you off the thesis, the metric is wrong.
+  → [[AI Training]], [[Experiment Log]] §2026-06-15 DIRECTION RESET.
+
+## 2026-06-16 — universe-regime curriculum, the gym-passthrough catch, and the honest-gate contract refactor
+
+Engineering for this session (numbers/verdicts: [[Experiment Log]] §2026-06-16, [[AI Training]]
+§"As-built (2026-06-16)" — do not re-derive them here). Three commits, in build order:
+
+- **Universe-regime curriculum BUILT** (`789979f`) — the **volatility-axis analog** of the horizon
+  curriculum (`e926e2e`). Stages the TRAINING universe through regimes over training progress —
+  `lowvol` (the k calmest tokens: learn ignition sizing/exit basics on tractable dynamics) →
+  `broad` (vol-stratified) → `voltopk` (the k most volatile = the deploy/eval distribution) — then
+  anneals into the deploy shape, mirroring the horizon ramp landing on the 1wk deploy episode.
+  Built: `trader.train.curriculum.parse_universe_schedule`/`universe_at` + `UNIVERSE_MODES`
+  (torch-free); `EventRungEnv.set_universe_mode` (a **between-episode setter** — no `_max_start`
+  constraint, categorical, unlike the shrink-only horizon setter); `UniverseCurriculumCallback`
+  (`env_method` push) + `--curriculum-universe` flag + provenance in `scripts/train_event.py`;
+  `curriculum_universe` in `launch.REWARD_KEYS` (so `/rl-loop` can drive it); anti-cosmetic tests
+  (lowvol vs voltopk pick DISJOINT universes; the callback drives each regime once, in order).
+  **Invariants:** default `""` = OFF / byte-identical; **EVAL always runs the deploy
+  `--universe-mode`** — only the TRAINING envs' START regime is staged, via a `make_env` dict-merge
+  override (`env_kwargs.universe_mode` is untouched), so the cold-weekly honest gate stays
+  meaningful; the schedule is validated to END at `--universe-mode`. Adversarially reviewed (2
+  lenses clean); 394 tests green.
+- **Gym-passthrough fix** (`7458aa8`) — the curriculum callback's
+  `env_method("set_universe_mode", …)` resolves on the `GymEventRungEnv` wrapper, not the core
+  `EventRungEnv`; `gym.Env` does NOT forward unknown attrs to `self.core`, so the call raised
+  `AttributeError` inside each `SubprocVecEnv` worker and killed it (parent saw **EOFError**),
+  crashing the curriculum sweep's 100k smoke **in setup**. The horizon curriculum worked only
+  because `set_episode_bars` already had a passthrough; `set_universe_mode` was missing its twin.
+  **The guard held: the smoke caught it before any real launch and the loop HALTED — nothing bad
+  ran.** Fix: add the passthrough on `GymEventRungEnv`; + a vec-env regression test (`DummyVecEnv`
+  `env_method` reproducing the exact callback path) the adversarial review had flagged as missing
+  coverage.
+- **Honest-gate contract refactor** (`503b784`) — FINISHED the 06-15 B&H demotion **across ALL gate
+  sites** (`6eda1d5` had fixed only `weekly_gate`; every other site still required beat-B&H, so the
+  loop mislabeled a rule-beating, DQ-surviving control as FAIL and steered toward PnL-vs-B&H — the
+  exact benchmark trap the reset killed). Demoted **Buy&Hold + Random to REPORTED references**
+  (still computed + surfaced, never binding) at: `train_event.honest_gate` (beats = {rung-0}, DQ-
+  first); `diagnostics.compare_seeds` + `regime_verdict` (checks = {drawdown, rung-0}; B&H/Random in
+  bars/fields); `champion._honest_gate` (pass = test-split + survive-DQ + beat-rung-0); `loop_control`
+  (north-star metric `margin_vs_buyhold → margin_vs_rung0` — the **rung-0 RULE edge**; drift alarm
+  now fires on no edge-vs-rung-0 improvement; `margin_vs_buyhold` retained as a None-safe reported
+  field, driver persists both); the `server.rl_diagnose` note; `contract.SUCCESS_METRIC`; and the
+  vault **[[Agent Communication Contract]]**. **Champion-contract consequence:** a rule-beating +
+  DQ-surviving config that LOSES to B&H can now be champion (the selective thesis); one that loses
+  to the rule binds "rung-0". ~20 pinned tests rewritten to the corrected contract; adversarially
+  reviewed (completeness/anti-weakening + semantics/backward-compat, both clean); **398 passed, 1
+  skipped.**
+
+**Operational notes (→ [[Remote Capabilities]], [[MCP Server]]):**
+- **The in-session `trader` MCP server ran STALE code** (loaded pre-fix) until the user restarted
+  it — the in-session-MCP-stale lesson recurs. The loop was driven via the **CLI**
+  (`scripts/rl_loop.py`, fresh process per call) rather than the MCP read tools, which lag a code
+  change until the server restarts.
+- **The `entry_forward` reward-shaping sweep (`ppo-event-rdLe4-ef`) was LAUNCHED and is TRAINING**
+  (in progress — NO verdict yet; do not read it as a result). Direction + design → [[Experiment Log]]
+  §2026-06-16, [[AI Training]] §"As-built (2026-06-16)".

@@ -1438,3 +1438,109 @@ it's trying to beat — not a basket-holder judged vs B&H. The overlay/curriculu
 OFF, parked); the horizon curriculum remains a usable tool for the selective substrate. **Next: diagnose
 WHY the selective rd/rdL agent plateaued vs the rule (it couldn't reliably out-discriminate it; drift-alarm
 halt at iteration 12) — the real RL problem — and tune from there.** See [[AI Training]].
+
+## 2026-06-16 — honest-gate fix FINISHED across all sites (commit `503b784`)
+
+The 2026-06-15 reset demoted Buy&Hold from a binding gate to a reference, but **only in `weekly_gate`** —
+every other gate site still bound on B&H, so the codebase disagreed with itself about what "pass" meant.
+This session finished the demotion **everywhere**: `train_event.honest_gate`, `diagnostics.compare_seeds`
++ `regime_verdict`, `champion._honest_gate`, `loop_control` (its north-star metric switched
+`margin_vs_buyhold → margin_vs_rung0` — the **drift alarm now fires on no edge-vs-the-rung-0-RULE
+improvement**), the `rl_diagnose` note, `contract.SUCCESS_METRIC`, and [[Agent Communication Contract]].
+
+**The honest gate now binds ONLY on {survive the ~30% max-drawdown DQ, beat the rung-0 RULE
+out-of-sample}.** Buy&Hold and Random stay **computed and reported** in every output — just **never
+binding**. Champion-contract consequence (stated so it's never mistaken for a bug): a config that beats the
+rule + survives DQ but **LOSES to B&H can now be champion** — intended for a selective agent that
+structurally can't out-return B&H in a bull. **398 tests pass, 1 skipped; adversarially reviewed under two
+lenses, both clean.** Companion fix `7458aa8` added `GymEventRungEnv.set_universe_mode` passthrough — the
+new universe-curriculum callback crashed the `SubprocVecEnv` worker without it. Full narrative → [[AI
+Training]] §"As-built (2026-06-16)".
+
+## 2026-06-16 — the curriculum-OFF control `ppo-event-rdLe4-wk` PASSES the corrected gate on VAL
+
+The first config judged under the fully-corrected gate (beat-the-rule + DQ, on the deployment-shaped
+cold-weekly eval), curriculum OFF — the CONTROL for the universe-curriculum test below.
+
+| seed | weekly/wk | vs rung-0 rule (−0.58%) | maxDD | gate |
+|------|-----------|-------------------------|-------|------|
+| s0 | +35.3% | BEATS | — | PASS |
+| s1 | +6.6% | BEATS | — | PASS |
+| s2 | +1.9% | BEATS | — | PASS |
+| s3 | +10.8% | BEATS | **10.1%** (worst-seed) | PASS |
+| **mean** | **+13.66%** | **+14.2pts**, 4/4 beat the rule | worst < 30% DQ | **PASS** |
+
+Reference (non-binding): **B&H +17.07%/wk** — the control loses to it, which is now allowed (B&H is a
+reference). **The read: the SELECTIVE rd/rdL substrate, judged CORRECTLY, WORKS on val** — the
+long-documented "rd/rdL plateaus vs the rule" was substantially an **artifact of the old continuous eval +
+the B&H gate, not the policy.**
+
+**CAVEATS (this is val, not a verdict):**
+- **VAL is the possible overfit pocket — the frozen TEST is UNSPENT.** A val pass is necessary, not
+  sufficient (cf. the `ppo2-real` +83% val → +11% test collapse above).
+- **The +13.66% mean is inflated by s0** (+35.3%, the historical val-pocket overfit seed). The robust
+  majority (s1/s2/s3) beats the rule by a more modest **+2.5–11pts** — read the majority, not the headline.
+- **Determinism check:** `rdLe4-wk-s0` is **bit-identical** to the prior `rdLe4r-68b268f-s0` (same
+  deterministic policy) — confirms training determinism on the box AND that the curriculum code is
+  byte-identical when the flag is OFF.
+
+## 2026-06-16 — universe-regime curriculum: BUILT then REFUTED (kill criterion MET)
+
+New `curriculum_universe` flag staging the **training universe** `lowvol → broad → voltopk` over training
+progress (the volatility-axis analog of the already-refuted horizon curriculum). Single-variable test vs
+the control above, cold-weekly VAL:
+
+| config | mean/wk | per-seed | vs rung-0 rule | seeds ≥0 | verdict |
+|--------|---------|----------|----------------|----------|---------|
+| `ppo-event-rdLe4-curu` (curriculum ON) | **−2.65%** | −4.4 / −4.6 / +4.95 / −6.6% | **−2.1pts** | 1/4 | **FAIL** (binding rung-0) |
+| `ppo-event-rdLe4-wk` (CONTROL, OFF) | **+13.66%** | +35.3 / +6.6 / +1.9 / +10.8% | **+14.2pts** | 4/4 | PASS |
+
+The curriculum **cost ~16pts** → its **pre-registered KILL CRITERION was MET.** Likely cause: the schedule
+trains ~65% OFF the `voltopk` deploy distribution (in `lowvol`+`broad`), **starving deploy-regime
+experience** — the agent spends most of training on a universe it will never trade.
+
+**The read across BOTH curricula.** The horizon curriculum earlier failed its kill criterion (on the
+now-shelved overlay, [[#OVERLAY-2 — the horizon curriculum (rl-ml-trainer design + probe PASS + built)]]);
+the universe curriculum now fails on the
+selective substrate. **Both curricula refuted → the plateau is NOT a capacity/exposure problem.** (Does not
+retract [[curriculum-and-checkpoints-are-legitimate]] — curriculum stays orthogonal to the gate and a
+legitimate lever; it was simply not the operative lever on these two axes, measured.) → [[AI Training]].
+
+## 2026-06-16 — diagnosis: the control is REWARD-BOUND, not capacity-bound
+
+`deviation_alpha` on the control (`ppo-event-rdLe4-wk`) — the diagnostic that redirected exp1→exp2 from
+"buy an LSTM" to "fix the reward," re-run on the cold-weekly-passing config:
+
+| group | n entries | mean fwd-24h return |
+|-------|-----------|---------------------|
+| oversized vs rule (0.20) | 19 | +3.29% |
+| undersized vs rule | 53 | +3.81% |
+| **corr(over/under-size, fwd-24h ret)** | | **+0.001** |
+
+**Bigger bets land on NO bigger moves** (corr ≈ 0). The `relative` (portfolio-level) reward is **not
+teaching entry-sizing discrimination**, so the control's +14pt val edge is **NOT skill-driven entry
+sizing** — it is exit-timing and/or s0 luck → **unlikely to generalize to the frozen test.** (The
+curriculum was worse and INVERSE: corr **−0.198**, over-sized losers.) This **quantifies the long-standing
+"defensive / won't discriminate" plateau as REWARD-BOUND** — same finding as the exp1→exp4 arc, now
+confirmed on the val-passing control. The fix is the reward, not capacity. → [[AI Training]].
+
+## 2026-06-16 — NEW DIRECTION: reward shaping (`entry_forward`), LAUNCHED (in progress, NO verdict)
+
+The residual preflight (`scripts/preflight_residual.py --horizon 24`) confirms a strong learnable signal:
+**corr(cush, fwd-24h ret) = −0.423** over **2176 train ignitions**; the correct-discriminator (size ∝
+−cush) is the **unique argmax at res_gamma 0.0** (both corners ≤ 0; an IC-hacker loses). So a per-entry
+reward — `entry_forward = dev × (fwd_ret − typical-ignition)`, which is **literally the quantity
+`deviation_alpha` measures** — should teach skillful sizing (objective == metric — the exp4 lesson).
+
+**LAUNCHED `ppo-event-rdLe4-ef`** — a **single-variable swap** vs the control: `reward_mode relative →
+entry_forward`, `fwd_horizon 24`, `res_gamma 0.0`, on val cold-weekly. **TRAINING NOW (loop iteration 3) —
+NO verdict yet; no result number exists for it.**
+
+- **PRE-REGISTERED SUCCESS** = `deviation_alpha` corr goes clearly **POSITIVE** AND it beats the rung-0
+  rule on val + survives DQ → **ONLY THEN spend the frozen test** (on a skill-driven config, not the
+  reward-bound control).
+- **KILL** = corr stays ~0 or it loses to the rule.
+
+The purpose: convert the control's *unexplained* val edge into a *skill-grounded* one **before** betting the
+unspent frozen test on it, so a test pass (if it comes) generalizes rather than repeats the s0 val-pocket
+pattern. → [[AI Training]] §"As-built (2026-06-16)".
