@@ -7,6 +7,16 @@ simpler robust strategies ([[Trading Strategies]]) for a single, high-variance l
 Owned by `rl-ml-trainer`. Regime/scenario context: [[Market Conditions]]; training-host
 question: [[Remote Capabilities]].
 
+> ## ⚠ CURRENT DIRECTION (2026-06-15) — read before acting on any "as-built" section below
+> The substrate is the **SELECTIVE event-driven ignition** model (the rd/rdL lineage): the agent
+> enters ONLY on real volume-ignition setups, the trap guards (`det_blacklist`, loss-floor) are
+> active, and RL learns the *discretion* (sizing, exit timing) on top. **The bar is: beat the
+> rung-0 RULE out-of-sample + survive the ~30% DD DQ + ≥1 trade/day, graded on the cold-weekly
+> eval.** Buy&Hold is a REPORTED reference, **never a gate**. The `basket_default` **OVERLAY is
+> SHELVED** (flag default-OFF, parked) — it was a buy-everything detour the "beat B&H" gate drove us
+> into; see §"DRIFT POST-MORTEM" at the bottom. The horizon curriculum + cold-weekly eval carry over
+> as tools for the selective substrate. **Next work = diagnose why rd/rdL plateaued vs the rule.**
+
 ## Where RL sits
 
 The decision core is a **pure module behind a clean interface** ([[Trading Strategies]]). A
@@ -693,3 +703,39 @@ sweep** on the overlay to the distribution gate (desktop — shared-box gotchas 
 can learned tilts beat holding the basket OOS across random weeks? "No, just hold" is now a valid,
 gate-safe answer the substrate makes reachable. See [[curriculum-and-checkpoints-are-legitimate]],
 [[Simulated Market]], [[Experiment Log]] §2026-06-14.
+
+## DRIFT POST-MORTEM (2026-06-15) — how the "beat B&H" gate drove us to buy-everything
+
+A full session drifted from the core thesis. Recording the MECHANISM so it never recurs (this is the
+same class as the exp1→exp5 reward-proxy drift — optimizing a metric that diverged from the goal).
+
+**The drift, step by step:**
+1. The 2026-06-14 fork's honest gate required "beat **Buy&Hold** + rung-0 OOS." Reasonable on its face.
+2. The cold-weekly diagnostic showed the SELECTIVE ignition skeleton **structurally cannot out-return
+   B&H in a bull** — it sits in cash between ignitions while the basket runs up (the "+13.2% bull-gap").
+3. Pressure to satisfy the *B&H* bar → proposed widening the substrate to a long-default **basket
+   overlay** (`basket_default`): default = **hold the WHOLE risk-parity basket** = literally Buy&Hold.
+   This "beat" the gate by *becoming the benchmark*.
+4. That is the **buy-everything** behavior the user rejected from the start. It abandoned selective
+   ignition entry AND made every trap guard inert (`det_blacklist` only blocks ignition *entries*; the
+   overlay never enters via ignition). Result: all 4 overlay seeds bought the **Q detonation trap** and
+   ate ~−$1k trades — the exact failure the selective rules exist to prevent.
+5. Two more sweeps (OVERLAY-1/2 + a horizon curriculum) were spent optimizing *inside* this wrong
+   substrate before the user caught it.
+
+**The tell we missed:** the rl-loop **drift-alarm was firing on "no PnL-vs-Buy&Hold improvement in 8
+experiments."** That was the system saying the *B&H comparison* was the binding, unproductive constraint.
+The correct response was to **question the METRIC**; instead the response was to **engineer a substrate to
+satisfy it**. When a gate halts progress, ask whether the gate measures the agent you actually want.
+
+**The durable lesson (the rule going forward):**
+- **Do not let a benchmark define the agent.** B&H is what passive competitors do — a *reference*, not a
+  *design target*. Requiring "beat B&H" rewards holding-everything, which is the opposite of a selective
+  trader. (Operationalized: `weekly_gate` `require_buyhold` defaults False; the bar is beat-the-RULE.)
+- **The north star is a SELECTIVE RL agent** that earns each position through ignition logic + the trap
+  rules, and **beats the rung-0 RULE** via better learned discretion. The rule — not B&H — is the bar.
+- **When optimizing a metric drives the agent AWAY from the thesis, the metric is wrong, not the thesis.**
+  Same failure class as reward-proxy drift; the fix is to correct the objective, not the agent.
+
+The overlay/curriculum code stays parked (flags default-OFF, byte-identical when unused). Return to the
+selective substrate; full record in [[Experiment Log]] §2026-06-15 DIRECTION RESET.
