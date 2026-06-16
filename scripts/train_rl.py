@@ -156,17 +156,18 @@ def build_portfolio_artifacts(records, universe, t0, t1):
             continue
         win = ohlcv[(ohlcv["timestamp"] >= t0) & (ohlcv["timestamp"] <= t1)]
         token_candles[t] = ap.candles_from_ohlcv(win)
-        # the env trades on a returns-index price `_px` (base 1.0 at the series start); scale it to the
-        # real display basis by k_t = the token's first close, so qty/PnL use the SAME basis the env
-        # executed in (immune to any returns-vs-OHLCV divergence) while markers still sit on the candles.
-        k_t = float(ohlcv["close"].iloc[0]) if len(ohlcv) else 1.0
+        # markers sit at the REAL candle close of each fill's bar so they land ON the candles. PnL comes
+        # from token_pnl.json (the env's exact ledger), NOT reconstructed from these prices: the env
+        # executes on a returns-index `_px` that can drift from the OHLCV, and the old code recorded
+        # `f["px"] * first_close` — a display-basis index mis-scaled by the GLOBAL first close, which
+        # floated markers off the candles by (first_close / window_start_close). A marker is a LOCATION.
         marks = []
         for r in records:
-            if "fills" in r:                                  # event-env: TRUE per-fill time + _px-basis price
+            if "fills" in r:                                  # event-env: TRUE per-fill time
                 for f in r["fills"]:
                     if f["token"] != t:
                         continue
-                    marks.append({"time": f["time"], "price": f["px"] * k_t,
+                    marks.append({"time": f["time"], "price": _price_at(win, f["time"]),
                                   "side": "buy" if f["usd"] > 0 else "sell", "usd": abs(f["usd"]),
                                   "fee": f["fee"], "weight": r["weights"].get(t, 0.0)})
             else:                                             # legacy path (rung-0 / PortfolioEnv records)
