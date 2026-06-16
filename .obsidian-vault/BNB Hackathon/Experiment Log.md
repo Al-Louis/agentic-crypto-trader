@@ -340,9 +340,11 @@ as the lever and explains every prior corner:
    `cush>0 & rising & ema_up` gate **already harvested the entry-cush alpha** — exactly the structural
    worry in the hypothesis, now confirmed empirically.
 
-**This rediscovers TradeSim's #1 hard lesson** ([[AI Training]]): *entry timing never clearly beat random;
-exits/risk-management carried performance.* The arc spent exp1→exp4 trying to make RL out-discriminate the
-rule on **entry sizing** — the one lever that lesson says has no edge.
+**This is a project-grounded finding (the probe above), and it is the OPPOSITE of "entry doesn't matter":**
+rung-0's `cush>0 & rising & ema_up` ignition gate has ALREADY harvested the entry-cush alpha — the entry
+edge lives in the rule's ignition selection/timing. What's thin is *re-discriminating among the rule's
+already-gated entries by SIZING alone* (the exp1→exp4 arc) — a smaller lever on top of the entry edge, not
+evidence against entry timing.
 
 **The corrected process gate (replaces the free-ignition preflight, which false-PASSed exp3 AND exp4):**
 no sweep until an **in-env landscape** check — scripted agents (rule-mimic / all-big / all-small /
@@ -597,8 +599,8 @@ Buy&Hold in the bull.** Decision pending (loop both agents with this result).
 > (−5.1% vs −4.6%). Also fixed: `rung0_baseline` used `select_vol_tokens` (full-window std = LOOKAHEAD),
 > inflating the bar (test +29% lookahead → +18% causal). **Every model above trained in the broken env
 > — the "survives crashes, can't beat Buy&Hold in the bull" plateau is very plausibly this bug giving
-> back every winner.** TradeSim's #1 lesson (exits carried performance) — and our exit was the broken
-> one. Re-run everything on the fixed env. Regression: `test_trailing_stop_fires_off_peak_not_entry`.
+> back every winner** — the trailing-stop exit was anchored to entry, not the running peak ("sell
+> the bottom"). Re-run everything on the fixed env. Regression: `test_trailing_stop_fires_off_peak_not_entry`.
 > See [[env-exit-stop-bug-fixed]]. The ENTRY side (agent rides rung-0's momentum, can't buy dips) is the
 > next frontier — the user wants the agent to own entry/exit TIMING (buy low, sell high), not just sizing.
 
@@ -1544,3 +1546,34 @@ NO verdict yet; no result number exists for it.**
 The purpose: convert the control's *unexplained* val edge into a *skill-grounded* one **before** betting the
 unspent frozen test on it, so a test pass (if it comes) generalizes rather than repeats the s0 val-pocket
 pattern. → [[AI Training]] §"As-built (2026-06-16)".
+
+## 2026-06-16 — GUARDRAIL BUG FIXED: the intrabar disaster floor cut equity but DROPPED its sell marker
+
+A 3-seed forensic on `ppo-event-rdLe4-ef` (the run above; `intrabar_floor=True, loss_floor=0.20`) found
+SIREN riding to **−78/−79%** and Q to **−50/−53% below entry** with **no sell marker, OPEN at window end,
+on every seed** — the floor looked like it never cut them. Root-caused and fixed in
+`src/trader/train/event_env.py::step` (no change to the floor's value or semantics — the floor was
+*reached*, its **marker was lost**):
+
+- **Root cause.** `step()` snapshotted `traded = list(self._trades)` and built `info["trades"]` **before**
+  calling `self._advance_to_event()`. The **intrabar resting-stop floor (path A)** lives *inside*
+  `_advance_to_event` (the forward roll between events); when it force-cut a deep loser it appended the
+  closing SELL to `self._trades` — but that happened **after** the snapshot, so the marker never reached
+  `info["trades"]`, and the next `step()`'s `self._trades = []` wiped it. The position **was** removed from
+  the live book and equity (the floor DID fire), but in the **recorded marker/weights stream** it rode OPEN
+  to the window end with no sell. The close-only paths (B in `_do_exit`, C in `_scan_bar`) were unaffected
+  because they fire during the decision, *before* the snapshot — which is why the bug only showed on
+  `intrabar_floor=True` runs.
+- **Fix (minimal).** Move the `traded`/`weights` capture to **after** `_advance_to_event()`, so any floor
+  fill during the forward roll is folded into that step's record. Reward machinery (`_eq_mark`,
+  `_agent_w_snap`, `_prev_bar`) stays at the pre-advance decision point.
+- **Regression test** = the full-flow repro that would have caught it:
+  `tests/test_rule_default.py::test_floor_force_cuts_overridden_position_and_emits_the_sell_marker`
+  (parametrized intrabar True/False) — a late-igniting token entered near the top, OVERRIDDEN on every exit
+  (idx3 keep-all) so it rides a monotone crash past entry·(1−floor); asserts force-cut from `env.pos` **and**
+  a matching SELL in `info["trades"]` at/under the floor price. Fails on the old ordering (intrabar case),
+  passes after the fix. Suite: **400 passed, 1 skipped**.
+- **Implication.** Past `intrabar_floor=True` forensics that judged the override behavior off the
+  marker/weights stream **under-counted the floor's cuts** — equity/DQ numbers were correct (the cut hit
+  the book), but per-token charts/markers showed phantom open rides. Re-reading SIREN/Q charts on
+  re-exported sims is now safe.

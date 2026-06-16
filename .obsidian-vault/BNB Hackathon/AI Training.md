@@ -64,15 +64,14 @@ satisfy the June 16 PoC gate, which needs a real on-chain trade ([[Tech Stack]])
 ## Post-mortem: hard lessons from TradeSim (carry these, not the optimism)
 
 The prior project shipped a `baseline_handoff.md` (`tradesim_handoff_seed/`) distilling ~40
-iterations and 64 runs. It is the most valuable thing in the seed, and it **corrects** some of
-the optimism elsewhere in this note. Non-negotiable takeaways:
+iterations and 64 runs. The seed is single-asset BTC with a heavy technical-indicator stack — a
+different market and a more complicated training problem — so what carries over is the
+**engineering discipline**, not its strategy conclusions. Non-negotiable discipline takeaways:
 
-- **Entry timing never clearly beat random; *exits / risk-management* carried performance** —
-  best honest outcome was **bull-regime breakeven**. → Treat **entry alpha as an open research
-  question** (the [[Trading Strategies]] edge thesis), weight effort toward exit/risk logic and
-  the survival overlay, and make a **baseline (Buy&Hold / cross-sectional momentum) behind an
-  honest gate** the first validated thing. Our *cross-sectional selection* claim differs from
-  single-asset entry timing — but the skepticism stands.
+- **Make a baseline (Buy&Hold / cross-sectional momentum) behind an honest gate the first
+  validated thing** — prove any edge out-of-sample before trusting it. (Entry timing + sizing
+  ARE the edge in this selective-ignition strategy; the honest gate is how we prove it, not
+  assume it.)
 - **The curriculum was cosmetic.** `CurriculumCallback` only logged phase names; it never
   changed the episode sampler, so the phases were never applied. → Build curriculum as a
   **real, data-driven sampler with a test asserting the sampled distribution shifts per phase**.
@@ -722,8 +721,7 @@ basket (= B&H, cost baked in), and the exit/profit action tables **invert** — 
 deviations trim — so the default action holds and *doing nothing ≈ B&H*. The relative-reward benchmark
 becomes the **held-basket B&H curve** (`_basket_equity_curve`), so a do-nothing agent nets ~0 and *only
 correct tilts score* — a well-posed gradient that directly targets the +13pp. rung-0's ignition/exit
-discretion becomes a **tilt** on top (its real value is the exit/risk side — TradeSim's #1 lesson — now
-additive instead of the whole policy). Flag defaults OFF (378 tests green, prior behavior byte-identical);
+discretion becomes a **tilt** on top (additive instead of the whole policy). Flag defaults OFF (378 tests green, prior behavior byte-identical);
 new flag builds on `rule_default` (discrete 4-level), with `rule_prior` making the untrained policy ≈ B&H.
 Validated on real data: hold-everything == B&H to 5 decimals over 6 cold weeks. Plumbed through the gym
 adapter, `train_event` (`--basket-default` + provenance), and `simulate` provenance.

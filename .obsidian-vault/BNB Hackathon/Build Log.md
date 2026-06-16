@@ -52,9 +52,9 @@ Worked out the *edge* before the plumbing:
 
 Analyzed the prior project's lean handoff; verdict captured in [[Simulated Market]] /
 [[AI Training]]:
-- **Most valuable artifact = the lessons** — esp. *entry timing never beat random; exits /
-  risk-management carried performance* — logged as a research question against our
-  entry-centric edge thesis.
+- **What ports is the engineering discipline** — the seed is single-asset BTC with a heavy
+  technical-indicator stack (a different market and problem), so its value here is the
+  engineering practice listed below, not its strategy-level findings.
 - **Ports clean:** leakage guard, metrics suite, benchmarks/backtester, indicator registry
   (+71-col feature schema), grouped-attention extractor.
 - **Adapt:** broker (AMM slippage), dataset (→ multi-asset), reward (→ ruin-aware).
@@ -971,7 +971,7 @@ failure and its shelving → [[AI Training]].
   bull windows, 10%→30% over 1wk→4wk); `EventRungEnv.set_episode_bars` (shrink-only safe; env built
   at the largest horizon) + gym delegate; `trader.train.curriculum.parse_horizon_schedule`/
   `horizon_at` (torch-free); `HorizonCurriculumCallback` + `--curriculum-horizon` flag + provenance;
-  `launch.REWARD_KEYS` knob. **Two ANTI-COSMETIC tests** (TradeSim's #1 lesson — the sampler
+  `launch.REWARD_KEYS` knob. **Two ANTI-COSMETIC tests** (the curriculum-was-cosmetic lesson — the sampler
   provably MOVES on `set_episode_bars`; the schedule drives each phase once, descending). Flags
   default OFF (byte-identical); 387 tests green.
 - **B&H demoted to a reported reference — in `weekly_gate` ONLY** (`6eda1d5`) — the **DIRECTION
