@@ -73,3 +73,9 @@ class GymEventRungEnv(gym.Env):
     def set_episode_bars(self, n):
         """Delegate the horizon-curriculum hook to the core env (reached via VecEnv.env_method)."""
         self.core.set_episode_bars(n)
+
+    def set_universe_mode(self, mode):
+        """Delegate the universe-curriculum hook to the core env (reached via VecEnv.env_method).
+        gym.Env does NOT forward unknown attributes to `self.core`, so this passthrough is REQUIRED —
+        without it the callback's `env_method('set_universe_mode')` crashes the SubprocVecEnv worker."""
+        self.core.set_universe_mode(mode)

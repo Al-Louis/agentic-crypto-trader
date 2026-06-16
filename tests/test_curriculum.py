@@ -165,3 +165,38 @@ def test_universe_curriculum_pushes_each_phase_once_in_order():
             cur = target
     assert [m for _, m in pushed] == ["lowvol", "broad", "voltopk"]   # each regime once, easy -> deploy
     assert [step for step, _ in pushed] == [0, 350, 650]             # at progress 0.0 / 0.35 / 0.65
+
+
+def test_gym_wrapper_exposes_universe_curriculum_hook():
+    """Regression (the curu smoke EOFError, 2026-06-16): the VecEnv curriculum callback calls
+    env_method('set_universe_mode') on the GYM WRAPPER, not the core env. gym.Env does NOT forward
+    unknown attrs to self.core, so GymEventRungEnv MUST expose the passthrough (mirroring
+    set_episode_bars). Missing it killed the SubprocVecEnv worker mid-training with EOFError."""
+    from trader.train.gym_env import GymEventRungEnv
+    returns, btc, vol, liq = _vol_panel()
+    env = GymEventRungEnv(returns, btc, liq, volume=vol, k=3, ema_span=10, warmup=30,
+                          episode_bars=40, vol_mult=2.5, vol_spk=4, vol_base=20, vol_fast=4,
+                          stop_k=0.1, cooldown=8, universe_mode="voltopk", seed=0)
+    assert hasattr(env, "set_universe_mode") and hasattr(env, "set_episode_bars")
+    env.set_universe_mode("lowvol")
+    assert env.core.universe_mode == "lowvol"             # passthrough reached the core env
+    env.reset(options={"start": 100})
+    assert set(env.core.universe) == {"T0", "T1", "T2"}   # next episode samples the calm regime
+
+
+def test_vecenv_env_method_drives_universe_curriculum():
+    """The EXACT failure path: env_method('set_universe_mode') across a VecEnv must move EVERY
+    sub-env's regime — the UniverseCurriculumCallback's mechanism. (Skipped where sb3 is absent.)"""
+    pytest.importorskip("stable_baselines3")
+    from stable_baselines3.common.vec_env import DummyVecEnv
+
+    from trader.train.gym_env import GymEventRungEnv
+    returns, btc, vol, liq = _vol_panel()
+
+    def mk():
+        return GymEventRungEnv(returns, btc, liq, volume=vol, k=3, ema_span=10, warmup=30,
+                               episode_bars=40, vol_mult=2.5, vol_spk=4, vol_base=20, vol_fast=4,
+                               stop_k=0.1, cooldown=8, universe_mode="voltopk", seed=0)
+    venv = DummyVecEnv([mk, mk])
+    venv.env_method("set_universe_mode", "lowvol")        # what UniverseCurriculumCallback calls
+    assert all(c.universe_mode == "lowvol" for c in venv.get_attr("core"))
