@@ -172,7 +172,7 @@ def eval_regime(eval_r, btc, universe, warmup=WARMUP):
 def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed):
     """Run the policy on one split and grade it through the full honest gate (universe-matched
     Buy&Hold, Random-through-env, rung-0, regime). Returns everything needed to publish + report."""
-    eq, records, universe, fees, raw, _tp = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
+    eq, records, universe, fees, raw, token_pnl = evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs)
     report = PerformanceMetrics.compute_all(eq.to_numpy(), steps_per_year=HOURS_PER_YEAR)
     pol, pol_dd = report.total_return_pct, report.max_drawdown_pct
     uni, caps = eval_universe_and_caps(eval_r, btc, liq, vol, env_kwargs)
@@ -183,7 +183,7 @@ def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed)
     gate_pass, binding = honest_gate(pol, base, bh, rnd, pol_maxdd=pol_dd, rung0_maxdd=base_dd)
     return {"name": name, "eq": eq, "records": records, "universe": universe, "fees": fees, "raw": raw,
             "report": report, "pol": pol, "base": base, "base_dd": base_dd, "bh": bh, "rnd": rnd,
-            "regime": regime, "gate_pass": gate_pass, "binding": binding}
+            "regime": regime, "gate_pass": gate_pass, "binding": binding, "token_pnl": token_pnl}
 
 
 def evaluate_weekly_gate(returns, btc, liq, vol, env_kwargs, make_predict, val_start, test_start,
@@ -572,6 +572,8 @@ def main() -> None:
 
     eq, records, universe, fees, raw, report = (pr["eq"], pr["records"], pr["universe"], pr["fees"],
                                                 pr["raw"], pr["report"])
+    token_pnl = pr["token_pnl"]                            # exact per-token PnL ledger (realized + open
+    #   marked at the LAST bar) — the frontend reads this instead of reconstructing from markers
     metrics = ap.metrics_to_frontend(report)
     metrics["total_fees_paid"] = fees
     pub_r = held[args.eval_split]                          # published window starts at the first
@@ -637,7 +639,7 @@ def main() -> None:
     model_name = f"{args.run_id} @{sha} | {flags} | s{args.seed} {args.timesteps // 1000}k"
     entry = ap.export_portfolio_run(out, args.run_id, equity=eq_pub, metrics=metrics, weights=weights,
                                     token_candles=candles, token_trades=trades, universe=universe,
-                                    model_name=model_name,
+                                    model_name=model_name, token_pnl=token_pnl,
                                     action_mode="event", regime=args.eval_split,
                                     timestamp=datetime.now(timezone.utc).isoformat())
     target = args.publish_target or config.get("APENTIC_PUBLISH_TARGET")

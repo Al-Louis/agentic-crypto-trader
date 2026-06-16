@@ -179,7 +179,8 @@ def _slug(token: str) -> str:
 def export_portfolio_run(out_dir: Path | str, run_id: str, *, equity: pd.Series, metrics: dict,
                          weights: list[dict], token_candles: dict[str, list],
                          token_trades: dict[str, list], universe: list[str], model_name: str,
-                         timestamp: str, action_mode: str = "weights", regime: str = "",
+                         timestamp: str, token_pnl: dict | None = None,
+                         action_mode: str = "weights", regime: str = "",
                          simulation: bool = False) -> dict:
     """Write a **portfolio** run bundle (vs the single-asset `export_run`).
 
@@ -187,6 +188,10 @@ def export_portfolio_run(out_dir: Path | str, run_id: str, *, equity: pd.Series,
       - metrics.json / equity_curve.json     — portfolio NAV + risk panel
       - weights.json                         — allocation over time: ``[{time, weights:{sym:w}}]``
       - run_info.json                        — model + ``universe`` ([{symbol, slug}], action_mode)
+      - token_pnl.json                       — ``{symbol: $pnl}``, the env's EXACT per-token ledger
+        (realized cash flow + any open position marked at the LAST bar — i.e. open lots treated as
+        closed at the final price). The frontend reads PnL from THIS, never reconstructed from the
+        markers (whose ``price`` is a display-basis index, not a clean per-unit price).
       - tk_<slug>_candles.json / _trades.json — per held token: its candles + buy/sell markers
     The frontend renders the allocation view from the first group and the per-token candle+marker
     drill-down from the last. Manifest entry carries ``kind:"portfolio"`` + the universe.
@@ -199,6 +204,7 @@ def export_portfolio_run(out_dir: Path | str, run_id: str, *, equity: pd.Series,
     _dump(run_dir / "metrics.json", metrics)
     _dump(run_dir / "equity_curve.json", equity_points(equity))
     _dump(run_dir / "weights.json", weights)
+    _dump(run_dir / "token_pnl.json", {t: round(float(v), 2) for t, v in (token_pnl or {}).items()})
     _dump(run_dir / "run_info.json",
           {"model_name": model_name, "kind": "portfolio", "action_mode": action_mode,
            "universe": uni, "regime": regime, "n_episodes": 1, "indicators_used": [],

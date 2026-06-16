@@ -148,6 +148,32 @@ def test_export_portfolio_run_writes_allocation_and_per_token_layers(tmp_path):
     assert man[0]["kind"] == "portfolio" and entry["symbol"] == "PORTFOLIO"
 
 
+def test_export_portfolio_run_writes_token_pnl_ledger(tmp_path):
+    # the env's EXACT per-token ledger (realized + open-marked-at-last); the frontend reads PnL from
+    # this, NOT reconstructed from the markers whose price is a display-basis index.
+    idx = pd.RangeIndex(2) * 86400 + 1_700_000_000
+    equity = pd.Series([10_000.0, 10_100], index=idx)
+    m = ap.metrics_to_frontend(PerformanceMetrics.compute_all(equity.to_numpy()))
+    token_pnl = {"ZEC": 161.61, "SIREN": -105.034, "Q": -26.2}
+    ap.export_portfolio_run(
+        tmp_path, "ppo-pnl", equity=equity, metrics=m, weights=[], token_candles={}, token_trades={},
+        universe=["ZEC", "SIREN", "Q"], model_name="PPO", token_pnl=token_pnl,
+        timestamp="2026-06-09T00:00:00+00:00")
+    tp = json.loads((tmp_path / "ppo-pnl" / "token_pnl.json").read_text())
+    assert tp == {"ZEC": 161.61, "SIREN": -105.03, "Q": -26.2}   # cents, sign preserved
+
+
+def test_export_portfolio_run_token_pnl_defaults_to_empty(tmp_path):
+    # backward-compatible: omitting token_pnl still writes the file (empty) so the frontend never 404s
+    idx = pd.RangeIndex(2) * 86400 + 1_700_000_000
+    equity = pd.Series([10_000.0, 10_100], index=idx)
+    m = ap.metrics_to_frontend(PerformanceMetrics.compute_all(equity.to_numpy()))
+    ap.export_portfolio_run(tmp_path, "ppo-empty", equity=equity, metrics=m, weights=[],
+                            token_candles={}, token_trades={}, universe=["ZEC"], model_name="PPO",
+                            timestamp="2026-06-09T00:00:00+00:00")
+    assert json.loads((tmp_path / "ppo-empty" / "token_pnl.json").read_text()) == {}
+
+
 def test_upsert_manifest_replaces_same_id(tmp_path):
     mpath = tmp_path / "manifest.json"
     ap.upsert_manifest(mpath, {"id": "a", "model_name": "v1"})

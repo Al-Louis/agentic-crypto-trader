@@ -169,6 +169,7 @@ def main() -> None:
         entry = ap.export_portfolio_run(base, sim_id, equity=res["eq"].iloc[::6], metrics=metrics,
                                         weights=weights, token_candles=candles, token_trades=trades,
                                         universe=res["universe"], model_name=model_name,
+                                        token_pnl=res["token_pnl"],
                                         action_mode="event", regime=res["regime"]["label"],
                                         simulation=True,
                                         timestamp=datetime.now(timezone.utc).isoformat())
