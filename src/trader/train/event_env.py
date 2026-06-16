@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd
+from trader.train.curriculum import UNIVERSE_MODES
 from trader.train.event_reward import entry_forward_reward
 
 OBS_DIM = 13   # ... rung-0 exposure (0 in absolute mode) + universe breadth (alts' own regime)
@@ -211,6 +212,16 @@ class EventRungEnv:
                              f"warmup={self.warmup})")
         self.episode_bars = n
         self._max_start = new_max
+
+    def set_universe_mode(self, mode: str) -> None:
+        """Universe-curriculum hook: change the universe VOLATILITY regime BETWEEN episodes (takes
+        effect on the next `reset()` via `_pick_universe`, never mid-episode). `lowvol` (the k calmest
+        — learn basics on tractable dynamics) -> `broad` (vol-stratified) -> `voltopk` (the k most
+        volatile: the deploy/eval distribution). Unlike `set_episode_bars` there is NO `_max_start`
+        constraint — it only changes WHICH k tokens `reset()` samples. See `trader.train.curriculum`."""
+        if mode not in UNIVERSE_MODES:
+            raise ValueError(f"universe_mode must be one of {'|'.join(UNIVERSE_MODES)}; got {mode!r}")
+        self.universe_mode = mode
 
     # -- lifecycle ----------------------------------------------------------
     def reset(self, *, start: int | None = None, seed: int | None = None) -> np.ndarray:

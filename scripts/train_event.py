@@ -27,7 +27,8 @@ from trader import config  # noqa: E402
 from trader.report import apentic as ap  # noqa: E402
 from trader.sim.broker import DEFAULT_GAS_USD, DEFAULT_LP_FEE_BPS, amm_cost_usd  # noqa: E402
 from trader.sim.metrics import PerformanceMetrics  # noqa: E402
-from trader.train.curriculum import horizon_at, max_horizon, parse_horizon_schedule  # noqa: E402
+from trader.train.curriculum import (horizon_at, max_horizon, parse_horizon_schedule,  # noqa: E402
+                                     parse_universe_schedule, universe_at)
 
 HOURS_PER_YEAR = 24 * 365
 WARMUP = 168
@@ -257,6 +258,11 @@ def main() -> None:
                    "'672:0.0,336:0.40,168:0.70' (long episodes first teach holding the bull where the "
                    "missed-run cost is in-episode/creditable; anneal to the 1wk deploy shape). '' = OFF "
                    "(constant --episode-bars). The env is built at the LARGEST horizon; it only shrinks.")
+    p.add_argument("--curriculum-universe", default="", help="universe-regime curriculum (2026-06-15): "
+                   "ramp the TRAINING universe through volatility regimes as 'mode:progress' pairs, e.g. "
+                   "'lowvol:0.0,broad:0.35,voltopk:0.65' (the k calmest tokens first to learn basics on "
+                   "tractable dynamics, anneal to the voltopk deploy distribution). '' = OFF (constant "
+                   "--universe-mode). Must END at --universe-mode; EVAL always runs on --universe-mode.")
     p.add_argument("--max-entry-frac", type=float, default=0.34)
     p.add_argument("--stop-k", type=float, default=0.25)
     p.add_argument("--cooldown", type=int, default=48)
@@ -365,6 +371,11 @@ def main() -> None:
                 setattr(args, k, v)
     hsched = parse_horizon_schedule(args.curriculum_horizon)        # [] when OFF
     construct_bars = max_horizon(hsched) if hsched else args.episode_bars   # build env at the LARGEST horizon
+    usched = parse_universe_schedule(args.curriculum_universe)      # [] when OFF
+    construct_universe = usched[0][1] if usched else args.universe_mode   # phase-0 regime for the TRAINING start
+    if usched and usched[-1][1] != args.universe_mode:             # eval runs on --universe-mode, so the
+        raise ValueError(f"--curriculum-universe must END at the deploy --universe-mode "  # ramp must land there
+                         f"({args.universe_mode!r}); schedule ends at {usched[-1][1]!r}")
 
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import BaseCallback
@@ -413,7 +424,8 @@ def main() -> None:
         def _f():
             return Monitor(GymEventRungEnv(train_r, btc, liq, volume=vol,
                                            episode_bars=construct_bars,   # max horizon; curriculum shrinks it
-                                           **{**env_kwargs, "seed": args.seed + rank}))
+                                           **{**env_kwargs, "seed": args.seed + rank,
+                                              "universe_mode": construct_universe}))  # phase-0; curriculum ramps it
         return _f
 
     if args.reexport:                                     # regenerate the bundle from the SAVED policy
@@ -454,6 +466,21 @@ def main() -> None:
                     self._cur = target
                 return True
 
+        class UniverseCurriculumCallback(BaseCallback):
+            """Push the scheduled universe REGIME into every sub-env between episodes — the volatility-
+            axis analog of HorizonCurriculumCallback (mutates which k tokens `reset()` samples via
+            `EventRungEnv.set_universe_mode`; non-cosmetic). Fires only when the target changes; the
+            next reset() picks it up (never mid-episode)."""
+            def __init__(self, schedule, total):
+                super().__init__()
+                self._sched, self._total, self._cur = schedule, max(int(total), 1), None
+            def _on_step(self) -> bool:
+                target = universe_at(self._sched, self.num_timesteps / self._total)
+                if target != self._cur:
+                    self.training_env.env_method("set_universe_mode", target)
+                    self._cur = target
+                return True
+
         lr = args.lr
         if args.lr_end is not None:                        # linear anneal lr -> lr_end (progress: 1->0)
             lr0, lr1 = args.lr, args.lr_end
@@ -476,6 +503,9 @@ def main() -> None:
         if hsched:                                         # ramp episode_bars down across training
             callbacks.append(HorizonCurriculumCallback(hsched, args.timesteps))
             print(f"[curriculum] horizon schedule {hsched} (env built at {construct_bars} bars)")
+        if usched:                                         # ramp the training universe across regimes
+            callbacks.append(UniverseCurriculumCallback(usched, args.timesteps))
+            print(f"[curriculum] universe schedule {usched} (deploy/eval mode {args.universe_mode})")
         model.learn(total_timesteps=args.timesteps, callback=callbacks)
         model.save(os.path.join(out, "policy.zip"))        # persist the trained policy + the obs-
         venv.save(os.path.join(out, "vecnormalize.pkl"))   # normalization stats: re-loadable for the
@@ -588,6 +618,7 @@ def main() -> None:
                              "ent_coef": args.ent_coef, "n_epochs": args.n_epochs, "target_kl": args.target_kl, "lr": args.lr, "lr_end": args.lr_end,
                              "no_btc_obs": args.no_btc_obs, "eval_mode": args.eval_mode,
                              "curriculum_horizon": args.curriculum_horizon,
+                             "curriculum_universe": args.curriculum_universe,
                              "eval_split": args.eval_split}
     eq_pub = eq.iloc[::6]                                   # ~6-bar resolution for the chart
     # self-describing display name: the frontend should never be ambiguous about which run/config it shows

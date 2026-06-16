@@ -53,6 +53,12 @@ def test_reward_args_accept_curriculum_horizon():
     assert args[args.index("--curriculum-horizon") + 1] == "672:0.0,336:0.40,168:0.70"
 
 
+def test_reward_args_accept_curriculum_universe():
+    args = L.build_reward_args({**RDL_CONFIG, "curriculum_universe": "lowvol:0.0,broad:0.35,voltopk:0.65"})
+    assert "--curriculum-universe" in args
+    assert args[args.index("--curriculum-universe") + 1] == "lowvol:0.0,broad:0.35,voltopk:0.65"
+
+
 def test_smoke_forces_continuous_but_sweep_keeps_weekly():
     """The smoke must run the fast, parseable CONTINUOUS eval (its [eval] line carries the action
     distribution the gate reads); the real sweep keeps --eval-mode weekly."""
