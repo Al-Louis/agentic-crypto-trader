@@ -1719,3 +1719,58 @@ cost_px after a scale-in. (d) no add past the per-token cap. (e) flag OFF → by
 **SUCCESS** = on the wkw base, cold-weekly `beats_rung0` + `survives_dq` with HIGHER realized return than wkw
 (it capitalizes on re-ignitions like ZEC Apr 9) and worst-week DD not worse. **KILL** = if it over-pyramids
 (DD up) or doesn't beat wkw → revert, and reconsider the cooldown/reclaimed gates (the 51% bucket) instead.
+
+## 2026-06-17 — BACKFILLED loop verdicts: `ef` (iter-3) REFUTED, `wkw` (iter-4) = best-known
+
+The loop graded iterations 3–4 during the probe/implement detour and auto-advanced without a log write (the
+`ef` launch entry above said "NO verdict yet" and was never closed; `wkw`'s numbers appeared only inside the
+`wtp` comparison). Backfilled from the published bundles (`compare_seeds`, val cold-weekly) — both cross-check
+exactly against the loop-state aggregates.
+
+### `ppo-event-rdLe4-ef-503b784` (iter-3, `reward_mode=entry_forward`) — REFUTED
+
+| seed | return | trades | worst-wk maxDD | Sharpe |
+|------|-------:|-------:|---------------:|-------:|
+| s0 | +15.5% | 53 | 14.8% | 2.68 |
+| s1 | **−14.0%** | 45 | **17.6%** | −2.96 |
+| s2 | +3.4% | 56 | 11.9% | 0.85 |
+| s3 | −3.3% | 82 | 11.0% | −0.54 |
+| **mean** | **+0.4%** | — | worst **17.6%** | — |
+
+Beats the rung-0 RULE (−0.6%) by only **+1.0pt** (`margin_vs_rung0` +0.0096 — a *thin* gate pass) and **ties
+Random discretion (+0.4%)** through the same env: `entry_forward` produced a random-equivalent policy with high
+seed variance (s1 −14% / s0 +15.5%) and the worst drawdown of the family (17.6%). The 3-seed forensic above
+(SIREN −78%, Q −53%, uncut open losers) is the mechanism — crediting per-entry deviation × forward-return shaped
+the ENTRY but left the EXIT unlearned, and the probe verdict proved **the exit is the alpha**: a reward aimed at
+the wrong side. **NOT promoted; `entry_forward` shelved.** vs `wkw` it loses on every axis (lower return, ~2× DD,
+lower margin). Frozen test untouched.
+
+### `ppo-event-rdLe4-wkw-ef0af8f` (iter-4, `wick_reject 0.30→0.25`) — BEST-KNOWN
+
+| seed | return | trades | worst-wk maxDD | Sharpe |
+|------|-------:|-------:|---------------:|-------:|
+| s0 | −2.9% | 83 | 7.6% | −1.03 |
+| s1 | +0.6% | 71 | 6.9% | 0.43 |
+| s2 | +3.9% | 68 | 7.8% | 1.25 |
+| s3 | **+16.5%** | 42 | 7.3% | **5.04** |
+| **mean** | **+4.5%** | — | worst **7.8%** | — |
+
+Beats the rung-0 RULE by **+5.1pts** (`margin_vs_rung0` +0.051) and Random (+3.3%) by +1.2pts; every seed holds
+worst-week DD **< 8%** (DQ-protective, far under the 30% gate). High seed variance remains (s3 carries with
++16.5% / Sharpe 5.04; s0 negative) — a real caveat for any frozen-test spend. Both `ef` and `wkw` badly lag B&H
+(+17.1%) in this +20.6% universe-EW **bull** window — the documented selective-skeleton ceiling (can't ride the
+bull); B&H is reported, never gated. **`wkw` is the best-known and the base for the next experiment.** Loop
+state after backfill: iteration 5, stall 1/3, best_margin = `wkw` +0.051, idle.
+
+## 2026-06-17 — SCALE-IN feature IMPLEMENTED (commit `d68c824`)
+
+The design above is now built. `EventRungEnv` flag **`scale_in` (default OFF → byte-identical)**: a held token
+re-prompts an entry on a fresh ignition only when in profit (`_px[bar] > cost_px`) and under its per-token cap;
+the add blends a new `cost_px` basis (`(usd+size)·_px[bar]/(cur_val+size)`), and the floor / unrealized-gain /
+value sites all reference `cost_px`, so the −20% floor can't be loosened by an add. Plumbed end-to-end:
+`train_event --scale-in` + provenance, `launch` REWARD_KEYS `("--scale-in", bool)`, `simulate` re-export, and
+the gym `**kwargs` passthrough. The rung-0 RULE mirror (`_rule_equity_curve`) is correctly left on `entry_bar`
+(the rule never scales in); `_rotate_for` cannot close the token being added to. **408 tests pass** (5 new:
+in-profit add, no-add-underwater, floor-off-blended-cost, cap-respected, flag-off-byte-identical). Reviewed:
+full diff + every cross-boundary path verified. NEXT: launch `ppo-event-rdLe4-wkw-scale` = `wkw` + `scale_in=True`,
+single variable, on the cold-weekly gate; SUCCESS/KILL per the design above.
