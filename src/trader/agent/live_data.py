@@ -124,14 +124,22 @@ def refresh_anchors(days: int = 10, root: str = ANCHOR_ROOT) -> dict:
 
 def update_live(selection: list[dict], now_wall: int, *, ohlcv_root: str = OHLCV_ROOT,
                 anchor_root: str = ANCHOR_ROOT, features_out: str = FEATURES_OUT,
-                anchor_days: int = 10, logger=print) -> dict:
+                anchor_days: int = 10, min_interval: float = 2.5, logger=print) -> dict:
     """One hourly refresh of all three surfaces, then the factor regen. `now_wall` (unix seconds,
     injectable for tests) gates bar finalization. Returns a per-token appended-bar count + the
-    anchor totals. The caller (the loop) then runs the validated loaders/driver UNCHANGED."""
+    anchor totals. The caller (the loop) then runs the validated loaders/driver UNCHANGED.
+
+    Token fetches are PACED by `min_interval` seconds: GeckoTerminal rate-limits hard (HTTP 429
+    after a handful of rapid calls), so 20 back-to-back fetches would 429 most of them. ~2.5s ×
+    20 tokens ≈ 50s/refresh — well inside the hourly cadence."""
+    import time  # noqa: PLC0415
+
     anchors = refresh_anchors(days=anchor_days, root=anchor_root)
     appended: dict[str, int] = {}
-    for s in selection:
+    for i, s in enumerate(selection):
         sym, pool = s["symbol"], s["pair_address"]
+        if i and min_interval > 0:
+            time.sleep(min_interval)               # pace GeckoTerminal (skip before the first)
         try:
             page = fetch_alt_latest(pool)
             n = append_alt_bars(sym, pool, finalized_bars(page, now_wall), root=ohlcv_root)
