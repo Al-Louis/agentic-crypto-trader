@@ -1,0 +1,89 @@
+# Probe Suite — the alpha-hunt program
+
+Designed **2026-06-17** by an 8-agent quant workflow (recon → per-facet design → adversarial verify → synthesis), grounded in [[AI Training]] §"Probe methodology & scope" and the [[Experiment Log]] findings. Every probe is bound to the **honest gate** (beat the rung-0 RULE OOS + survive the ~30% max-drawdown DQ on the cold-weekly eval; Buy&Hold / Random are *reported*, never the bar). **Thesis guardrail:** the goal is the LEARNED agent, not a new hand rule — every surviving probe must inform an **obs feature** the LSTM conditions on or a **reward shape**, never a fixed gate (fixed gates are the refuted ledger).
+
+## The reframe — the binding constraint is the EXIT REWARD, not information
+
+Findings 1 + 3 (the exit is the alpha; entry selection adds no edge yet) establish that the obs-hypothesis family is largely *exhausted* on this architecture. The single highest-value arm is therefore a **giveback-from-peak reward shape** — validated NOT by a clairvoyant oracle but by a **causal surrogate-exit test**: can an obs-only exit (driven solely by state at bar *b* — giveback, unreal, surge, cush, held_frac) close a *positive OOS-val fraction* of the +12–15% available run-up gap? The oracle "gap closed" number is a **ceiling only**; letting it become a success bar is the exp1→exp5 drift, and the drift alarm is armed against it (and against any re-bind on B&H).
+
+## Trade-scenario taxonomy (the history-labeling library)
+
+Causal definitions; "clean-runner"/"fakeout" labels that use forward bars are for **retrospective labeling only**, never live features.
+
+| Scenario | Causal definition (sketch) | Why it matters |
+|---|---|---|
+| **clean-runner** | ignition → monotone advance to a 72h high, run-up ≥ +10%, never breaches the 25% trailing stop before peak | where the +12–15% uncaptured gap lives — HOLD + SCALE these |
+| **fakeout-reversal** | pop (<+5%) then roll-over breaching loss_floor/stop in 24–48h; fwd-48h strongly negative | the **modal** ignition (38% fwd-48h win rate) — EXIT FAST / SIZE DOWN; green/rising-vol ignitions land here (finding 2) |
+| **multi-leg runner** (ZEC Apr-9 class) | held + in-profit token fires a FRESH ignition mid-move (39% of ignition-bars) | the **premise of `scale_in`** — validated by P-REIGNITE |
+| **climax top / blow-off** | late-in-move bar, stretched run-up, surge *collapsing* from a within-move peak (read UNCLIPPED vrec/vbase — `_surge` clips at 10) | the exhaustion regime to BANK near peak — distinct from the refuted blanket-wick / wick+surge≥8 sellers (those fired on bar shape regardless of move-state) |
+| **slow grind** | steady (non-climactic) volume, surge flat across the move, positive run-up | contrarian-consistent "good" continuation — HOLD/SCALE |
+| **chop / no-follow-through** | bounded oscillation, run-up <+5%, drawdown shallow, never resolves | fee+gas drag regime (the ≥1-trade/day floor forces participation) — minimal sizing; ensure costs hit baselines equally |
+| **detonation trap** | surge≥8 & rising≤−0.15 (already masked by `rising>0` + det_blacklist) | the Q-detonation; must be EXCLUDED from the surge-sizing probe so upper surge bins are the valid-ignition continuum |
+| **spent-move re-buy** (the bleed) | flat cooled token re-igniting after a prior ignition that already paid (ret_since >~10%) | the `cycle_obs` population — sign known (already-paid fwd-24h −6..−7% vs fresh −1..−2%), but bound by the refuted rdLc sweep |
+
+## Prioritized probe suite
+
+Status: ☐ pending · ▶ running · ✅ done · ✗ refuted · ~ inconclusive
+
+| # | Probe | Facet | What it answers | Effort | Decision value | Status |
+|---|---|---|---|---|---|---|
+| 1 | **P-EXIT-REWARD** | exit reward | does a giveback-from-peak reward close a +OOS fraction of the gap via a **causal surrogate** (oracle = ceiling only)? | med | **HIGHEST** — the only arm directly on the alpha | ⚠ 2026-06-17 — **NO-GO** (gate failed): surrogate OOS gap +6.4%, CI straddles 0, single-token, no incremental over giveback, only 20 val trades. Run-up REAL but not learnable on current obs/data |
+| 2 | **P-REIGNITE** | continuation | do held+in-profit re-ignitions (bucket B) beat a matched single-leg control (A) on fwd run-up? | cheap | **VERY HIGH, bidirectional** — gates the live `scale_in` sweep | ✅ 2026-06-17 — **SELECTION refuted** (well-powered null), capacity OPEN |
+| 3 | **P-DECEL** | continuation/exit | does acceleration roll-over (signed v_fast−v_slow) DISCRIMINATE runners from reversals *among bars at the same giveback*? | med | HIGH — a new exit/scale obs slot | ☐ |
+| 4 | **P-SURGE-SHAPE** | entry sizing | is P(+10%)/mean-fwd-48h *non-monotone / decreasing* in surge magnitude among valid ignitions? | cheap | HIGH — reads `env._surge` directly, zero drift | ☐ |
+| 5 | **P-PULLBACK** | entry sizing | do pre-ignition pullback depth + coil (short/long realized-vol ratio) carry continuous fwd IC the obs lacks? | med | MED-HIGH — the contrarian setup state variable | ☐ |
+| 6 | **P-CLUSTER** | entry sizing | is an ISOLATED ignition alpha vs a BROAD co-firing cluster beta froth — surviving a btc_trend partial-effect control? | med | MEDIUM — alpha-vs-beta, on the low-BTC-corr thesis | ☐ |
+| 7 | **P-CYCLE-CI** | entry | which single cycle component (bars- vs ret-since prior ignition) survives CI+FDR? ship one slot or none | cheap | MED-LOW — a re-pass of `probe_knowledge.py`, NOT new | ☐ |
+| 8 | **P-MOVEAGE** | continuation | does causal within-move maturity (÷ token-typical run length) beat the raw `held_frac` obs on Spearman IC? | heavy | LOW-MED — highest leakage; expected INCONCLUSIVE | ☐ |
+
+**Methodological refinements (what makes each honest — folded in by the skeptic pass):**
+- **Continuous IC on a temporal holdout is the PRIMARY deliverable**; bucket grids are human-readable illustration only (thin +10% cells, ~13% base rate, ~321 val ignitions).
+- **Facet-level BH-FDR** (not just within-probe), one pre-registered headline per probe, baselines reported (run_up-so-far-only / held_frac-only / btc_trend-only) so *incremental* value is visible.
+- **Move-clustered / 168h-block / token-paired bootstrap** for autocorrelation; collapse consecutive-bar ignitions on one token to one obs per (token, move).
+- **Pre-registered n-floors → INCONCLUSIVE (not refute, not pass)** below them.
+- P-DECEL: drop the v_fast/v_slow *ratio* (unstable), use the **signed difference**; replace the tautological lead-over-the-stop metric with a **giveback-matched discrimination** test; sign-agnostic (the agent learns the sign).
+- P-EXIT-REWARD: the **oracle dev\*** number is labelled UPPER BOUND; the **causal surrogate OOS gap** is the real metric; per-trade DD augmented with a cold-weekly PORTFOLIO-DD sim (the actual DQ object).
+- P-MOVEAGE: HARD-ASSERT `b0+72 ≤ b` in code + a synthetic unit test; cross-token pooled trailing-median fallback (per-token starves early in a split).
+
+## Execution order
+
+1. **WHILE THE SWEEP TRAINS (cheap, torch-free, no desktop contention):** P-REIGNITE first (gates `scale_in`; a refute prevents a wasted sweep), then P-SURGE-SHAPE (cheapest, reads `_surge` directly), then P-CYCLE-CI (resolves one-slot-or-none + hardens the rdLc caveat).
+2. **THE PRIORITY ARM:** P-EXIT-REWARD — stand up the giveback-from-peak reward via the shared `event_reward.py` pure-function pattern; run the offline landscape with BOTH the oracle upper-bound AND the causal surrogate gap. **Do not launch an exit-reward sweep until the surrogate (obs-only) gap is shown > 0 OOS on val.**
+3. **Medium continuation/entry features in decision-value order:** P-DECEL → P-PULLBACK → P-CLUSTER. Each that survives facet-level FDR becomes a **single-variable** obs add on the `wkw` base (never bundled — the discipline that kept `wkw` clean).
+4. **LAST, only if a continuation feature survives:** P-MOVEAGE (heavy, highest leakage; gated behind Spearman-beats-`held_frac` + the causality assert).
+
+**Sequencing rules:** launch sweeps ONE AT A TIME, single-variable, on the `wkw` base via `scripts/rl_loop.py` (NOT the MCP `rl_loop_*` tools — SSH goes stale); the desktop is a SHARED box (check idle/ask before launch); publish static-JSON from the laptop. The frozen TEST split is spent ONCE, only on the single final champion candidate after the cold-weekly VAL gate passes with paired-bootstrap CI-low > 0 vs rung-0.
+
+## RL integration plan
+
+Priority = the exit. The agent already has the exit head (`_do_exit`/`_do_profit`) and the `giveback` obs slot; what it lacks is (a) a reward crediting banking near the peak and (b) state features that discriminate a runner from a reversal at the exit moment.
+
+1. **Reward shape** — if P-EXIT-REWARD's causal surrogate closes a +OOS-val gap, add a giveback-from-peak / peak-capture term via a NEW pure function in `event_reward.py` (the ONE shared definition imported by both env and preflight — the exp3 false-PASS guard). Sweep `kappa` as a Pareto curve; keep the quadratic `dd_penalty` (`dd_soft` 0.15 → `dd_gate` 0.30) intact so the DQ binding is unchanged. The reward, not a new obs, is the binding constraint.
+2. **Exit/scale obs features** — each continuation feature surviving facet-level FDR with a sign-stable IC gets exactly ONE appended obs slot, added as a SINGLE-VARIABLE flag on `wkw`: acceleration/curvature (P-DECEL) → exit+scale; surge-decay (P-SURGE-SHAPE/P3) → hold-vs-bank; pullback_depth + coil (P-PULLBACK) and cluster_frac partial-effect (P-CLUSTER) → entry sizing. The LSTM learns the (possibly non-monotone, contrarian) MAP.
+3. **Scale-in** — `scale_in` (commit d68c824) launches as `wkw + scale_in` (single variable) ONLY if P-REIGNITE passes; the blended `cost_px` + per-token cap already fence the floor and prevent pyramiding.
+4. **Cycle** — at most ONE `cycle_obs` slot (the P-CYCLE-CI survivor) or none; explicitly NOT a re-run of the refuted rdLc sweep.
+
+**Guardrails on every addition:** tested against the honest gate (paired-bootstrap CI-low vs rung-0), default-OFF/byte-identical until proven, never converted into a fixed gate. If optimizing any added term drives the agent toward buy-everything, the metric is wrong, not the thesis — sound the drift alarm ([[benchmark-driven-drift]]).
+
+## Open risks (the guards)
+
+- **Thin val cells** — +10% events rare (~13% base rate, ~321 val ignitions); several probes will honestly land INCONCLUSIVE. Continuous IC is primary; buckets illustrate.
+- **Multiple comparisons / fishing** — facet-level BH-FDR; one headline per probe; baselines reported.
+- **Autocorrelation pseudo-replication** — move-clustered / 168h-block / token-paired bootstrap; collapse consecutive-bar ignitions.
+- **Oracle leakage** (P-EXIT-REWARD) — the dev\*-exit is clairvoyant; label UPPER BOUND, the surrogate OOS gap is the metric.
+- **Forward-window leakage** (P-MOVEAGE) — bars-to-local-peak peeks; hard-assert `b0+72 ≤ b` + unit test, else KILL.
+- **Universe selection** (verified clean) — `_pick_universe` reads trailing `_std[at-1]`, NOT the full-window vol-rank that once peeked at late pumpers; all probes inherit this; read features as RATIOS within one token (the `_px` r_alt-vs-candle drift).
+- **Regime / scope** — probes use vol-top-8 fixed at split start over ONE continuous window with forward WINDOWS, NOT the cold-weekly $10k-reset rotating-universe deploy structure. A probe edge is necessary but NOT sufficient — every surviving feature must re-clear the honest gate on the cold-weekly eval.
+- **One-week live variance** — the June 22–28 window is a single draw; `wkw`'s edge leans on one seed (s3 +16.5%; s0 −2.9%). Frame DQ-protective worst-week DD as a first-class objective; report paired CI-low, never crown on one lucky week.
+- **Cost realism** — STATIC liquidity caps `amm_cost_usd` realism; in chop, fee+gas drag can masquerade as a deficit vs B&H — apply costs equally to all baselines.
+- **Thesis / metric drift** — `wkw` LAGS B&H (+17.1% vs +20.6% bull); B&H stays reported, never the bar (the buy-everything-overlay lesson).
+
+## Status log
+
+- **2026-06-17** — suite designed (8-agent quant workflow). **P-REIGNITE launched** (torch-free, laptop-local) to validate the just-shipped `scale_in` feature against forward data while the `ppo-event-rdLe4-wsi` (wkw + scale_in) sweep trains. Next cheap probes queued: P-SURGE-SHAPE, P-CYCLE-CI. The priority arm is P-EXIT-REWARD (the exit-reward reframe).
+- **2026-06-17** — **P-REIGNITE DONE (`scripts/probe_reignite.py`, uncommitted): SELECTION premise REFUTED, CAPACITY premise open.** Held + in-profit re-ignitions (bucket B; VAL n=169, TRAIN n=228 — well above the n≥30 floor) carry strong *absolute* run-up (VAL fwd48 +15.7% mean / +11.1% median, 92% win) — adding to a held winner is NOT chasing duds — but **B−A vs fresh single-leg ignitions is a well-powered NULL**: small and every 95% CI straddles 0 on both splits (VAL fwd48 B−A −1.3% [−17.5,+14.5]; surge-matched −3.7%..+4.0%). Held re-ignitions are *not better entries* than fresh → `scale_in` buys **no selection edge**. **Narrative correction:** the ZEC Apr-9 +16.2% poster-child lands in bucket **A** — under the *rule* the prior leg was already stopped out (rule FLAT → fresh entry); the "missed re-ignition" was the *trained s3 agent's* sliver-hold, a different book. **Survives:** the *capacity* premise — the rule funds only ~6–12% of flat ignition candidates (39/637 train, 20/163 val; usually capacity-constrained), so `scale_in` could still help by deploying more capital into the equally-good held-winner stream — a sizing/portfolio question only the `wsi` sweep's equity curves vs the honest gate can judge, NOT a run-up probe. Verdict = **STOP-AND-RECONSIDER on selection**; let the `wsi` sweep finish as the capacity test but temper expectations (a null / slight-negative is consistent); the clearer next big arm is **P-EXIT-REWARD**.
+- **2026-06-17** — **P-EXIT-REWARD DONE (`scripts/probe_exit_reward.py`, uncommitted): NO-GO — do not spend a desktop slot.** Build → 3 adversarial skeptics (leakage SOUND, incremental FLAWED, stats INCONCLUSIVE) → decision NO. The oracle confirms the run-up is **REAL** (+9.3%/trade train, +14.2%/trade val above the rule's ~breakeven). But the CAUSAL surrogate (obs-only, fit-train/eval-val) closes only **+6.4% (H24) / +13.5% (H48)** of the gap; the move/token-clustered **95% CI straddles 0** [−10%,+20.4%]; the entire edge is **one token (Q — leave-it-out → −1.5%, below the rule)**; it wins **<50% of trades** (4/20); and it shows **no significant incremental over the giveback obs the policy already carries** (giveback-dominated logit, fair giveback-logit floor → incremental +12.1% [−23.7%,+70.4%], inside noise). Leakage-clean (independently re-audited, reproduces to the digit; the train-argmax threshold 0.95 ≠ val-argmax 0.75 = the no-peek signature), drift alarm held (oracle = upper-bound only, never the bar). **THE BINDING LIMIT IS DATA/POWER:** the rule funds only **39 train / 20 val closed trades** (~8 token-clusters) of ~952/321 ignitions — >95% of ignitions never become trades an exit can act on. The exit-is-alpha thesis is **unresolved-by-data, NOT refuted**.
+
+## META-FINDING (2026-06-17) — the binding constraint may be CAPACITY / PARTICIPATION
+
+P-REIGNITE and P-EXIT-REWARD independently hit the **same wall**: the rule **trades very little** — it funds only ~5–12% of flat ignition candidates (**39 train / 20 val** closed trades), capacity/rotation-gated (risk-parity caps + 48-bar cooldown + reclaimed gate + swap-weak-for-strong rotation). Consequences: (a) the exit-timing problem is **data-starved** offline (20 val trades); (b) the agent leaves **~95% of the +EV ignition stream untouched**. Both the entry-selection edge (refuted) and the exit-reward edge (not learnable on this book) sit **downstream of a more basic limit: how much of the +EV ignition stream can the agent safely participate in?** `scale_in` (the live `wsi` sweep) is one capacity lever; the 51% flat-skip/cooled bucket and the cooldown/reclaimed/rotation gates are the others. **NEXT research direction: a CAPACITY / PARTICIPATION probe** — are the ~95% unfunded ignitions +EV, and what is the *portfolio-DD* cost of participating in more of them (the real DQ object, not per-trade)? Two caveats on power: the *agent* trades more than the *rule* (its training sees more exit-decisions than the rule's 20-trade book), so the offline exit-probe's power limit is partly an artifact of measuring the rule; and the desktop's highest-*confidence* use right now is the **frozen-TEST spend on `wkw`** (the real OOS check of the best-known, still unspent — the human's one-time, irreversible call).

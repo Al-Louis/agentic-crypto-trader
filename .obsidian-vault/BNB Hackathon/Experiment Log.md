@@ -1774,3 +1774,69 @@ the gym `**kwargs` passthrough. The rung-0 RULE mirror (`_rule_equity_curve`) is
 in-profit add, no-add-underwater, floor-off-blended-cost, cap-respected, flag-off-byte-identical). Reviewed:
 full diff + every cross-boundary path verified. NEXT: launch `ppo-event-rdLe4-wkw-scale` = `wkw` + `scale_in=True`,
 single variable, on the cold-weekly gate; SUCCESS/KILL per the design above.
+
+## 2026-06-17 — PROBE SUITE designed (the alpha-hunt program) → [[Probe Suite]]
+
+An 8-agent quant workflow (recon → per-facet design → adversarial verify → synthesis) produced a
+comprehensive, honest-gate-bound probe suite — full doc in **[[Probe Suite]]**. Headline reframe: the
+binding constraint is the **EXIT REWARD, not information** (findings 1+3 — the exit is the alpha, entry
+selection adds no edge — exhaust the obs-hypothesis family on this architecture). Highest-value arm =
+**P-EXIT-REWARD** (a giveback-from-peak reward, validated by a CAUSAL surrogate-exit gap test, NOT the
+oracle ceiling — the oracle number is a drift trap). 8 ranked probes + an 8-scenario trade-scenario
+taxonomy + an RL-integration plan. Cheap probes to run while the `wsi` sweep trains: **P-REIGNITE**
+(LAUNCHED 2026-06-17 — validates the shipped `scale_in`: held+in-profit re-ignitions vs a matched
+single-leg control; a refute would stop a wasted sweep), **P-SURGE-SHAPE** (surge-magnitude SIZING,
+reads `_surge` directly), **P-CYCLE-CI**. See [[Probe Suite]] for methods, n-floors, FDR/bootstrap
+discipline, the leakage/drift guards, and the live status tracker.
+
+## 2026-06-17 — P-REIGNITE verdict: `scale_in` SELECTION premise REFUTED (capacity premise still open)
+
+Torch-free probe (`scripts/probe_reignite.py`, uncommitted; rule-book held-set replicated from
+`_rule_equity_curve`, token-clustered bootstrap, TEST frozen). Held + in-profit re-ignitions (bucket B)
+vs fresh single-leg ignitions (bucket A), forward run-up:
+- B is strongly **+EV in ABSOLUTE terms** (VAL fwd48 +15.7% mean / +11.1% median, 92% win; n=169 — well
+  above the n≥30 floor) → adding to a held winner is **not** chasing duds.
+- But **B − A is a well-powered NULL**: small, every 95% CI straddles 0 on BOTH train & val (VAL fwd48
+  B−A −1.3% [−17.5,+14.5]; surge-matched −3.7%..+4.0%). Held re-ignitions are **not better entries** than
+  fresh ones → `scale_in` buys **no selection edge**.
+- **Narrative correction:** the ZEC Apr-9 +16.2% poster-child lands in bucket **A**, not B — under the RULE
+  its prior leg was already stopped out (rule FLAT → it was a FRESH entry). The "missed re-ignition" was the
+  *trained s3 agent's* sliver-hold, a different book than the rule's.
+- **Survives = the CAPACITY premise.** The rule funds only ~6–12% of flat ignition candidates (39/637 train,
+  20/163 val) — usually capacity-constrained. `scale_in` could still help by deploying MORE capital into the
+  (equally good) held-winner stream; that is a sizing/portfolio question only the `wsi` sweep's equity curves
+  vs the honest gate can judge — the run-up probe cannot. **VERDICT = STOP-AND-RECONSIDER on selection; let
+  the `wsi` sweep finish as the capacity test, temper expectations (a null / slight-negative is consistent),
+  and treat the EXIT REWARD (P-EXIT-REWARD) as the clearer next big arm.** Full detail: [[Probe Suite]].
+
+## 2026-06-17 — P-EXIT-REWARD verdict: NO-GO on the exit-reward sweep + the CAPACITY meta-finding
+
+Workflow (build → 3 adversarial skeptics: leakage SOUND / incremental FLAWED / stats INCONCLUSIVE → decision **NO**). Probe `scripts/probe_exit_reward.py` (uncommitted), leakage-clean and independently re-audited.
+- **The run-up is REAL** — oracle (clairvoyant peak exit, UPPER BOUND only) captures +9.3%/trade train, +14.2%/trade val above the rule's ~breakeven. The exit-is-alpha thesis is **NOT refuted**.
+- **But it is NOT learnable on current obs/data.** The CAUSAL surrogate (obs-only, fit-train/eval-val) closes only **+6.4% (H24) / +13.5% (H48)** of the gap; move/token-clustered **95% CI straddles 0** [−10%,+20.4%]; the entire edge is **one token (Q — leave-out → −1.5%)**; wins **<50% of trades** (4/20); **no significant incremental over the giveback obs** the policy already carries (giveback-dominated logit). Drift alarm held (oracle never read as the bar).
+- **META-FINDING (the convergence):** P-REIGNITE and P-EXIT-REWARD hit the SAME wall — the rule funds only **39 train / 20 val closed trades** of ~952/321 ignitions (~5–12%), capacity/rotation-gated. The exit problem is data-starved AND ~95% of the +EV ignition stream goes untouched. **The emergent binding constraint is CAPACITY / PARTICIPATION**, upstream of both entry-selection (refuted) and exit-reward (not learnable here). Next direction = a capacity/participation probe (are the unfunded ignitions +EV; portfolio-DD cost of more participation); the live `wsi` (scale_in) sweep is the first capacity data point. Highest-*confidence* desktop use now = the frozen-TEST spend on `wkw` (the real OOS check, still unspent — human's one-time call). Full detail: [[Probe Suite]] §META-FINDING.
+
+## 2026-06-17 — `wsi` (scale_in) verdict: REFUTED on the honest gate (KILL criterion met)
+
+`ppo-event-rdLe4-wsi-2c80d05` (wkw + `scale_in`, single variable), iteration 6, val cold-weekly:
+
+| seed | return | worst-wk maxDD | gate |
+|------|-------:|---------------:|------|
+| s0 | +1.7% | 12.2% | pass |
+| s1 | **−7.1%** | 8.2% | fail |
+| s2 | **−7.1%** | 12.2% | fail |
+| s3 | +1.5% | 9.8% | pass |
+| **mean** | **−2.75%** | worst **12.2%** | **FAIL** |
+
+Loses to the rung-0 RULE (−0.6%) by **−2.17pts** (binding val:rung-0); 2/4 seeds negative. vs the base `wkw`
+(+4.5% mean, +5.1pts, DD 7.84%) `scale_in` is **WORSE on every axis** — lower return AND higher drawdown
+(12.2% vs 7.84%). **KILL criterion MET** (no beat + DD up) → `scale_in` is **refuted; reverted** (flag stays
+default-OFF; the code remains, fenced).
+
+This CONFIRMS P-REIGNITE's forecast (held re-ignitions buy no selection edge) and sharpens it into a capacity
+data point: deploying *more capital into held winners* (the `scale_in` lever) actively HURT — concentration
+raised portfolio DD without raising return. **Not all participation is +EV; concentrating into held positions
+is net-negative.** The broader capacity question (looser cooldown / reclaimed / more DIVERSE positions) is a
+DIFFERENT lever — the running capacity probe ([[Probe Suite]] §META-FINDING). Loop: iteration 6, **stall 2/3**,
+best-known still `wkw` (+5.1pts). HALTED for human direction (capacity-probe result + the frozen-`wkw`-TEST
+question) rather than burning the last patience slot on a hasty proposal.
