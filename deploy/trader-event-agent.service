@@ -1,0 +1,60 @@
+# trader-event-agent.service — the live EVENT-DRIVEN RL champion (ef-s2) paper loop.
+# Replaces the HoldCore placeholder unit (trader-agent.service) for the forward-run.
+# Install: sudo install -m 0644 deploy/trader-event-agent.service /etc/systemd/system/trader-event-agent.service
+# Then:    sudo systemctl daemon-reload && sudo systemctl enable --now trader-event-agent
+#
+# Design (vault: "EC2 Trading Host Runbook" / [[event-forward-run-harness]]):
+# - PAPER mode (TRADER_MODE=paper from the env-file); the event harness has no signing path yet,
+#   so live mode REFUSES loudly. No secret is needed by this unit (no CMC/TWAK for paper) — S3
+#   telemetry publishing uses the instance role, not keys.
+# - Each tick refreshes the data/ panels (GeckoTerminal + ccxt, paced), replays the cold week,
+#   records fills through the guardrails, and publishes trading/ telemetry. Ticks immediately on
+#   start, then hourly at HH:03; a restart re-reads the ledger (crash-safe) and re-ticks at once.
+# - Restart=always is safe: paper fills are re-derived from the deterministic replay + the
+#   append-only ledger; a restart cannot double-record (the fill-diff is keyed on bar timestamp).
+
+[Unit]
+Description=Apentic event-driven RL champion paper loop (ef-s2)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/srv/trader/agentic-crypto-trader
+EnvironmentFile=/etc/trader/trader.env
+Environment=HOME=/srv/trader
+# The deployed checkpoint (edit --run-dir on a redeploy, e.g. to a different run-id).
+ExecStart=/srv/trader/venv/bin/python -m trader.agent.event_agent --run-dir /srv/trader/models/ppo-event-rdLe4-ef-503b784-s2
+Restart=always
+RestartSec=15
+# A tick can take ~1 min (paced data fetch + factor regen + LSTM replay); allow it to finish.
+TimeoutStopSec=120
+
+# --- sandbox / hardening (mirrors trader-agent.service) ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/trader
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+# torch CPU inference does not need W+X; keep the hardening strict.
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target

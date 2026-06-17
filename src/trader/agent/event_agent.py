@@ -133,14 +133,16 @@ def main(argv: list[str] | None = None) -> int:
             signal.signal(sig, lambda *_: stop.set())
         except (ValueError, OSError):
             pass
+    # Tick immediately on startup (catch-up + a fresh heartbeat after any (re)start), THEN settle
+    # into the hourly cadence — a restart never leaves the dead-man stale for up to an hour.
     while not stop.is_set():
-        wait = seconds_until_next_tick(int(_now()), args.interval_secs, args.tick_offset_secs)
-        if stop.wait(wait):                         # interruptible sleep — SIGTERM returns at once
-            break
         try:
             _tick(int(_now()))
         except Exception as e:  # noqa: BLE001 — one bad tick must not kill the loop (dead-man ages)
             print(f"tick error: {e!r}", file=sys.stderr)
+        wait = seconds_until_next_tick(int(_now()), args.interval_secs, args.tick_offset_secs)
+        if stop.wait(wait):                         # interruptible sleep — SIGTERM returns at once
+            break
     print("event-agent stop", file=sys.stderr)
     return 0
 
