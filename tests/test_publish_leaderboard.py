@@ -255,6 +255,29 @@ def test_config_aggregate_matches_via_run_id_prefix_when_label_field_absent():
     assert dq is True
 
 
+def test_resolve_config_guard_override_skips_ledger():
+    # override_mean given -> use the passed values, ignore the ledger entirely (laptop-computed guard).
+    mean, dq, label = pl.resolve_config_guard("ppo-x-cfg-s3", [], override_mean=0.045, override_dq=True)
+    assert mean == 0.045
+    assert dq is True
+    assert label == "ppo-x-cfg"
+
+
+def test_resolve_config_guard_override_dq_false_default():
+    mean, dq, _ = pl.resolve_config_guard("ppo-x-cfg-s3", [], override_mean=-0.0275)
+    assert mean == -0.0275
+    assert dq is False                       # override_dq defaults False (omit --dq-pass => fail)
+
+
+def test_resolve_config_guard_falls_back_to_ledger_without_override():
+    cfg = "cfgZ"
+    rows = [_row(f"{cfg}-s0", cfg, 0.1, True), _row(f"{cfg}-s1", cfg, 0.3, True)]
+    mean, dq, label = pl.resolve_config_guard(f"{cfg}-s1", rows)   # no override -> ledger
+    assert abs(mean - 0.2) < 1e-12
+    assert dq is True
+    assert label == cfg
+
+
 def test_strip_seed_suffix():
     assert pl.strip_seed_suffix("ppo-event-rdLe4-wkw-ef0af8f-s3") == "ppo-event-rdLe4-wkw-ef0af8f"
     assert pl.strip_seed_suffix("ppo-event-rdLe4r-68b268f-s0") == "ppo-event-rdLe4r-68b268f"

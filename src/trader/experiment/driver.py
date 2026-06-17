@@ -31,6 +31,7 @@ EXPERIMENTS = Path("experiments")
 STATE_FILE = "loop_state.json"
 DEFAULT_SEEDS = "0 1 2 3"
 DEFAULT_TIMESTEPS = 1_000_000
+DQ_MAXDD = 0.30   # competition max-drawdown DQ gate (fraction); the leaderboard dq_pass guard
 
 _SEED_TAIL = re.compile(r"-s\d+$")
 
@@ -88,6 +89,36 @@ def _history_results(st: dict) -> list[ExperimentResult]:
             for h in st["history"]]
 
 
+def _best_seed_and_guard(verdict: dict, stamped: str) -> tuple[str | None, float | None, bool]:
+    """From the val regime's per-seed rows, pick the sweep's best seed (max val return) + the config
+    guard (seed-mean return + DQ pass) for the dashboard leaderboard. Computed from the VERDICT the
+    driver already has, so the desktop publish needs no (stale) ledger. (None, None, False) if empty."""
+    rows = [r for r in ((verdict.get("regimes") or {}).get("val") or {}).get("per_seed", [])
+            if isinstance(r.get("return"), (int, float))]
+    if not rows:
+        return None, None, False
+    best = max(rows, key=lambda r: r["return"])
+    seed_mean = sum(r["return"] for r in rows) / len(rows)
+    dds = [r["maxdd"] for r in rows if isinstance(r.get("maxdd"), (int, float))]
+    dq_pass = bool(dds) and all(d <= DQ_MAXDD for d in dds)
+    return f"{stamped}-s{best['seed']}", seed_mean, dq_pass
+
+
+def _leaderboard_publish_cmd(seed_run_id: str, config_seed_mean: float | None, dq_pass: bool,
+                             python: str, workdir: str) -> str:
+    """Build the fire-and-forget desktop command: `simulate_weekly` then `publish_leaderboard` for one
+    seed. PURE so the cross-boundary command string is unit-testable. nohup + `< /dev/null` so the job
+    survives the ssh close (we only ever LAUNCH it — never group-kill, which would also drop tailscaled
+    per the runbook); the only stdout is the launch ack (tiny — MTU-safe)."""
+    import shlex
+    csm = f" --config-seed-mean {config_seed_mean}" if config_seed_mean is not None else ""
+    dq = " --dq-pass" if dq_pass else ""
+    inner = (f"cd {workdir} && {python} scripts/simulate_weekly.py --run-id {seed_run_id} && "
+             f"{python} scripts/publish_leaderboard.py --run-id {seed_run_id}{csm}{dq}")
+    return (f"nohup bash -c {shlex.quote(inner)} > /tmp/leaderboard_{seed_run_id}.log 2>&1 "
+            f"< /dev/null & echo launched:$!")
+
+
 def real_deps() -> dict[str, Callable[..., Any]]:
     """Production wiring: the same cores the MCP tools call (lazy imports — laptop-side)."""
     def launch(item: dict) -> dict:
@@ -120,7 +151,19 @@ def real_deps() -> dict[str, Callable[..., Any]]:
         from trader.mcp_server.server import experiment_record
         return experiment_record(sha_only=True, publish=True)
 
-    return {"launch": launch, "poll": poll, "verdict": verdict, "record": record}
+    def publish_leaderboard(seed_run_id: str, config_seed_mean: float | None, dq_pass: bool) -> dict:
+        # Auto-publish the sweep's best seed to the simulated-trades leaderboard ([[Dashboard
+        # Leaderboard]] §Integration). Fire-and-forget on the DESKTOP (torch for simulate_weekly + the
+        # publish creds): the reply is just the launch ack (MTU-safe). The guard is computed laptop-
+        # side from the verdict and passed via --config-seed-mean (the desktop's committed ledger is
+        # stale and can't resolve it there).
+        from trader.experiment.remote import REMOTE_PYTHON, REMOTE_WORKDIR, run_ssh
+        cmd = _leaderboard_publish_cmd(seed_run_id, config_seed_mean, dq_pass,
+                                       REMOTE_PYTHON, REMOTE_WORKDIR)
+        return {"launched": run_ssh(cmd, timeout=20)}
+
+    return {"launch": launch, "poll": poll, "verdict": verdict, "record": record,
+            "publish_leaderboard": publish_leaderboard}
 
 
 def step(state_dir: Path | str = EXPERIMENTS, *, deps: dict | None = None) -> dict:
@@ -166,6 +209,17 @@ def step(state_dir: Path | str = EXPERIMENTS, *, deps: dict | None = None) -> di
             deps["record"]()
         except Exception as e:  # noqa: BLE001 — ledger refresh is best-effort, never blocks
             st["history"][-1]["record_error"] = str(e)[:160]
+        # Phase 3: auto-publish the sweep's best seed to the dashboard leaderboard (best-effort,
+        # fire-and-forget on the desktop; never blocks the loop — [[Dashboard Leaderboard]]).
+        best, csm, dq = _best_seed_and_guard(v, a["stamped"])
+        pub_fn = deps.get("publish_leaderboard")
+        if best and pub_fn:
+            try:
+                pub = pub_fn(best, csm, dq)
+                st["history"][-1]["leaderboard"] = {"best_seed": best, "config_seed_mean": csm,
+                                                    "dq_pass": dq, **pub}
+            except Exception as e:  # noqa: BLE001 — leaderboard publish is best-effort, never blocks
+                st["history"][-1]["leaderboard_error"] = str(e)[:160]
         decision = decide(_history_results(st), patience=int(st.get("patience", 3)),
                           budget_remaining=st["iteration"] < int(st.get("max_iterations", 12)))
         st["last_decision"] = decision

@@ -164,6 +164,22 @@ def config_aggregate_from_ledger(run_id: str, ledger_rows: list[dict]
     return config_seed_mean, dq_pass, config_label
 
 
+def resolve_config_guard(run_id: str, ledger_rows: list[dict], *,
+                         override_mean: float | None = None, override_dq: bool = False
+                         ) -> tuple[float | None, bool, str | None]:
+    """The config guard `(config_seed_mean, dq_pass, config_label)`, from an OVERRIDE or the ledger.
+
+    The ledger is LAPTOP-authoritative (the rl_loop `record()` appends it laptop-side) but this
+    publish runs on the DESKTOP (creds), whose committed ledger is stale and lacks the recent rows.
+    So the caller — the laptop, or the rl_loop verdict hook — computes the guard from the FRESH
+    ledger and passes it via `override_mean`/`override_dq`; only when no override is given do we read
+    the local ledger (`config_aggregate_from_ledger`). PURE / I/O-free apart from that fallback.
+    """
+    if override_mean is not None:
+        return override_mean, bool(override_dq), strip_seed_suffix(run_id)
+    return config_aggregate_from_ledger(run_id, ledger_rows)
+
+
 def strip_seed_suffix(run_id: str) -> str:
     """``ppo-…-ef0af8f-s3`` -> ``ppo-…-ef0af8f`` (drop a trailing ``-s<digits>``)."""
     import re
@@ -253,6 +269,12 @@ def main() -> None:
     p.add_argument("--ledger", default=DEFAULT_LEDGER, help="path to experiments/ledger.jsonl")
     p.add_argument("--no-publish", action="store_true",
                    help="compute + print the entry/eviction, do NOT PUT or invalidate (laptop-safe)")
+    p.add_argument("--config-seed-mean", type=float, default=None,
+                   help="OVERRIDE the ledger lookup for the config guard. The ledger is laptop-"
+                        "authoritative but this publish runs on the desktop (stale ledger), so the "
+                        "laptop/rl_loop computes the guard from the fresh ledger and passes it here.")
+    p.add_argument("--dq-pass", action="store_true",
+                   help="with --config-seed-mean, sets the entry's dq_pass True (omit => False).")
     args = p.parse_args()
 
     from trader import config
@@ -291,12 +313,15 @@ def main() -> None:
         print(f"[leaderboard] WARNING: no OOS weekly score in meta.windows ({source}); "
               f"entry will sort LAST. Inspect {args.run_id}/simulated_trades.json meta.windows.")
 
-    # --- 2. config 4-seed-mean + dq_pass, from the ledger (the anti-cherry-pick guard) ------------
-    config_seed_mean, dq_pass, config_label = config_aggregate_from_ledger(
-        args.run_id, _load_ledger(args.ledger))
-    if config_seed_mean is None:
-        print(f"[leaderboard] note: config '{config_label}' not in {args.ledger} — "
-              f"config_seed_mean=null, dq_pass=False (the seed still ranks on its own weekly_score).")
+    # --- 2. config 4-seed-mean + dq_pass — the anti-cherry-pick guard (override or ledger) --------
+    config_seed_mean, dq_pass, config_label = resolve_config_guard(
+        args.run_id, _load_ledger(args.ledger),
+        override_mean=args.config_seed_mean, override_dq=args.dq_pass)
+    if args.config_seed_mean is not None:
+        print(f"[leaderboard] config guard from args: config_seed_mean={config_seed_mean} dq_pass={dq_pass}")
+    elif config_seed_mean is None:
+        print(f"[leaderboard] note: config '{config_label}' not in {args.ledger} — config_seed_mean=null, "
+              f"dq_pass=False. Pass --config-seed-mean (computed laptop-side) for the guard.")
 
     # --- 3. build the entry -----------------------------------------------------------------------
     entry = build_entry(args.run_id, weekly_score, cumulative_score, source,
