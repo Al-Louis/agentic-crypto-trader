@@ -1937,3 +1937,32 @@ the ceiling of this substrate**: +5.1pts vs rung-0, DQ-protective 7.84%, and it 
 **NEXT (decision-critical): validate `wkw` on the FROZEN TEST** — the real OOS check of the deployable, still unspent,
 before the live window (Jun 22–28); the human's one-time, irreversible call. (A genuinely NEW obs/feature —
 higher-timeframe, order-flow — could reopen the exit hunt; the current-obs family is what's exhausted.)
+
+## 2026-06-17 — Conditional EMA-break (USER hypothesis): REFUTED — BETA, and the ZEC anchor self-refutes
+
+The user's idea: gate the EMA-break exit on P&L — only honor `cush<0` IF `unreal < -T` (sell at the EMA cross only
+when >T below the buy price), making it a stop-loss instead of a profit-giveback exit. Tested as a faithful rule
+counterfactual (`scripts/probe_ema_cond.py`, T=baseline **bit-identical** to production `run_rung0`) on the cold-weekly
+PORTFOLIO grader; workflow build → 3 skeptics (causality SOUND, alpha-vs-beta FLAWED, dd-realism FLAWED) → decide NO.
+- **No T beats the rule:** every paired weekly edge CI straddles 0 (user's T=0.05: **+0.235% [−1.48, +2.30]**); mean
+  return negative at every T.
+- **BETA, not alpha (triple-decomposed):** OLS market-neutral alpha = **−0.087%/wk (t=−0.08)**; the edge **flips sign
+  with the market** (+1.79% bull / −0.31% flat-down at T=0.05; the 6 bull weeks supply ~199% of the summed edge);
+  corr(edge, market) +0.19→+0.28. The Sharpe/Calmar "lifts" are hollow (bull-sourced, std rose 7.5→9.2%, worstDD unmoved).
+- **DQ NOT relieved:** worst-week DD **35.63% at T=0.05 (slightly WORSE** than baseline 35.53%, still breaches); the DD
+  trap realizes distribution-wide (T=0.05 RAISES DD in 20/23 weeks — longer holds give back more before the trailing
+  stop); down-stress worsens BOTH return and DD. Only the near-disabling T=0.20 drops under the gate (= the
+  already-refuted P-EMABREAK hold-through-all).
+- **THE ZEC ANCHOR SELF-REFUTES.** T=0.05 confirms LOCALLY in the cited Apr-06 week (ZEC realized +150.95 → +207.66,
+  **+56.71** — exactly the hypothesis) BUT summed over all 8 ZEC cold weeks it is **−2462.70 WORSE** — the 2025-12-08
+  week flips a **+194.74 WIN to −2008.52** (holding ZEC through a shallow EMA-break let it fall to the deep trailing
+  stop). The EMA-break that cut the Apr-3 winner early ALSO protected against the Dec-08 disaster; removing it helps one
+  and hurts the other more. A favorable single instance, not a pattern. (One-week-driven both ways: drop Apr-06 → the
+  edge sign-flips negative; drop Apr-13 → every T DQ-safe. n=23, low power.)
+
+**THE LESSON (now triple-confirmed — P-EMABREAK, capacity probe, this):** a FIXED rule cannot harvest the +11–16%
+ignition run-up without picking up bull beta and giving back DD. With P-EXIT-REWARD (the exit-via-REWARD was NO-GO on
+the current obs) and P-EMABREAK (the EMA-break isn't a pathology), the EXIT is comprehensively closed via **both** a
+fixed rule AND a reward on the current obs — the run-up is regime beta. The probe-before-build discipline saved a
+beta-chasing substrate change (a reasonable intuition, tested rigorously, turned out beta + its motivating example
+net-negative). **`wkw` remains the substrate ceiling; the frozen-TEST validation of `wkw` is the move.**
