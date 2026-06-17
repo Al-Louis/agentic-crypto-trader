@@ -1840,3 +1840,60 @@ is net-negative.** The broader capacity question (looser cooldown / reclaimed / 
 DIFFERENT lever — the running capacity probe ([[Probe Suite]] §META-FINDING). Loop: iteration 6, **stall 2/3**,
 best-known still `wkw` (+5.1pts). HALTED for human direction (capacity-probe result + the frozen-`wkw`-TEST
 question) rather than burning the last patience slot on a hasty proposal.
+
+## 2026-06-17 — FORENSIC (wsi-s3 ZEC): the **EMA-break exit (cushion<0)** is what cuts winners — exit-alpha, localized
+
+User flagged wsi-s3's ZEC: good scale-in (BUY Mar 31 02:00 + Apr 1 21:00, blended), then SOLD Apr 3 (03:00 =
+trim to ~1/3; 15:00 = full exit) right before a big run-up; re-bought Apr 9 ~+39% higher. WHY the Apr 3 sells?
+Forensic (CDN bundle `…-wsi-…-s3` + torch-free env replication):
+- **Mechanism = (b) exit-on-weakness via the rung-0 EMA-break (`ema_hit = cushion<0`, `event_env._scan_bar`
+  L396).** ZEC dipped ~8% off its Apr 1 peak and a hair below its EMA on Apr 2 (cushion −0.008/−0.015);
+  with `exit_commit=12` the env re-fired an EMA-break exit prompt every 12 bars (476/488/500/512); the policy
+  HELD the first two, trimmed at 500, cut to flat at 512. Unreal at the sells was only **−0.9% / −1.9%** from
+  blended cost (a breather, not a loss); giveback −7.8% / −8.7% from peak.
+- **RULED OUT with hard evidence:** TP profit-take (max unreal *ever* +7.4%, never reached the +25% rung);
+  **ROTATION** (ZEC was the SOLE holding → 100% cash after the exit; nothing was bought that needed funding,
+  so `_rotate_for` cannot have forced it — this was a DELIBERATE exit, not capacity-driven); loss_floor (px at
+  cost×0.99, nowhere near −20%).
+- **The kicker:** at the full-exit bar **surge was RISING (1.75)** — the ignition was not dead — yet it sold.
+  ZEC then ran 1.12→1.82 (**+60% on blended cost**) over 9 days; the agent sat in cash and re-bought ~30% higher.
+- **ROOT CAUSE:** the EMA-break is a **hair-trigger** that sells shallow below-EMA pullbacks — which
+  [[ignition-edge-is-contrarian-not-strength]] says OUTPERFORM. Entry + scale-in were CORRECT; the EXIT
+  destroyed the trade. The binding exit trigger is `ema_hit`, **NOT** the −25% trailing stop (never close) and
+  **NOT** tp/scale-in (untouched/worked) → do not tweak those.
+- **Fix direction (learned exit timing):** learn to RIDE a shallow below-EMA pullback while the ignition is
+  intact (surge alive / giveback shallow) instead of caving to the EMA-break — via a giveback-penalty reward
+  and/or a shallow-dip-vs-trend-break exit obs (the surge-at-exit discriminator). **CAVEAT:** ONE seed / ONE
+  week / BULL regime (B&H +17% beat all selling) — the *pattern* is durable + matches prior probes, the
+  *magnitude* is regime-flattered. Verify the EMA-break-cuts-winners pattern at the POPULATION level (a probe)
+  before any substrate/reward change; validate cold-weekly. NB this reconciles with P-EXIT-REWARD: that arm
+  measured *timing the peak* (hard, unlearnable on the thin book); THIS is *not selling too early* (the
+  EMA-break premature cut) — a distinct, more tractable sub-problem with a concrete discriminator.
+
+## 2026-06-17 — CAPACITY probe verdict: capacity is NOT the constraint (NULL); the rung-0 RULE itself BREACHES the DQ
+
+Workflow (build → 3 skeptics: causality SOUND, dd-realism SOUND, **selection FLAWED** → decision **NO**). Probe
+`scripts/probe_capacity.py` (uncommitted), production-grader cross-checked. The adversarial verify was decisive.
+- **Capacity never binds.** `capacity-no-rot = rotation-rejected = 0` in BOTH splits — the rule's loser-funded
+  rotation never fails for cash/slots; the binding gates are cooldown / not-reclaimed / already-held, NOT a
+  cash/concurrency ceiling. So there is no capacity ceiling to relieve.
+- **Loosening the gates would fund WORSE ignitions, not equal ones** (methodology catch by the selection skeptic):
+  the build's "uniformly +EV / money on the table" used **max-run-up (positive-by-construction)**; on REALIZABLE
+  **terminal** return every gate-class is negative and the point estimates FLIP (funded beats not-reclaimed/cooldown
+  — VAL t48 funded −2.65% vs not-reclaimed −11.27%, cooldown −23.24%), CIs straddle 0 → **INCONCLUSIVE-on-selection,
+  NOT money on the table.** And `+PARTICIPATION` (cd0/reclaimed-off) WORSENED cold-weekly return at the same DD + same
+  DQ-breach. **Lesson: use terminal/realizable return for selection contrasts, never max-run-up.**
+- **The build's headline "Pareto sizing win" (entry_frac 0.20→0.10: DD 35.5%→19.9%, +1.70%/wk CI-lo>0) is BETA
+  GIVE-UP, not alpha** — the selection skeptic caught it: Sharpe-like mean/std AND Calmar are **invariant** across ef
+  0.20→0.05 (no frontier bend); the "edge" is **−0.48 correlated with the market and LOSES in every bull week**; it's
+  "bet less, lose less" on a negative-expectancy rule. Real DQ *insurance*, NOT capturable alpha. The adversarial
+  verify prevented a wasted false-positive sizing experiment.
+- **DRIFT ALARM (production-grader-confirmed): the rung-0 RULE at default knobs BREACHES the 30% DQ** — worst cold
+  week 2026-04-13 (flat) = **35.53% portfolio DD**, ret −14.58% vs B&H +6.27%. The baseline is **not automatically
+  DQ-safe**; any "beats the rule" must state the rule's own DQ. **`wkw` (the TRAINED agent) is DQ-protective (7.84%)
+  — it FIXES the rule's DQ hole**, which strengthens its champion case.
+- **TRIANGULATION → the frontier is LEARNED EXIT TIMING, not capacity.** The ignition stream is broadly +EV but
+  EVERY mechanical lever (entry filters, tp ladders, trailing-stop sweep, scale_in, and now capacity/sizing) caps
+  near breakeven, and the rule LOSES THE BULL. The one lever the agent can pull that the rule cannot is EXIT
+  discretion (let winners run / cut givebacks) — exactly what **P-EMABREAK** (running) tests. CAVEAT: 23 cold weeks,
+  the DQ driven by ~1 week, VAL Part-A below the n-floor, TEST frozen. Full: [[Probe Suite]].
