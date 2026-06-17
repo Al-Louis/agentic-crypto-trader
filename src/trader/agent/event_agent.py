@@ -65,6 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
                    "+ <run-id>/metrics.json)")
     p.add_argument("--run-id", default=None, help="defaults to the run-dir basename")
     p.add_argument("--once", action="store_true", help="run a single tick then exit (the dry-run gate)")
+    p.add_argument("--now", type=int, default=None, help="override wall-clock 'now' (unix sec) for "
+                   "the --once dry-run, e.g. a timestamp inside recorded data")
     p.add_argument("--interval-secs", type=int, default=HOUR)
     p.add_argument("--tick-offset-secs", type=int, default=DEFAULT_TICK_OFFSET)
     p.add_argument("--no-refresh", action="store_true", help="skip the network data refresh "
@@ -122,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
               f"trades_today={r.trades_today} uni={len(r.universe)}", file=sys.stderr)
 
     if args.once:
-        _tick(int(_now()))
+        _tick(int(args.now if args.now is not None else _now()))
         return 0
 
     stop = threading.Event()
