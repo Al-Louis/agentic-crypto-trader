@@ -97,6 +97,50 @@ def week_starts(idx_secs) -> list[int]:
     return [int(t) for t in idx_secs if int(t) % WEEK_SECS == MONDAY_PHASE]
 
 
+def label_week_split(ws: int, train_end: int, val_end: int) -> str:
+    """Which split a week's START falls in, from the SAME train_rl.time_split boundaries the gate
+    uses (don't hardcode timestamps). `train_end` = train_r.index[-1], `val_end` = val_r.index[-1]
+    (the inclusive last bar of each split). A week starting on/before `train_end` is 'train'; on or
+    before `val_end` (but past train) is 'val'; everything later is the never-touched 'test' OOS.
+    Pure / torch-free so it's unit-testable. Matches trader.train.weekly_eval.split_label semantics."""
+    if ws <= train_end:
+        return "train"
+    if ws <= val_end:
+        return "val"
+    return "test"
+
+
+def summarize_windows(weeks_meta: list[dict]) -> dict:
+    """Aggregate per-week metadata into the 3-window (+ overall) summary for `meta.windows`.
+
+    Input: a list of `{start, split, return, dd}` (one per emitted week). PURE — no torch, no I/O —
+    so the dashboard's overview maths is unit-testable off a synthetic bundle. For each of
+    'train'/'val'/'test' (and 'overall' = every week) emits:
+      ret_sum       sum of per-week raw returns in the window
+      ret_mean      mean per-week return (0.0 for an empty window)
+      worst_week_dd max per-week within-week portfolio max-DD in the window (0.0 if empty)
+      win_rate      fraction of weeks with return > 0 (0.0 if empty)
+      n_weeks       count of weeks in the window
+    """
+    def agg(rows: list[dict]) -> dict:
+        n = len(rows)
+        rets = [float(r["return"]) for r in rows]
+        dds = [float(r["dd"]) for r in rows]
+        ret_sum = sum(rets)
+        return {
+            "ret_sum": ret_sum,
+            "ret_mean": (ret_sum / n) if n else 0.0,
+            "worst_week_dd": max(dds) if dds else 0.0,
+            "win_rate": (sum(1 for x in rets if x > 0) / n) if n else 0.0,
+            "n_weeks": n,
+        }
+
+    by_split = {split: [w for w in weeks_meta if w["split"] == split]
+                for split in ("train", "val", "test")}
+    return {**{split: agg(rows) for split, rows in by_split.items()},
+            "overall": agg(list(weeks_meta))}
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--run-id", required=True)
@@ -115,11 +159,16 @@ def main() -> None:
     prov = prov.get("provenance", prov)
     recurrent, seed = bool(prov.get("recurrent")), int(prov.get("seed", 0))
 
-    from train_rl import build_ohlc_frac_panels, build_portfolio_artifacts, build_volume_panel, load_data
+    from train_rl import (build_ohlc_frac_panels, build_portfolio_artifacts, build_volume_panel,
+                           load_data, time_split)
 
     returns, btc, _anchor, liq = load_data()
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = env_kwargs_from_provenance(prov, returns, build_ohlc_frac_panels)
+
+    # Split boundaries from the SAME train_rl.time_split the gate uses (don't hardcode timestamps).
+    train_r, val_r, _test_r = time_split(returns)
+    train_end, val_end = int(train_r.index[-1]), int(val_r.index[-1])
 
     if recurrent:
         from sb3_contrib import RecurrentPPO
@@ -165,7 +214,15 @@ def main() -> None:
 
         recon_err = abs((START_CAPITAL + recon_pnl) - float(eq.iloc[-1]))
         max_recon = max(max_recon, recon_err)
+        # Within-week PORTFOLIO max-DD + return computed EXACTLY from the env equity (the script has
+        # the real per-bar equity; reconstructing from candles is a scale-mismatched consumer problem).
+        # eq carries the warmup prepad first, so drop it before marking the week.
+        eq_wk = eq.iloc[WARMUP:]
+        dd = float(abs((eq_wk / eq_wk.cummax() - 1.0).min()))
+        wk_return = float(eq.iloc[-1] / START_CAPITAL - 1.0)
         weeks.append({"index": len(weeks), "label": f"W{len(weeks) + 1:02d}", "start": ws, "end": we,
+                      "split": label_week_split(ws, train_end, val_end),
+                      "return": wk_return, "dd": dd,
                       "portfolio_start": START_CAPITAL, "assets": assets})
         flag = "  <-- RECON GAP" if recon_err > RECON_TOL_USD else ""
         print(f"[wk] {datetime.fromtimestamp(ws, timezone.utc).date()} "
@@ -175,11 +232,13 @@ def main() -> None:
     if not weeks:
         raise SystemExit("no full Monday-aligned weeks with warmup found")
 
+    windows = summarize_windows(weeks)   # weeks carry {start, split, return, dd} — exactly the input
     payload = {
         "meta": {"start_capital": START_CAPITAL, "window_start": weeks[0]["start"],
                  "window_end": weeks[-1]["end"], "n_weeks": len(weeks),
                  "candle_interval_seconds": HOUR, "drawdown_limit": DD_LIMIT,
                  "universe_size": len(returns.columns), "source_run": args.run_id,
+                 "windows": windows,
                  "generated": datetime.now(timezone.utc).isoformat()},
         "weeks": weeks,
     }
@@ -188,6 +247,10 @@ def main() -> None:
         json.dump(payload, f, separators=(",", ":"))
     print(f"[sim-weekly] {len(weeks)} weeks -> {out_path} ({os.path.getsize(out_path) // 1024} KB) "
           f"| max recon err ${max_recon:.2f}")
+    for split in ("train", "val", "test", "overall"):
+        w = windows[split]
+        print(f"[windows] {split:7s} n={w['n_weeks']:2d} ret_sum {w['ret_sum']:+.4f} "
+              f"ret_mean {w['ret_mean']:+.4f} worst_dd {w['worst_week_dd']:.4f} win_rate {w['win_rate']:.2f}")
     if max_recon > RECON_TOL_USD:
         print(f"[sim-weekly] WARNING: max reconstruction error ${max_recon:.2f} > ${RECON_TOL_USD} "
               f"- the page's derived PnL diverges from the sim's true equity; investigate before trusting.")
