@@ -1577,3 +1577,67 @@ on every seed** — the floor looked like it never cut them. Root-caused and fix
   marker/weights stream **under-counted the floor's cuts** — equity/DQ numbers were correct (the cut hit
   the book), but per-token charts/markers showed phantom open rides. Re-reading SIREN/Q charts on
   re-exported sims is now safe.
+
+## 2026-06-16 — PROBE SESSION: entries are fine, the EXIT is the learnable alpha (the case for RL, quantified)
+
+Chasing the Q 2026-03-28 trap (a rung-0 ignition at 23:00 that drew −53%) opened a systematic probe
+session on entry/exit logic — all **torch-free**, replaying `EventRungEnv`'s exact `_ignite`/`_px` on
+train+val. Seven probes; the synthesis reframes where the strategy's value lives.
+
+**Q forensic — the wick guard works; the entry was a bar early.** s1 of the running `wkw` run did NOT
+buy the wicked 00:00 bar (close/high 0.740, correctly blocked); it entered the prior **23:00** bar — a
+RED, lower-volume bar that ignited on the *rolling* surge (still hot from 22:00's spike) + the 24-bar
+rising trend + `ema_up` flipping True. Rung-0 doesn't require the trigger bar to be green or to carry
+the fresh spike; it fires on lagging/rolling context. The floor cut the position at −20%.
+
+**Four entry filters — ALL REFUTED; the edge is CONTRARIAN:**
+- GREEN trigger (close>open): green fwd48 −4.4%/−9.6% vs RED −2.5%/−4.7%. Red is better.
+- INCREASING volume (v[b]>v[b−1]): rising-vol fwd48 −5.0% vs declining −2.4% (train); 2-bar-rising worse both splits.
+- blanket wick-EXIT (close/high<0.75): wick bars BOUNCE (+22% val fwd24), don't dump.
+- climactic wick+surge≥8 exit: still bounces (+29% val fwd24). The wick is bearish ONLY on a full ignition (= the `wkw` entry filter).
+Every "buy strength / sell weakness" rule keeps the WORSE bucket. Buying the pullback/calm beats buying the climax. → [[ignition-edge-is-contrarian-not-strength]].
+
+**Run-up profile.** Each ignition averages **+11% (train) / +16% (val)** of available run-up to its
+local high (HMAX 72) — but with a near-equal drawdown (RU/|DR| ≈ 1). The average ignition is a
+symmetric swing; the alpha is not in the entry.
+
+**Velocity-as-SIZING (the one mechanical lever with support).** Extreme velocity (>+9%/4-bar) =
+biggest run-up (+12.8%) but WORST reward/risk (drawdown −15.5%, RU/|DR| 0.82); mid-velocity calmest
+(1.16). Sizing DOWN the rips de-risks without dropping trades — DQ-relevant. (Rare clean profile:
+streak-3+ & mid-vel → ~3% drawdown, RU/DR ~3 in train; val n=3–4, unconfirmed.)
+
+**Exit efficiency — the headline.** The rule's own exit (25% trailing stop + 20% floor) on every ignition:
+
+| split | avail run-up | captured | left-on-table |
+|-------|-------------:|---------:|--------------:|
+| train | +11.1% | **−3.3%** | +14.4% |
+| val   | +15.5% | **−7.5%** | +23.0% |
+
+The 25% stop is so wide it gives the whole move back — captured is NEGATIVE; ~half of >5%-peak entries
+stop out RED. The **exit sweep** (7 stop widths × 4 take-profits, train|val) then shows: **no mechanical
+exit beats ~breakeven.** Best robust = stop 0.05 / tp 20% → train −0.9% | val +0.4% (win 31–39%, median
+NEGATIVE). PERFECT (sell@peak) = +11–16%; PASSIVE(hold) = −3/−5%.
+
+**THE CONCLUSION — the case for RL, now quantified:** entries are fine, mechanical exits cap at
+breakeven, and the ~**+12–15% gap to PERFECT is capturable ONLY by predictive, state-conditioned exit
+timing** — no fixed `stop_k`/take-profit can separate a runner from a reversal at the moment of exit.
+First time we've *measured* why a rule stack can't win here and a learned exit policy can. Point the
+training at the **exit**, not the entry.
+
+**Operative diagnostic:** `tp_rungs` — the env's ONLY sell-into-strength prompts (`event_env`: "exit
+prompts fire on weakness only") — sit at {0.25,0.5,1.0,2.0} (+25%+), but the run-up *peaks at +11–16%*.
+The agent is essentially never prompted to bank the run-up; it only gets weakness-exit prompts AFTER
+the giveback starts. It cannot sell into the strength it sees.
+
+### NEXT EXPERIMENT (queue after `wkw` grades) — `tp_rungs` recalibration
+
+- **LEVER (one variable):** `tp_rungs` {0.25,0.5,1.0,2.0} → **{0.05,0.10,0.15,0.25}** on the best-known
+  config (control `ppo-event-rdLe4-wk`, or `wkw` if it passes). Everything else identical.
+- **HYPOTHESIS:** putting the sell-into-strength prompts where ignitions actually peak (+5–15%) lets the
+  agent LEARN to bank the run-up instead of riding the 25%-stop giveback — moving realized capture from
+  ~breakeven toward the +11–16% available, and trimming the giveback drawdown.
+- **SUCCESS:** cold-weekly `beats_rung0` + `survives_dq`, with higher realized per-trade capture / lower
+  giveback than the control; `deviation_alpha` on the EXIT prompts shows skill (not all-take/all-hold).
+- **KILL:** if the agent corner-solutions the prompts (all-take → sells every winner at +5%; none → no
+  change) or doesn't beat the rule, tp calibration isn't the exit lever → move to an explicit exit-reward
+  shape (giveback penalty / peak-capture credit, the env's `giveback` term).
