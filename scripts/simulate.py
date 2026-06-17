@@ -56,6 +56,7 @@ def env_kwargs_from_provenance(prov: dict, returns, build_ohlc_frac_panels) -> d
               exit_commit=prov["exit_commit"],
               dust_usd=prov["dust_usd"], tp_rungs=[float(x) for x in tp.split(",") if x],
               loss_floor=prov["loss_floor"], det_blacklist=prov["det_blacklist"],
+              scale_in=prov.get("scale_in", False),
               cycle_obs=prov.get("cycle_obs", False), no_btc_obs=prov.get("no_btc_obs", False),
               universe_lookback=prov.get("universe_lookback", 0), seed=prov.get("seed", 0))
     if prov.get("intrabar_floor") or (prov.get("wick_reject") or 0) > 0:

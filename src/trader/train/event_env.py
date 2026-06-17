@@ -73,6 +73,7 @@ class EventRungEnv:
                  det_blacklist: int = 0, det_surge: float = 8.0, det_drop: float = -0.15,
                  low_frac: pd.DataFrame | None = None, intrabar_floor: bool = False,
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
+                 scale_in: bool = False,
                  cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
@@ -106,6 +107,13 @@ class EventRungEnv:
         #   trigger bars (close < (1-wick_reject)*high): the dump is mid-flight at the fill price.
         #   Probe (`probe_wick.py`): rare (~3 events/5mo) and catastrophic every observed time;
         #   the mild version (0.10) is REFUTED — bars closing AT their highs are the worst bucket.
+        self.scale_in = bool(scale_in)                      # ADD to a held WINNER on a fresh ignition:
+        #   `_scan_bar` normally hides a held token's re-ignition (entry prompts fire on flat tokens
+        #   only), so the agent missed a +16% ZEC re-ignition runup. Fenced — a held token re-prompts
+        #   ONLY when in profit (above its blended cost basis) AND under its per-token cap, so the add
+        #   can never average down into the disaster floor or pyramid past the risk-parity ceiling. The
+        #   add BLENDS the cost basis (`cost_px`) so the floor/unrealized/value all reference the true
+        #   weighted basis, not the original entry bar. OFF = byte-identical to the pre-scale-in env.
         if self.intrabar_floor and (low_frac is None or loss_floor <= 0.0):
             raise ValueError("intrabar_floor needs low_frac data AND loss_floor > 0")
         if self.wick_reject > 0.0 and high_frac is None:
@@ -350,7 +358,7 @@ class EventRungEnv:
                 for t in list(self.pos):                    # bar's LOW crossed entry*(1-floor) —
                     p = self.pos[t]                         # not at the next close (the Q hole)
                     j = self.col_ix[t]
-                    floor_px = self._px[p["entry_bar"], j] * (1.0 - self.loss_floor)
+                    floor_px = p["cost_px"] * (1.0 - self.loss_floor)
                     if self._px[self.bar, j] * self._lowf[self.bar, j] <= floor_px:
                         self._stop_fill(t, floor_px)
             eqb = self._equity()
@@ -375,7 +383,7 @@ class EventRungEnv:
             j = self.col_ix[t]
             p["peak_px"] = max(p["peak_px"], self._px[bar, j])   # peak tracks highs even while committed
             floored = (self.loss_floor > 0.0
-                       and self._px[bar, j] < self._px[p["entry_bar"], j] * (1.0 - self.loss_floor))
+                       and self._px[bar, j] < p["cost_px"] * (1.0 - self.loss_floor))
             if (not floored and self.exit_commit > 0
                     and (bar - self._exit_decided.get(t, -10 ** 9)) < self.exit_commit):
                 continue                                         # committed exit decision: not re-prompted
@@ -393,15 +401,24 @@ class EventRungEnv:
                 if p.get("tp_i", 0) >= len(self.tp_rungs):       # strength is now expressible)
                     continue
                 j = self.col_ix[t]
-                unreal = self._px[bar, j] / self._px[p["entry_bar"], j] - 1.0
+                unreal = self._px[bar, j] / p["cost_px"] - 1.0
                 if unreal >= self.tp_rungs[p["tp_i"]]:
                     ev.append(("profit", t))
         for t in self.universe:                                  # fresh ignitions on flat, cooled, reclaimed
-            if t in self.pos or not self.ignite_armed[t]:
+            if not self.ignite_armed[t]:                         # entry edge consumed: no re-prompt
                 continue
             j = self.col_ix[t]
             if not self._ignite[bar, j]:
                 continue
+            if t in self.pos:                                    # already held: a SCALE-IN add, fenced
+                if not self.scale_in:                            # flag off -> held tokens never re-prompt
+                    continue                                     # (byte-identical to the pre-scale-in env)
+                p = self.pos[t]
+                in_profit = self._px[bar, j] > p["cost_px"]      # never average DOWN into the floor
+                cap = self._tok_cap.get(t, self.max_entry_frac) * self._equity()
+                if in_profit and self._pos_value(t) < cap:       # has room under the per-token cap
+                    ev.append(("entry", t))                      # the cooled/reclaimed gates are for
+                continue                                         #   FRESH (flat) entries only
             cooled = (bar - self.cool[t]) >= self.cooldown
             po = self.prior_origin[t]
             reclaimed = po is None or self._px[bar, j] > po
@@ -412,6 +429,7 @@ class EventRungEnv:
     # -- decisions ----------------------------------------------------------
     def _do_entry(self, tok: str, a: float):
         self.ignite_armed[tok] = False                           # consume this ignition edge
+        held = tok in self.pos                                    # scale_in: an ADD to a held winner
         eq = self._equity()
         size = 0.0
         if a >= SKIP_EPS:
@@ -421,6 +439,9 @@ class EventRungEnv:
                 want = frac * eq
             else:
                 want = a * self._tok_cap.get(tok, self.max_entry_frac) * eq
+            if held:                                             # cap the ADD to the cap's REMAINING room
+                want = min(want, max(self._tok_cap.get(tok, self.max_entry_frac) * eq   # so a scale-in
+                                     - self._pos_value(tok), 0.0))                       # never pyramids
             if want > self.cash:                                 # rung-0 loser-funded rotation
                 self._rotate_for(tok, want)
             size = min(want, self.cash)
@@ -429,8 +450,15 @@ class EventRungEnv:
                 c = amm_cost_usd(size, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
                 self.cash -= size + c
                 self._realized[tok] = self._realized.get(tok, 0.0) - (size + c)   # ledger: cash out
-                self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
-                                 "origin": self._px[self.bar, j], "tp_i": 0}
+                if held:                                         # BLEND the cost basis on the add: weight
+                    p = self.pos[tok]                            # the existing value + the new size by px
+                    cur_val = self._pos_value(tok)               # (the floor/unrealized/value all read
+                    p["cost_px"] = (p["usd"] + size) * self._px[self.bar, j] / (cur_val + size)
+                    p["usd"] += size                             #  cost_px after this) — keep entry_bar,
+                else:                                            #  peak_px, origin, tp_i (no new dict)
+                    self.pos[tok] = {"usd": size, "entry_bar": self.bar, "peak_px": self._px[self.bar, j],
+                                     "origin": self._px[self.bar, j], "cost_px": self._px[self.bar, j],
+                                     "tp_i": 0}
                 self._trades.append((tok, size, c, int(self.returns.index[self.bar]),
                                      self._px[self.bar, j]))      # +buy @ the bar's price index
             else:
@@ -444,7 +472,7 @@ class EventRungEnv:
         if p is None:
             return
         if (self.loss_floor > 0.0 and self._px[self.bar, self.col_ix[tok]]
-                < self._px[p["entry_bar"], self.col_ix[tok]] * (1.0 - self.loss_floor)):
+                < p["cost_px"] * (1.0 - self.loss_floor)):
             self._sell_down(tok, 0.0)                            # disaster floor: deep losers cannot be
             return                                               # overridden or trimmed — forced cut
         if a >= HOLD_EPS:                                        # override: hold through
@@ -463,7 +491,7 @@ class EventRungEnv:
         if p is None:
             return
         j = self.col_ix[tok]
-        unreal = self._px[self.bar, j] / self._px[p["entry_bar"], j] - 1.0
+        unreal = self._px[self.bar, j] / p["cost_px"] - 1.0
         while p["tp_i"] < len(self.tp_rungs) and unreal >= self.tp_rungs[p["tp_i"]]:
             p["tp_i"] += 1                                       # consume every rung crossed
         if a >= HOLD_EPS:
@@ -476,7 +504,7 @@ class EventRungEnv:
         full exit. The position's value at the stop = usd * fill_px/entry_px = usd*(1-floor)."""
         p = self.pos[tok]
         j = self.col_ix[tok]
-        val = p["usd"] * fill_px / self._px[p["entry_bar"], j]
+        val = p["usd"] * fill_px / p["cost_px"]
         c = amm_cost_usd(-val, self.liquidity.get(tok, 0.0), self.lp_fee_bps, self.gas_usd)
         self.cash += val - c
         self._realized[tok] = self._realized.get(tok, 0.0) + (val - c)   # ledger: cash in (even at $0)
@@ -527,7 +555,7 @@ class EventRungEnv:
     def _pos_value(self, tok: str) -> float:
         p = self.pos[tok]
         j = self.col_ix[tok]
-        return p["usd"] * self._px[self.bar, j] / self._px[p["entry_bar"], j]
+        return p["usd"] * self._px[self.bar, j] / p["cost_px"]
 
     def token_pnls(self) -> dict:
         """Per-token EXACT PnL = realized cash flow + current open-position value. Sums to
@@ -627,7 +655,8 @@ class EventRungEnv:
             self.cash -= alloc
             self._realized[t] = self._realized.get(t, 0.0) - alloc
             self.pos[t] = {"usd": usd, "entry_bar": self.start, "peak_px": self._px[self.start, j],
-                           "origin": self._px[self.start, j], "tp_i": 0}
+                           "origin": self._px[self.start, j], "cost_px": self._px[self.start, j],
+                           "tp_i": 0}
             self.ignite_armed[t] = False                         # already held -> no immediate entry re-prompt
             self._trades.append((t, usd, c, int(self.returns.index[self.start]), self._px[self.start, j]))
 
@@ -763,7 +792,7 @@ class EventRungEnv:
             surge = float(self._surge[self.bar, j])
             if tok in self.pos:
                 p = self.pos[tok]
-                unreal = float(np.clip(self._px[self.bar, j] / self._px[p["entry_bar"], j] - 1.0,
+                unreal = float(np.clip(self._px[self.bar, j] / p["cost_px"] - 1.0,
                                        -RET_CLIP, RET_CLIP))
                 held_frac = (self.bar - p["entry_bar"]) / max(self.episode_bars, 1)
                 giveback = float(np.clip(self._px[self.bar, j] / p["peak_px"] - 1.0, -CUSHION_CLIP, 0.0))

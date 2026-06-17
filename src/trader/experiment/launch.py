@@ -72,6 +72,7 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "lstm_size": ("--lstm-size", int),
     "intrabar_floor": ("--intrabar-floor", bool),   # the floor as a RESTING STOP (intra-bar fill)
     "wick_reject": ("--wick-reject", float),        # extreme-rejection wick guard on ignitions
+    "scale_in": ("--scale-in", bool),               # ADD to a held winner on a fresh ignition (fenced)
     "cycle_obs": ("--cycle-obs", bool),             # SPENT-MOVE obs (ret/bars since prior ignition)
     "n_epochs": ("--n-epochs", int),                # PPO update conservatism (semi-MDP: few decisions)
     "target_kl": ("--target-kl", float),            # PPO early-stop KL per update

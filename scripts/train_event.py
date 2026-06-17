@@ -326,6 +326,10 @@ def main() -> None:
     p.add_argument("--wick-reject", type=float, default=0.0, help="kill ignitions whose trigger bar "
                    "closed below (1-X)*high (extreme upper-wick rejection = the dump is mid-flight); "
                    "probe-calibrated 0.30; the mild 0.10 version is REFUTED — 0 = off")
+    p.add_argument("--scale-in", action="store_true", help="let the agent ADD to a HELD winner on a "
+                   "fresh ignition (a held token's re-ignition is otherwise invisible — it missed a "
+                   "+16%% ZEC re-ignition runup); fenced: in-profit + under the per-token cap ONLY, so "
+                   "it cannot average down into the disaster floor or pyramid past the risk-parity cap")
     p.add_argument("--eval-prepad", action="store_true", help="serve each eval window's 168-bar signal "
                    "warmup from the TAIL OF THE PRIOR SPLIT (contiguous time), so the published window "
                    "is tradeable from bar 0 — no dead first week on the charts; mirrors live trading, "
@@ -420,6 +424,7 @@ def main() -> None:
                       exit_commit=args.exit_commit, dust_usd=args.dust_usd,
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
+                      scale_in=args.scale_in,
                       cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback,
                       no_btc_obs=args.no_btc_obs, **ohlc_kwargs, seed=args.seed)
 
@@ -618,6 +623,7 @@ def main() -> None:
                              "rule_prior": args.rule_prior, "tp_rungs": args.tp_rungs,
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
                              "intrabar_floor": args.intrabar_floor, "wick_reject": args.wick_reject,
+                             "scale_in": args.scale_in,
                              "det_blacklist": args.det_blacklist, "recurrent": args.recurrent,
                              "lstm_size": args.lstm_size if args.recurrent else None,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,

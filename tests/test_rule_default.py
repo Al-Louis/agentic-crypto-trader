@@ -131,7 +131,8 @@ def test_dust_floor_forces_full_close():
     env.reset(start=40)
     t = env.universe[0]
     bar = env.bar
-    env.pos[t] = {"usd": 24.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0}
+    env.pos[t] = {"usd": 24.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0,
+                  "cost_px": env._px[bar, env.col_ix[t]]}
     env._do_exit(t, RULE_DEFAULT_EXIT_KEEP[1])        # keep 1/3 of ~$24 = $8 < $10 -> full close
     assert t not in env.pos
     assert env.cool[t] == bar
@@ -145,7 +146,7 @@ def test_legacy_defaults_unchanged_trim_still_reanchors():
     j = env.col_ix[t]
     bar = env.bar
     env._px[bar, j] = 1.4
-    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0}
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "cost_px": 1.4}
     env._do_exit(t, 0.5)                              # legacy partial trim
     assert env.pos[t]["peak_px"] == pytest.approx(1.4)  # legacy: re-anchors on the trim
     env.pos[t]["peak_px"] = 2.0
@@ -198,7 +199,8 @@ def test_loss_floor_forces_cut_despite_override():
     t = env.universe[0]
     j = env.col_ix[t]
     bar = env.bar
-    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0, "tp_i": 0}
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0, "tp_i": 0,
+                  "cost_px": env._px[bar, j]}
     px_entry = env._px[bar, j]
     later = bar + 1
     env._px[later, j] = px_entry * 0.75                  # 25% below entry: under the floor
@@ -216,7 +218,7 @@ def test_loss_floor_punctures_the_commit_window():
     j = env.col_ix[t]
     bar = env.bar
     env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, j],
-                  "origin": 1.0, "tp_i": 0}
+                  "origin": 1.0, "tp_i": 0, "cost_px": env._px[bar, j]}
     env._exit_decided[t] = bar                           # freshly committed (e.g. an override)
     env._cush[bar + 3, j] = 0.1                          # above EMA: only the floor can prompt
     env._px[bar + 3, j] = env._px[bar, j] * 0.9          # -10%: above floor -> commit holds
@@ -233,7 +235,8 @@ def test_above_floor_override_still_works():
     t = env.universe[0]
     j = env.col_ix[t]
     bar = env.bar
-    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "tp_i": 0}
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "tp_i": 0,
+                  "cost_px": env._px[bar, j]}
     env._px[bar, j] = env._px[bar, j] * 1.4              # well above entry (a winner in retrace)
     env._do_exit(t, RULE_DEFAULT_EXIT_KEEP[3])           # override allowed
     assert t in env.pos                                  # winner can still be ridden
@@ -279,7 +282,8 @@ def test_intrabar_floor_fills_at_the_stop_not_the_close():
     env.reset(start=90)
     j = env.col_ix["RUN"]
     entry_px = env._px[91, j]
-    env.pos["RUN"] = {"usd": 1000.0, "entry_bar": 91, "peak_px": entry_px, "origin": 1.0, "tp_i": 0}
+    env.pos["RUN"] = {"usd": 1000.0, "entry_bar": 91, "peak_px": entry_px, "origin": 1.0, "tp_i": 0,
+                      "cost_px": entry_px}
     env.bar = 94
     cash0 = env.cash
     env._advance_to_event()                                  # crosses bar 95: low < floor -> fill
@@ -427,3 +431,130 @@ def test_all_default_policy_tracks_the_rule_mirror():
     agent_eq = env._equity()
     rule_eq = env._rule_eq[-1]
     assert agent_eq == pytest.approx(rule_eq, rel=0.02)
+
+
+# --- scale_in: ADD to a held WINNER on a fresh ignition, fenced (in-profit + under-cap only) -------
+
+def _reignite_panel(n=260):
+    """RUN ignites TWICE: a first runup (entry 1), a mild drift up that holds the position in profit
+    (no stop), then a SECOND volume-spike runup (the fresh re-ignition the probe found invisible —
+    the missed +16% ZEC add). Two clean ignition windows (~50-53 and ~107-113), the held position
+    deep in profit at the second."""
+    idx = pd.RangeIndex(n) * 3600
+    rng = np.random.default_rng(0)
+    px = np.ones(n)
+    for i in range(50, 70):          # ignition-1 runup
+        px[i] = px[i - 1] * 1.03
+    for i in range(70, 110):         # mild drift up: stays in profit, no trailing-stop trip
+        px[i] = px[i - 1] * 1.002
+    for i in range(110, 130):        # ignition-2 runup (the re-ignition, while still held + in profit)
+        px[i] = px[i - 1] * 1.03
+    for i in range(130, n):          # sideways
+        px[i] = px[i - 1] * (1.001 if i % 2 else 0.999)
+    cols = {"RUN": pd.Series(px, index=idx).pct_change().fillna(0.0),
+            "C1": pd.Series(rng.normal(0, 0.003, n), index=idx),
+            "C2": pd.Series(rng.normal(0, 0.003, n), index=idx)}
+    returns = pd.DataFrame(cols)
+    btc = pd.Series(np.cumprod(1 + rng.normal(0, 0.004, n)) * 1e4, index=idx)
+    vol = pd.DataFrame({c: pd.Series(100.0, index=idx) for c in cols})
+    vol.loc[idx[46:58], "RUN"] = 500.0    # spike 1 -> ignition window ~50-53
+    vol.loc[idx[106:118], "RUN"] = 500.0  # spike 2 -> ignition window ~107-113
+    liq = {c: 1e9 for c in cols}
+    return returns, btc, vol, liq
+
+
+def _reignite_env(scale_in, **kw):
+    returns, btc, vol, liq = _reignite_panel()
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5,
+                vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0,
+                action_mode="discrete", n_action_levels=4, rule_default=True, scale_in=scale_in)
+    return EventRungEnv(returns, btc, liq, **{**base, **kw})
+
+
+def test_scale_in_held_winner_reignition_blends_cost_and_respects_cap():
+    """Held + in-profit + a fresh ignition + scale_in=True -> an ("entry", RUN) fires; _do_entry
+    BLENDS cost_px (between the old basis and the current price) and total exposure stays <= the cap."""
+    env = _reignite_env(scale_in=True)
+    env.reset(start=40)
+    j = env.col_ix["RUN"]
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    env.step([0])                                        # 1st entry at the rule's sizing
+    cost0 = env.pos["RUN"]["cost_px"]
+    # the SECOND ignition must re-prompt the HELD token (the feature) — invisible without scale_in
+    assert _advance_to(env, "entry", "RUN", filler=0)
+    assert "RUN" in env.pos                              # still held: this is a scale-in, not a fresh buy
+    px_now = env._px[env.bar, j]
+    assert px_now > env.pos["RUN"]["cost_px"]            # the in-profit guard is satisfied
+    eq = env._equity()
+    cap = env._tok_cap.get("RUN", env.max_entry_frac) * eq
+    env._do_entry("RUN", 2.0)                            # 2x rule sizing: a big add, capped to room
+    p = env.pos["RUN"]
+    assert cost0 < p["cost_px"] <= px_now + 1e-9         # blended between the old basis and the add px
+    assert env._pos_value("RUN") <= cap + 1e-6           # the add cannot push exposure past the cap
+
+
+def test_scale_in_underwater_emits_no_entry():
+    """Held but UNDERWATER (below cost_px) at a fresh ignition -> the in-profit guard blocks the add,
+    so _scan_bar emits NO ("entry", RUN) even with scale_in=True (never average down into the floor)."""
+    env = _reignite_env(scale_in=True)
+    env.reset(start=40)
+    env._px = env._px.copy()
+    j = env.col_ix["RUN"]
+    bar = 110                                            # inside the second ignition window
+    assert env._ignite[bar, j]                           # a fresh ignition fires here
+    # held with a cost basis ABOVE the current price -> underwater
+    env.pos["RUN"] = {"usd": 100.0, "entry_bar": 50, "peak_px": env._px[bar, j],
+                      "origin": 1.0, "tp_i": 0, "cost_px": env._px[bar, j] * 1.5}
+    env.ignite_armed["RUN"] = True
+    assert ("entry", "RUN") not in env._scan_bar(bar)    # underwater: the in-profit guard blocks it
+
+
+def test_scale_in_floor_cuts_off_the_blended_cost():
+    """After a scale-in raises cost_px, the disaster floor force-cuts off the BLENDED basis: a price
+    below blended_cost*(1-loss_floor) is a forced full cut, filled relative to the blended cost_px."""
+    env = _reignite_env(scale_in=True, loss_floor=0.2)
+    env.reset(start=40)
+    env._px = env._px.copy()
+    j = env.col_ix["RUN"]
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    env.step([0])
+    assert _advance_to(env, "entry", "RUN", filler=0)
+    env._do_entry("RUN", 2.0)                            # scale in -> blended (higher) cost_px
+    blended = env.pos["RUN"]["cost_px"]
+    bar = env.bar
+    later = bar + 1
+    env._px[later, j] = blended * 0.75                   # 25% below the BLENDED basis: under the floor
+    env.bar = later
+    env._do_exit("RUN", RULE_DEFAULT_EXIT_KEEP[3])       # idx3 = hold/override -> floor overrides it
+    assert "RUN" not in env.pos                           # forced cut off the blended cost_px
+    assert env.cool["RUN"] == later
+
+
+def test_scale_in_cannot_exceed_the_per_token_cap():
+    """A scale-in add is capped to the per-token cap's REMAINING room — even an oversized request
+    (and even with the loser-funded rotation freeing cash) cannot push exposure past the cap."""
+    env = _reignite_env(scale_in=True)
+    env.reset(start=40)
+    j = env.col_ix["RUN"]
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    env.step([0])
+    assert _advance_to(env, "entry", "RUN", filler=0)
+    eq = env._equity()
+    cap = env._tok_cap.get("RUN", env.max_entry_frac) * eq
+    env._do_entry("RUN", 3.0)                            # idx3-scale request, far over the cap
+    assert env._pos_value("RUN") <= cap + 1e-6           # capped at the cap, not pyramided
+
+
+def test_scale_in_off_held_token_gets_no_entry_prompt():
+    """scale_in=False (the default): a held token's fresh re-ignition produces NO entry prompt —
+    byte-identical to the pre-scale-in env (held tokens just `continue` in the entry loop)."""
+    env = _reignite_env(scale_in=False)
+    env.reset(start=40)
+    j = env.col_ix["RUN"]
+    assert _advance_to(env, "entry", "RUN", filler=2)
+    env.step([0])                                        # enter and hold RUN
+    bar = 110                                            # a fresh ignition fires inside window 2
+    assert env._ignite[bar, j]
+    env.ignite_armed["RUN"] = True
+    assert "RUN" in env.pos
+    assert ("entry", "RUN") not in env._scan_bar(bar)    # held + flag off -> never re-prompted
