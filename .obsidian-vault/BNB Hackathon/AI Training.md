@@ -871,3 +871,65 @@ verdict yet — do not present any number for it).**
 The point of `entry_forward` is to convert the control's *unexplained* val edge into a *skill-grounded* one
 before betting the frozen test on it — so that a test pass, if it comes, generalizes rather than repeats the
 s0 val-pocket pattern. Full record + tables: [[Experiment Log]] §2026-06-16.
+
+## Probe methodology & scope — the diagnostic instrument (2026-06-16/17)
+
+The probe-before-build discipline that drove the exit-logic work: before coding any entry/exit rule,
+**characterize the ignition dynamics on real data and let the numbers kill bad ideas cheaply.** This session
+it refuted six plausible-but-losing rules (green-bar / rising-volume / 2-bar-rising entry filters; blanket &
+climactic wick-exits; gentler & aggressive tp ladders) and located the real lever (the **exit**) — at ~30 s
+per probe vs ~2 h per training run. **What a probe covers — and does NOT — is recorded here so future reads
+aren't over-trusted.**
+
+### What a probe measures
+Each probe instantiates `EventRungEnv` (torch-free) on a returns split and reads two precomputed arrays:
+- `env._ignite[bar, token]` — every bar where the **rung-0 signal** fires (`surge ≥ vol_mult & rising>0 &
+  cushion>0 & ema_up`; env defaults: vol_mult 2.5, vol_spk 24 = the 1-day rising window, vol_base 168,
+  vol_fast 4 = the rolling-volume window, ema_span 72).
+- `env._px[bar, token]` — the env's price index (`cumprod(1+r_alt)`), the SAME basis the agent's PnL uses
+  (NOT the raw candle prices).
+It enumerates every ignition for the `env.universe` tokens and measures forward outcomes (run-up to local
+high, drawdown, captured-by-some-exit) over a fixed forward window.
+
+### Scope — what a probe is NOT (read before trusting a finding)
+1. **Not the agent's trades — it's the OPPORTUNITY set.** A probe sees *every* ignition the rung-0 RULE
+   could take, not the RL agent's selective entries/exits/sizing. The numbers are closest to "what the rung-0
+   rule sees." A well-selecting agent can **beat the probe averages** (they average over all ignitions,
+   including junk a good agent would skip) — so a mechanical-exit "breakeven" is a floor, not the agent's
+   ceiling.
+2. **Only the vol-top-8 universe, fixed at the split start.** Not all ~14 pool tokens, and NOT the
+   **weekly-rotating** universe the deployed strategy re-picks each Monday. A token that turns volatile
+   mid-split is invisible to the probe but tradeable live.
+3. **Train + val only, each as one continuous window.** NOT the frozen TEST (reserved), and NOT the
+   cold-weekly session structure ($10k Monday resets) the strategy actually deploys in.
+4. **Forward windows, not real holds.** "Run-up to local high" is the max over a fixed 24/48/72-bar window
+   from entry — the *opportunity*, not however long the agent holds. Captured-return sims apply a fixed exit
+   rule (trailing stop / tp ladder), again not the agent's learned exit.
+5. **`_px` carries the known r_alt-vs-candle drift** (≈ a few %); fine for ratios/forward returns, but
+   absolute levels are the index, not the candle.
+
+### How to run one (reproducible, laptop, torch-free)
+`.venv\Scripts\python.exe -c "..."` with:
+```
+sys.path.insert(0,"scripts"); sys.path.insert(0,"src")
+from train_rl import load_data, time_split, build_volume_panel   # + _load_token_ohlcv for candles
+from trader.train.event_env import EventRungEnv
+returns,btc,_,liq = load_data(); train_r,val_r,test_r = time_split(returns)
+vol = build_volume_panel(list(returns.columns), returns.index)
+env = EventRungEnv(r, btc, liq, volume=vol, episode_bars=len(r)-WARMUP-1, k=8,
+                   warmup=168, universe_mode="voltopk", seed=0)
+env.reset(start=WARMUP)            # no stepping needed — _px/_ignite are built in __init__
+px, ig, uni = env._px, env._ignite, env.universe   # iterate uni x bars where ig[b,j]
+```
+Pattern reference: `scripts/probe_wick.py`. Forward-return basis matches the trainer's own
+`evaluate_event_policy` (same `_px`/`_ignite`), so probe numbers are consistent with training-eval on the
+same window.
+
+### The complementary probe (the realized view — NOT yet run)
+To see the AGENT's *realized* trades vs this opportunity baseline: fetch a published bundle's
+`tk_<slug>_trades.json` + `token_pnl.json` (the env's exact ledger, post the 2026-06-16 export fix) and fold
+into round-trips → realized capture / win-rate / per-token PnL on the **deployed weekly-rotating universe** —
+the piece these opportunity-set probes don't cover.
+
+Findings from the session's probes (run-up profile, "entries fine / exit is the alpha", the refuted levers):
+[[Experiment Log]] §"PROBE SESSION".
