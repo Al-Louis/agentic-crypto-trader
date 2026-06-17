@@ -141,6 +141,19 @@ def summarize_windows(weeks_meta: list[dict]) -> dict:
             "overall": agg(list(weeks_meta))}
 
 
+def week_return_dd(eq) -> tuple[float, float]:
+    """Within-week return + portfolio max-DD from the env's per-bar equity series. `eq` is ALREADY
+    the week's trading bars: evaluate_event_policy seeds the equity trace at reset(start=WARMUP), so
+    it starts at the env's first tradeable bar -- there is NO warmup prepad to drop (an earlier
+    eq.iloc[WARMUP:] dropped the entire week and zeroed every DD). Pure / torch-free (input is a plain
+    pandas Series). return = eq[-1]/START_CAPITAL - 1; dd = worst drawdown from the running peak (>=0)."""
+    if len(eq) == 0:
+        return 0.0, 0.0
+    wk_return = float(eq.iloc[-1] / START_CAPITAL - 1.0)
+    dd = float(abs((eq / eq.cummax() - 1.0).min()))
+    return wk_return, dd
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--run-id", required=True)
@@ -214,12 +227,11 @@ def main() -> None:
 
         recon_err = abs((START_CAPITAL + recon_pnl) - float(eq.iloc[-1]))
         max_recon = max(max_recon, recon_err)
-        # Within-week PORTFOLIO max-DD + return computed EXACTLY from the env equity (the script has
-        # the real per-bar equity; reconstructing from candles is a scale-mismatched consumer problem).
-        # eq carries the warmup prepad first, so drop it before marking the week.
-        eq_wk = eq.iloc[WARMUP:]
-        dd = float(abs((eq_wk / eq_wk.cummax() - 1.0).min()))
-        wk_return = float(eq.iloc[-1] / START_CAPITAL - 1.0)
+        # Within-week return + PORTFOLIO max-DD from the env's EXACT per-bar equity (reconstructing
+        # from candles is a scale-mismatched consumer problem). `eq` is already week-only -- the
+        # equity trace is seeded at reset(start=WARMUP), so do NOT drop another WARMUP (that zeroed
+        # every DD). See week_return_dd.
+        wk_return, dd = week_return_dd(eq)
         weeks.append({"index": len(weeks), "label": f"W{len(weeks) + 1:02d}", "start": ws, "end": we,
                       "split": label_week_split(ws, train_end, val_end),
                       "return": wk_return, "dd": dd,

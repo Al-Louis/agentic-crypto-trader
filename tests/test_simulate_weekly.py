@@ -137,3 +137,23 @@ def test_window_keys_match_contract():
     assert set(w.keys()) == {"train", "val", "test", "overall"}
     for split in w:
         assert set(w[split].keys()) == {"ret_sum", "ret_mean", "worst_week_dd", "win_rate", "n_weeks"}
+
+
+# --- per-week return + drawdown (the eq-based mark) -----------------------------------------------
+
+def test_week_return_dd_uses_full_eq_not_a_dropped_slice():
+    """Regression for the worst_dd=0 bug: evaluate_event_policy's eq is already week-only (seeded at
+    reset(start=WARMUP)), so week_return_dd must mark the FULL series, not eq.iloc[WARMUP:]. A series
+    that rises then dips must report a NONZERO drawdown."""
+    import pandas as pd
+    cap = sw.START_CAPITAL
+    eq = pd.Series([cap, cap * 1.05, cap * 0.98, cap * 1.02])     # peak +5%, dip to -2%, end +2%
+    ret, dd = sw.week_return_dd(eq)
+    assert abs(ret - 0.02) < 1e-12                                # week return = last/cap - 1
+    assert abs(dd - (1.0 - 0.98 / 1.05)) < 1e-12                  # worst DD from the +5% peak (~6.67%)
+    assert dd > 0.0                                               # the bug returned 0.0
+
+
+def test_week_return_dd_empty_is_zeroed():
+    import pandas as pd
+    assert sw.week_return_dd(pd.Series([], dtype=float)) == (0.0, 0.0)
