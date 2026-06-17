@@ -1966,3 +1966,37 @@ the current obs) and P-EMABREAK (the EMA-break isn't a pathology), the EXIT is c
 fixed rule AND a reward on the current obs — the run-up is regime beta. The probe-before-build discipline saved a
 beta-chasing substrate change (a reasonable intuition, tested rigorously, turned out beta + its motivating example
 net-negative). **`wkw` remains the substrate ceiling; the frozen-TEST validation of `wkw` is the move.**
+
+## 2026-06-17 — Reconciliation: `wsi-s3` +109% vs `wk-s0` +91% on the 28-week dashboard is an ARTIFACT
+
+User observed `wsi-s3` (+109%) > `wk-s0` (+91%) on the `simulate_weekly` dashboard (28-week cumulative — seemingly
+contradicting the cold-weekly refutal of `wsi`). Decomposed both published bundles (per-week PnL by split):
+
+| split | n | wsi-s3 | wk-s0 | diff |
+|-------|--:|-------:|------:|-----:|
+| train (in-sample) | 17 | +76.28% | +79.58% | −3.31 |
+| **val** (the gate split) | 6 | −6.33% | −3.66% | **−2.67** |
+| **test** (frozen) | 5 | +39.34% | +13.90% | **+25.44** |
+| OOS (val+test) | 11 | +33.02% | +10.24% | +22.77 |
+
+- The entire +19.5pt gap is OOS, and within OOS it is **entirely the TEST split**. On **VAL (the gate split) `wsi-s3`
+  LOSES by −2.67pts** — matching the cold-weekly refutal exactly.
+- **Concentration:** the +22.77pt OOS edge **collapses to +1.83pts** when ONE week (2026-05-04) is removed; `wsi-s3`
+  wins only **5/11** OOS weeks (coin flip).
+- **Mechanism — a `scale_in` SIZING artifact, not selection:** that week, both models entered the same token (Q) at
+  the same hour; `scale_in` stacked ~**6× the notional** (qty 198k+88k vs wk-s0's 48k) into the same move; Q ripped
+  (+$1665 vs +$371). Leverage-into-a-winner = variance, not an information/timing edge.
+- **Single-seed cherry:** `wsi-s3` (+1.5% val) is the lucky tail of a refuted distribution (seed-mean −2.75%); vs
+  `wk-s0` (+35.3% val) of a +13.66% mean.
+- **Verdict:** the dashboard cumulative is exactly the full-history flattery the arc moved away from; the cold-weekly
+  REFUTAL of `wsi` stands. The +109% = test-only × one-week × sizing-variance × cherry-seed. (Sound the drift alarm if
+  anyone proposes promoting `wsi` on this number — it's "beats on the cumulative dashboard" with no per-split/seed-mean
+  backing, the exp1→exp5 failure mode.)
+- **SURVIVOR (genuinely useful):** `scale_in` is **DD-NEUTRAL** here (worst-week ~−9.3% vs control −10.1%, both well
+  inside the DQ) — not *dangerous*, but its payoff is **uncontrolled bet-sizing variance** (fire-on-ignition stacking,
+  6× into one token). It would need **learned sizing** (size down the rips, cap the stack) to earn a place — consistent
+  with the "sizing/exit is the alpha but must be LEARNED" thread (velocity-as-sizing).
+- **DASHBOARD CAVEAT (verify):** the reconciliation flagged that the published `positions` prices and `candles` closes
+  may be on incommensurable per-asset scales (env `_px` units vs real prices). The PnL-based "overall" numbers are
+  EXACT (recon $0.00), so the comparison stands — but any intra-week **equity/DD widget** that marks positions against
+  candle closes would be garbage. Tension with the ef0af8f marker-price fix → worth a check before trusting DD curves.
