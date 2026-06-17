@@ -18,7 +18,7 @@ Bucket: **`alexlouis-act-private`**, region **us-east-1**, key prefix **`models/
 ```powershell
 aws s3api create-bucket --bucket alexlouis-act-private --region us-east-1
 aws s3api put-public-access-block --bucket alexlouis-act-private `
-  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicAcls=true
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws s3api put-bucket-encryption --bucket alexlouis-act-private `
   --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 ```
