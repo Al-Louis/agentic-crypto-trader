@@ -1641,3 +1641,26 @@ the giveback starts. It cannot sell into the strength it sees.
 - **KILL:** if the agent corner-solutions the prompts (all-take → sells every winner at +5%; none → no
   change) or doesn't beat the rule, tp calibration isn't the exit lever → move to an explicit exit-reward
   shape (giveback penalty / peak-capture credit, the env's `giveback` term).
+
+### wtp verdict (iter-5, 2026-06-17) — did NOT beat wkw; added tail risk
+
+`ppo-event-rdLe4-wtp-ef0af8f` (wkw + tp_rungs {0.05,0.10,0.15,0.25}), cold-weekly:
+
+| seed | return | trades | worst-wk maxDD |
+|------|-------:|-------:|---------------:|
+| s0 | **−9.7%** | 64 | **20.3%** |
+| s1 | **+12.7%** | 47 | 3.8% |
+| s2 | +0.7% | 63 | 10.3% |
+| s3 | +0.9% | 74 | 7.3% |
+| **mean** | **+1.2%** | — | worst **20.3%** |
+
+vs `wkw` (+4.5% mean, worst-wk DD 7.84%): **lower return, much worse tail.** The agent DID take the new
+prompts (trades 47–74 vs wkw ~50) — not a corner-solution — but the outcome is dominated by seed variance:
+s1 shows the lever CAN work (+12.7% at 3.8% DD), while s0 blew up (−9.7%, **20.3% DD**, uncomfortably near
+the 30% DQ line). The aggressive +5–15% calibration over-trades and adds churn/tail risk without a reliable
+capture gain. **NOT promoted** (loop stall 1/3, no new best margin); `wkw` remains best-known. The exit
+hypothesis is NOT refuted (s1) — *this calibration* is too aggressive. Candidate next moves on the `wkw`
+base: a gentler tp set (e.g. {0.10,0.15,0.25,0.50}, prompt at +10–25% not +5%), or the **explicit
+giveback-penalty reward** (a soft exit-timing incentive that doesn't force early sells), or more seeds to
+beat the variance. HALTED for human review (the loop wanted to continue; per direction, the human picks the
+next lever).
