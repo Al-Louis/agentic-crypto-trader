@@ -33,6 +33,7 @@ The ef-s2/wsi-s3 lesson is baked in so a lucky seed of a refuted config can't to
    trades_path: "<run-id>/simulated_trades.json", generated}
   ```
   The dashboard reads this for the overview (no 4.7MB fetch) and loads a `trades_path` only when a seed is selected. Render `weekly_score` as the rank/headline and `cumulative_score` as a secondary stat; `config_seed_mean`/`dq_pass` as the guard.
+- **`simulated_champion.json`** (NEW): the rank-1 entry, published standalone — the **deployable champion** (== the best `weekly_score`). The dashboard/deployment reads this for "the model to deploy"; `publish_leaderboard` rewrites it every publish so it auto-tracks #1. Distinct from the loop's local `experiments/champion.json` (a config-level record the rl_loop uses internally — NOT touched here).
 - **`simulated_models.json`** (existing index): keep, but the selector is now driven by the leaderboard's 3 entries (de-listed seeds drop out).
 
 ## Eviction mechanics

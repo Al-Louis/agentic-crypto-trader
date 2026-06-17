@@ -9,10 +9,11 @@ Phase 3 = the rl_loop verdict-phase hook, out of scope here). For a given seed r
   3. builds the leaderboard entry;
   4. upserts it into the current top-3 (sort by `weekly_score` desc, truncate to 3), identifying any
      EVICTED run-id (was listed, now isn't);
-  5. PUBLISHES the updated leaderboard + appends the evicted file to `orphans.json` (the publish
-     key can PUT but **not byte-delete** — [[apentic-publisher-no-delete]] — so an evicted seed is
-     simply de-listed; its 4.7MB trades file stays orphaned in S3 for a later manual purge), then
-     CloudFront-invalidates both.
+  5. PUBLISHES the updated leaderboard + the rank-1 CHAMPION (`simulated_champion.json` — the model
+     to deploy, == the best `weekly_score`; auto-tracks #1 each publish) + appends the evicted file
+     to `orphans.json` (the publish key can PUT but **not byte-delete** — [[apentic-publisher-no-delete]]
+     — so an evicted seed is simply de-listed; its 4.7MB trades file stays orphaned in S3 for a later
+     manual purge), then CloudFront-invalidates them.
 
   python scripts/publish_leaderboard.py --run-id ppo-event-rdLe4-wkw-ef0af8f-s3 [--no-publish]
 
@@ -50,6 +51,7 @@ sys.path.insert(0, "scripts")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 LEADERBOARD_KEY = "simulated_leaderboard.json"
+CHAMPION_KEY = "simulated_champion.json"   # the rank-1 entry, published standalone (the deploy pick)
 ORPHANS_KEY = "orphans.json"
 DEFAULT_K = 3
 DEFAULT_LEDGER = os.path.join("experiments", "ledger.jsonl")
@@ -345,6 +347,11 @@ def main() -> None:
     if evicted:
         print(f"[leaderboard] EVICTED (de-listed): {evicted} — file(s) orphaned in S3 (no byte-delete).")
 
+    # The CHAMPION is, by definition, the rank-1 entry (the best weekly_score) — the model to deploy.
+    champion = new_list[0] if new_list else None
+    if champion:
+        print(f"[leaderboard] champion (#1) = {champion['run_id']} (weekly_score={champion['weekly_score']})")
+
     # --- 5. publish -------------------------------------------------------------------------------
     if args.no_publish:
         print("[leaderboard] --no-publish: not writing. Computed leaderboard JSON:")
@@ -354,8 +361,16 @@ def main() -> None:
     lb_bytes = json.dumps(new_list, separators=(",", ":")).encode("utf-8")
     put_bytes(target_uri(LEADERBOARD_KEY), lb_bytes,
               content_type="application/json", cache_control=MANIFEST_CACHE_CONTROL)
-
     invalidations = [f"/{LEADERBOARD_KEY}"]
+
+    # The champion = the rank-1 entry, published as its own small artifact so the dashboard /
+    # deployment reads "the model to deploy" directly (no re-ranking). Auto-tracks #1 every publish.
+    if champion:
+        put_bytes(target_uri(CHAMPION_KEY),
+                  json.dumps(champion, separators=(",", ":")).encode("utf-8"),
+                  content_type="application/json", cache_control=MANIFEST_CACHE_CONTROL)
+        invalidations.append(f"/{CHAMPION_KEY}")
+        print(f"[leaderboard] champion published -> {target_uri(CHAMPION_KEY)} ({champion['run_id']})")
     if evicted:
         orphans = _fetch_json(read_uri(ORPHANS_KEY)) or []
         if not isinstance(orphans, list):
