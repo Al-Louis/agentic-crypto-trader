@@ -32,6 +32,26 @@ OBS_DIM = 13   # ... rung-0 exposure (0 in absolute mode) + universe breadth (al
 SURGE_CLIP, CUSHION_CLIP, RET_CLIP = 10.0, 1.0, 5.0
 SKIP_EPS, HOLD_EPS = 0.05, 0.95   # action < SKIP_EPS on entry = skip; >= HOLD_EPS on exit = full hold
 
+# Trade-reasoning capture (eval/recording-only — byte-identical to training; [[Trade Reasoning
+# Capture]]). Each marker carries the deterministic TRIGGER that generated the decision point (the
+# rung-0 rule's "why"). The agent's discretion (size/hold-vs-sell) is recorded as the obs snapshot +
+# action, NOT a reason. The FORCED/DISCRETIONARY split is DERIVED from the code (membership in
+# FORCED_REASONS), never stored twice.
+# entry triggers
+IGNITION = "IGNITION"          # fresh rung-0 ignition on a flat, cooled, reclaimed token
+SCALE_IN = "SCALE_IN"          # fresh ignition on an already-held in-profit token (scale_in flag)
+BASKET_OPEN = "BASKET_OPEN"    # basket_default overlay open at reset
+# exit triggers
+EMA_BREAK = "EMA_BREAK"        # cush<0 (price below EMA) — discretionary
+TRAILING_STOP = "TRAILING_STOP"  # px < peak*(1-stop_k) — discretionary
+PROFIT_TAKE = "PROFIT_TAKE"    # unreal >= tp_rungs[tp_i] — discretionary
+LOSS_FLOOR = "LOSS_FLOOR"      # unreal < -loss_floor (disaster floor) — FORCED
+INTRABAR_STOP = "INTRABAR_STOP"  # intrabar low crossed the resting-stop floor — FORCED
+ROTATION_OUT = "ROTATION_OUT"  # weakest-cushion holding sold to fund a stronger ignition — FORCED
+# FORCED = executes regardless of the agent's action; DISCRETIONARY (the rest) = the agent took the
+# prompt / sized it. Derive the flag from membership; do NOT persist a second `forced` field here.
+FORCED_REASONS = {LOSS_FLOOR, INTRABAR_STOP, ROTATION_OUT}
+
 # rung-1b `rule_default` action tables (discrete, 4 levels): index 0 EXECUTES rung-0's decision —
 # entry at the rule's sizing, exit cut in full — so deviating from the rule is a learned act, never
 # the path of least resistance (the g2b forensics: the policy skipped every strong ignition and
@@ -250,7 +270,8 @@ class EventRungEnv:
         self._exit_decided = {}                                 # tok -> bar of last committed non-cut exit
         self.prior_origin = {t: None for t in self.universe}    # dead-zone: runup origin of last cycle
         self.ignite_armed = {t: True for t in self.universe}    # entry edge: only prompt on a fresh ignite
-        self._queue = []                                        # pending (event_type, tok) on the current bar
+        self._queue = []                                        # pending events on the current bar
+        self._pending_reason, self._pending_both = None, False  # trigger of the pending event (recording)
         self._eq_mark = self.capital
         self._trades = []                                       # trades made in the current step (markers)
         self._eq_trace = [(int(self.returns.index[self.start]), self.capital)]  # per-bar equity (eval)
@@ -315,12 +336,13 @@ class EventRungEnv:
         decision_time = int(self.returns.index[self.bar])
         self._trades = []
         etype, tok = self._pending
+        reason = self._pending_reason                          # the trigger _scan_bar tagged (recording)
         if etype == "entry":
-            self._do_entry(tok, m)
+            self._do_entry(tok, m, reason)
         elif etype == "profit":
-            self._do_profit(tok, m)
+            self._do_profit(tok, m)                            # implicitly PROFIT_TAKE (in _sell_down)
         else:
-            self._do_exit(tok, m)
+            self._do_exit(tok, m, reason)
         eq_post = self._equity()
         self._eq_mark = eq_post
         if self.reward_mode == "relative":
@@ -343,6 +365,22 @@ class EventRungEnv:
         info.update({"trades": traded, "trade_time": decision_time, "weights": weights})
         return self._obs(), float(reward), bool(self._done), info
 
+    def _set_pending(self, event: tuple) -> None:
+        """Unpack a variable-width `_scan_bar` event into the stable `self._pending = (etype, tok)`
+        2-tuple plus the recording-only trigger metadata (`self._pending_reason`, carried into the
+        marker, and `self._pending_both`, the stop+ema co-fire flag for the obs snapshot). Keeping
+        `_pending` a 2-tuple leaves every `etype, tok = self._pending` consumer untouched."""
+        etype, tok = event[0], event[1]
+        self._pending = (etype, tok)
+        if etype == "exit":                                  # ("exit", t, reason, both_stop_ema)
+            self._pending_reason, self._pending_both = event[2], event[3]
+        elif etype == "entry":                               # ("entry", t, IGNITION|SCALE_IN)
+            self._pending_reason, self._pending_both = event[2], False
+        elif etype == "profit":                              # profit prompts are always PROFIT_TAKE
+            self._pending_reason, self._pending_both = PROFIT_TAKE, False
+        else:                                                # ("none", None)
+            self._pending_reason, self._pending_both = None, False
+
     # -- event engine -------------------------------------------------------
     def _advance_to_event(self, first: bool = False):
         """Roll the bar cursor forward (positions drift) until the next decision point, draining any
@@ -350,7 +388,7 @@ class EventRungEnv:
         self._done = False
         while True:
             if self._queue:
-                self._pending = self._queue.pop(0)
+                self._set_pending(self._queue.pop(0))
                 return
             self.bar += 0 if first else 1
             first = False
@@ -365,7 +403,8 @@ class EventRungEnv:
             if self.record_trace:                              # record EVERY advanced bar incl. the FINAL
                 self._eq_trace.append((int(self.returns.index[self.bar]), eqb))   # one — the done-check
             if self.bar >= self.end or eqb <= 1.0:             # used to return FIRST, leaving eq one bar
-                self._done, self._pending = True, ("none", None)   # stale vs the open-position marks
+                self._done = True                              # stale vs the open-position marks
+                self._set_pending(("none", None))
                 return
             self.peak_eq = max(self.peak_eq, eqb)
             if self.reward_mode == "entry_forward":            # mature entries whose forward window elapsed
@@ -377,7 +416,11 @@ class EventRungEnv:
                     self.ignite_armed[t] = True
 
     def _scan_bar(self, bar: int) -> list:
-        """Decision points on `bar`: exits on held positions first, then fresh fundable ignitions."""
+        """Decision points on `bar`: exits on held positions first, then fresh fundable ignitions.
+        Each event carries the deterministic TRIGGER reason it fired on ([[Trade Reasoning Capture]]):
+        exit -> ("exit", t, reason, both_stop_ema) with precedence LOSS_FLOOR>TRAILING_STOP>EMA_BREAK;
+        profit -> ("profit", t); entry -> ("entry", t, SCALE_IN|IGNITION). The reason is recording-
+        only — it does not steer the decision (those branches are unchanged)."""
         ev = []
         for t, p in self.pos.items():                            # update peaks, test exit triggers
             j = self.col_ix[t]
@@ -389,13 +432,14 @@ class EventRungEnv:
                 continue                                         # committed exit decision: not re-prompted
             #                                  (the disaster floor PUNCTURES the commit window)
             if floored:
-                ev.append(("exit", t))
+                ev.append(("exit", t, LOSS_FLOOR, False))        # FORCED — _do_exit re-checks & cuts
                 continue
             stop_hit = self._px[bar, j] < p["peak_px"] * (1.0 - self.stop_k)   # TRAILING stop off the
             #                              peak (matches canonical rung0.py:121 + _rule_equity_curve:400)
             ema_hit = self._cush[bar, j] < 0.0
             if stop_hit or ema_hit:
-                ev.append(("exit", t))
+                reason = TRAILING_STOP if stop_hit else EMA_BREAK   # precedence: stop > ema
+                ev.append(("exit", t, reason, bool(stop_hit and ema_hit)))   # both co-fired? (forensics)
         if self.tp_rungs:                                        # profit prompts: a position crossed its
             for t, p in self.pos.items():                        # next unrealized-gain rung (sell-into-
                 if p.get("tp_i", 0) >= len(self.tp_rungs):       # strength is now expressible)
@@ -403,7 +447,7 @@ class EventRungEnv:
                 j = self.col_ix[t]
                 unreal = self._px[bar, j] / p["cost_px"] - 1.0
                 if unreal >= self.tp_rungs[p["tp_i"]]:
-                    ev.append(("profit", t))
+                    ev.append(("profit", t))                     # profit prompts are always PROFIT_TAKE
         for t in self.universe:                                  # fresh ignitions on flat, cooled, reclaimed
             if not self.ignite_armed[t]:                         # entry edge consumed: no re-prompt
                 continue
@@ -417,19 +461,20 @@ class EventRungEnv:
                 in_profit = self._px[bar, j] > p["cost_px"]      # never average DOWN into the floor
                 cap = self._tok_cap.get(t, self.max_entry_frac) * self._equity()
                 if in_profit and self._pos_value(t) < cap:       # has room under the per-token cap
-                    ev.append(("entry", t))                      # the cooled/reclaimed gates are for
+                    ev.append(("entry", t, SCALE_IN))            # the cooled/reclaimed gates are for
                 continue                                         #   FRESH (flat) entries only
             cooled = (bar - self.cool[t]) >= self.cooldown
             po = self.prior_origin[t]
             reclaimed = po is None or self._px[bar, j] > po
             if self.ungate or (cooled and reclaimed):          # exp5: let the agent gate, not the rule
-                ev.append(("entry", t))
+                ev.append(("entry", t, IGNITION))
         return ev
 
     # -- decisions ----------------------------------------------------------
-    def _do_entry(self, tok: str, a: float):
+    def _do_entry(self, tok: str, a: float, reason: str | None = None):
         self.ignite_armed[tok] = False                           # consume this ignition edge
         held = tok in self.pos                                    # scale_in: an ADD to a held winner
+        reason = SCALE_IN if held else IGNITION                  # the trigger (authoritative from held)
         eq = self._equity()
         size = 0.0
         if a >= SKIP_EPS:
@@ -460,20 +505,23 @@ class EventRungEnv:
                                      "origin": self._px[self.bar, j], "cost_px": self._px[self.bar, j],
                                      "tp_i": 0}
                 self._trades.append((tok, size, c, int(self.returns.index[self.bar]),
-                                     self._px[self.bar, j]))      # +buy @ the bar's price index
+                                     self._px[self.bar, j], reason,   # +buy @ the bar's price index
+                                     self._marker_obs(tok, a)))       # + trigger + state-acted-on
             else:
                 size = 0.0                                       # couldn't fund -> a skip (dev = -0.20)
         if self.reward_mode == "entry_forward":                  # record for delayed forward crediting
             self._pending_entries.append((self.bar, size / max(eq, 1.0) - self.rule_entry_frac, tok))
 
-    def _do_exit(self, tok: str, a: float):
-        """a = fraction of the position to KEEP. a>=HOLD_EPS overrides the exit (re-arm the stop)."""
+    def _do_exit(self, tok: str, a: float, reason: str | None = None):
+        """a = fraction of the position to KEEP. a>=HOLD_EPS overrides the exit (re-arm the stop).
+        `reason` is the carried trigger (TRAILING_STOP/EMA_BREAK, or ROTATION_OUT from _rotate_for);
+        the disaster-floor force-branch OVERRIDES it to LOSS_FLOOR (a forced cut, not the prompt)."""
         p = self.pos.get(tok)
         if p is None:
             return
         if (self.loss_floor > 0.0 and self._px[self.bar, self.col_ix[tok]]
                 < p["cost_px"] * (1.0 - self.loss_floor)):
-            self._sell_down(tok, 0.0)                            # disaster floor: deep losers cannot be
+            self._sell_down(tok, 0.0, LOSS_FLOOR, a)             # disaster floor: deep losers cannot be
             return                                               # overridden or trimmed — forced cut
         if a >= HOLD_EPS:                                        # override: hold through
             if self.rule_default:                                # rung-1b: COMMIT the hold (no re-prompt
@@ -481,7 +529,8 @@ class EventRungEnv:
             else:                                                # re-anchor — the old re-anchor let
                 p["peak_px"] = self._px[self.bar, self.col_ix[tok]]  # repeated overrides ratchet the
             return                                               # stop down a crash (g2b-s2, 63.7% DD)
-        self._sell_down(tok, max(a, 0.0))
+        both = self._pending_both and reason in (TRAILING_STOP, EMA_BREAK)   # co-fire only on stop/ema
+        self._sell_down(tok, max(a, 0.0), reason, a, both)
 
     def _do_profit(self, tok: str, a: float):
         """Take-profit prompt (the position crossed its next unrealized-gain rung): `a` = fraction
@@ -496,7 +545,7 @@ class EventRungEnv:
             p["tp_i"] += 1                                       # consume every rung crossed
         if a >= HOLD_EPS:
             return                                               # let it run (the rule's behavior)
-        self._sell_down(tok, max(a, 0.0))
+        self._sell_down(tok, max(a, 0.0), PROFIT_TAKE, a)       # a profit-prompt sell is PROFIT_TAKE
 
     def _stop_fill(self, tok: str, fill_px: float):
         """Force-fill a full close at `fill_px` (the resting-stop price the intra-bar path
@@ -509,15 +558,20 @@ class EventRungEnv:
         self.cash += val - c
         self._realized[tok] = self._realized.get(tok, 0.0) + (val - c)   # ledger: cash in (even at $0)
         if val > 0.0:                                        # record EVERY close (even sub-$1 crash
+            obs = self._marker_obs(tok, 0.0)                 # forced full close (no agent action)
             self._trades.append((tok, -val, c, int(self.returns.index[self.bar]),   # closes) so the
-                                 fill_px))                          # marker stream nets to flat -sell @ stop price index
+                                 fill_px, INTRABAR_STOP, obs))      # marker stream nets to flat -sell @ stop px index
         self.cool[tok] = self.bar
         self.prior_origin[tok] = p["origin"]
         del self.pos[tok]
 
-    def _sell_down(self, tok: str, keep: float):
+    def _sell_down(self, tok: str, keep: float, reason: str | None = None, action: float = 0.0,
+                   both: bool = False):
         """Sell a position down to `keep` of its value (shared by exit cuts/trims and profit-takes):
-        dust floor, AMM cost, markers, cooldown + dead-zone on a full close, commit on a trim."""
+        dust floor, AMM cost, markers, cooldown + dead-zone on a full close, commit on a trim. `reason`
+        is the carried trigger (LOSS_FLOOR/TRAILING_STOP/EMA_BREAK/PROFIT_TAKE/ROTATION_OUT), `action`
+        the agent's keep-fraction, and `both` the stop+ema co-fire flag — all recording-only, captured
+        in the marker obs."""
         p = self.pos[tok]
         val = self._pos_value(tok)
         if self.dust_usd > 0.0 and keep * val < self.dust_usd:  # dust floor: a remainder below $dust
@@ -528,8 +582,9 @@ class EventRungEnv:
         self.cash += sell_val - c
         self._realized[tok] = self._realized.get(tok, 0.0) + (sell_val - c)   # ledger: cash in
         if sell_val > 0.0:                                   # record EVERY sell (even sub-$1) so the
+            obs = self._marker_obs(tok, action, both)       # state-acted-on (pos still present here)
             self._trades.append((tok, -sell_val, c, int(self.returns.index[self.bar]),   # marker stream
-                                 self._px[self.bar, j]))            # nets to flat -sell @ bar index (incl. rotation)
+                                 self._px[self.bar, j], reason, obs))   # nets to flat -sell @ bar index
         if keep <= 1e-6:                                         # full exit -> cooldown + dead-zone
             self.cool[tok] = self.bar
             self.prior_origin[tok] = p["origin"]
@@ -549,7 +604,28 @@ class EventRungEnv:
             weak = min(self.pos, key=lambda h: self._cush[self.bar, self.col_ix[h]])
             if self._cush[self.bar, self.col_ix[weak]] >= cur_cush:
                 break
-            self._do_exit(weak, 0.0)                             # full close of the laggard
+            self._do_exit(weak, 0.0, ROTATION_OUT)               # full close of the laggard (funding
+            #   side-effect, not a deliberate exit; LOSS_FLOOR overrides if weak is itself past floor)
+
+    def _marker_obs(self, tok: str, action: float, both: bool = False) -> dict:
+        """The 'state the agent acted on', captured at the marker bar for the reasoning panel
+        ([[Trade Reasoning Capture]]). Recording-only — read from slots the env already holds:
+        `surge`, `cush` (always), and `giveback`/`unreal`/`held_frac` when the token is held at the
+        moment of the marker. `action` is the agent's chosen size-multiple (entries) or keep-fraction
+        (exits). `both_stop_ema` flags an exit where the trailing stop AND the ema-break co-fired
+        (passed explicitly by the stop/ema exit path so the stop>ema precedence isn't lossy; False for
+        every other marker). `surge_decay` is DEFERRED (needs new per-position state — follow-up)."""
+        j = self.col_ix[tok]
+        o = {"surge": float(self._surge[self.bar, j]), "cush": float(self._cush[self.bar, j]),
+             "giveback": 0.0, "unreal": 0.0, "held_frac": 0.0, "action": float(action),
+             "both_stop_ema": bool(both)}
+        p = self.pos.get(tok)
+        if p is not None:
+            cost_px = p["cost_px"]
+            o["unreal"] = float(self._px[self.bar, j] / cost_px - 1.0) if cost_px > 0 else 0.0
+            o["giveback"] = float(self._px[self.bar, j] / p["peak_px"] - 1.0) if p["peak_px"] > 0 else 0.0
+            o["held_frac"] = (self.bar - p["entry_bar"]) / max(self.episode_bars, 1)
+        return o
 
     # -- valuation / obs / reward -------------------------------------------
     def _pos_value(self, tok: str) -> float:
@@ -658,7 +734,9 @@ class EventRungEnv:
                            "origin": self._px[self.start, j], "cost_px": self._px[self.start, j],
                            "tp_i": 0}
             self.ignite_armed[t] = False                         # already held -> no immediate entry re-prompt
-            self._trades.append((t, usd, c, int(self.returns.index[self.start]), self._px[self.start, j]))
+            self._trades.append((t, usd, c, int(self.returns.index[self.start]),
+                                 self._px[self.start, j], BASKET_OPEN,   # overlay open at reset
+                                 self._marker_obs(t, w[t])))             # action = the basket weight taken
 
     def _basket_equity_curve(self, start: int, end: int):
         """Buy&Hold of the risk-parity basket over [start, end] — the benchmark under `basket_default`

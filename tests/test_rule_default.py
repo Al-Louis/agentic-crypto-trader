@@ -115,15 +115,15 @@ def test_override_commits_and_does_not_reanchor_the_peak():
     env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0}
     env._cush[bar, j] = 0.1
     env._px[bar, j] = 1.7                             # stop_k=0.1 -> threshold 1.8 -> stop fires
-    assert ("exit", t) in env._scan_bar(bar)
+    assert ("exit", t, "TRAILING_STOP", False) in env._scan_bar(bar)   # stop-only (ema isolated)
     env._pending = ("exit", t)
     env._do_exit(t, RULE_DEFAULT_EXIT_KEEP[3])        # idx3 = hold-through (override)
     assert env.pos[t]["peak_px"] == 2.0               # NOT re-anchored — the ratchet is gone
     assert env._exit_decided[t] == bar
-    assert ("exit", t) not in env._scan_bar(bar + 5)   # committed: suppressed inside the window
+    assert not any(e[0] == "exit" and e[1] == t for e in env._scan_bar(bar + 5))   # committed: suppressed
     env._px[bar + 13, j] = 1.7
     env._cush[bar + 13, j] = 0.1
-    assert ("exit", t) in env._scan_bar(bar + 13)      # window over: prompts again off the TRUE peak
+    assert any(e[0] == "exit" and e[1] == t for e in env._scan_bar(bar + 13))   # window over: prompts again
 
 
 def test_dust_floor_forces_full_close():
@@ -152,7 +152,7 @@ def test_legacy_defaults_unchanged_trim_still_reanchors():
     env.pos[t]["peak_px"] = 2.0
     env._do_exit(t, 0.96)                             # legacy override
     assert env.pos[t]["peak_px"] == pytest.approx(1.4)  # legacy: re-anchors (the ratchet)
-    assert ("exit", t) in env._scan_bar(bar) or True   # no commit suppression exists with flags off
+    assert True   # no commit suppression exists with flags off (legacy trim re-anchors; nothing to gate)
 
 
 def test_profit_prompt_fires_and_default_lets_winner_run():
@@ -222,10 +222,10 @@ def test_loss_floor_punctures_the_commit_window():
     env._exit_decided[t] = bar                           # freshly committed (e.g. an override)
     env._cush[bar + 3, j] = 0.1                          # above EMA: only the floor can prompt
     env._px[bar + 3, j] = env._px[bar, j] * 0.9          # -10%: above floor -> commit holds
-    assert ("exit", t) not in env._scan_bar(bar + 3)
+    assert not any(e[0] == "exit" and e[1] == t for e in env._scan_bar(bar + 3))
     env._px[bar + 5, j] = env._px[bar, j] * 0.7          # -30%: below floor -> punctures commit
     env._cush[bar + 5, j] = 0.1
-    assert ("exit", t) in env._scan_bar(bar + 5)
+    assert ("exit", t, "LOSS_FLOOR", False) in env._scan_bar(bar + 5)   # floored -> forced-cut trigger
 
 
 def test_above_floor_override_still_works():
@@ -506,7 +506,7 @@ def test_scale_in_underwater_emits_no_entry():
     env.pos["RUN"] = {"usd": 100.0, "entry_bar": 50, "peak_px": env._px[bar, j],
                       "origin": 1.0, "tp_i": 0, "cost_px": env._px[bar, j] * 1.5}
     env.ignite_armed["RUN"] = True
-    assert ("entry", "RUN") not in env._scan_bar(bar)    # underwater: the in-profit guard blocks it
+    assert not any(e[0] == "entry" and e[1] == "RUN" for e in env._scan_bar(bar))   # in-profit guard blocks
 
 
 def test_scale_in_floor_cuts_off_the_blended_cost():
@@ -557,4 +557,4 @@ def test_scale_in_off_held_token_gets_no_entry_prompt():
     assert env._ignite[bar, j]
     env.ignite_armed["RUN"] = True
     assert "RUN" in env.pos
-    assert ("entry", "RUN") not in env._scan_bar(bar)    # held + flag off -> never re-prompted
+    assert not any(e[0] == "entry" and e[1] == "RUN" for e in env._scan_bar(bar))   # held+off: no re-prompt

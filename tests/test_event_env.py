@@ -5,8 +5,22 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from trader.train.event_env import OBS_DIM, EventRungEnv
+from trader.train.event_env import (
+    BASKET_OPEN,
+    EMA_BREAK,
+    FORCED_REASONS,
+    IGNITION,
+    INTRABAR_STOP,
+    LOSS_FLOOR,
+    OBS_DIM,
+    PROFIT_TAKE,
+    ROTATION_OUT,
+    SCALE_IN,
+    TRAILING_STOP,
+    EventRungEnv,
+)
 
 
 def _panel(n=260):
@@ -64,13 +78,16 @@ def test_trailing_stop_fires_off_peak_not_entry():
     t = env.universe[0]
     j = env.col_ix[t]
     bar = env.bar
-    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0}
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "cost_px": 1.0,
+                  "tp_i": 0}
     env._cush[bar, j] = 0.1                               # price above EMA -> isolate from the ema-break exit
     env._px[bar, j] = 1.4                                 # 30% below peak (2.0), 40% above entry (1.0)
-    assert ("exit", t) in env._scan_bar(bar)             # trailing stop peak*0.75=1.5 > 1.4 -> fires
+    ev = env._scan_bar(bar)                               # events now carry (etype, tok, reason, both)
+    assert any(e[0] == "exit" and e[1] == t for e in ev)  # trailing stop peak*0.75=1.5 > 1.4 -> fires
+    assert ("exit", t, "TRAILING_STOP", False) in ev     # ema isolated -> stop-only, both_stop_ema False
     env.pos[t]["peak_px"] = 2.0
     env._px[bar, j] = 1.6                                 # only 20% below peak -> stop (1.5) NOT hit
-    assert ("exit", t) not in env._scan_bar(bar)         # (an entry-anchored stop would never fire here)
+    assert not any(e[0] == "exit" and e[1] == t for e in env._scan_bar(bar))   # (entry-anchored never fires)
 
 
 def test_obs_shape_and_finite():
@@ -288,3 +305,285 @@ def test_gym_adapter_conforms_and_steps():
         assert np.isfinite(r), "reward must be finite"
         if term:
             break
+
+
+# -- Trade Reasoning Capture (Stage 1: env trace) -----------------------------
+# Each marker tuple is now (tok, usd, fee, time, px, reason, obs); `reason` is the deterministic
+# TRIGGER _scan_bar tagged, `obs` the state-acted-on. Recording-only — byte-identical to training.
+
+OBS_KEYS = {"surge", "cush", "giveback", "unreal", "held_frac", "action", "both_stop_ema"}
+
+
+def _collect_markers(env, entry_a=1.0, exit_a=0.0, start=40, max_steps=800):
+    """Drive an episode (fixed per-event-type actions) and gather every marker, capturing the
+    floor/intrabar fills folded into info['trades'] AFTER the advance (the step() ordering)."""
+    env.reset(start=start)
+    markers = []
+    for _ in range(max_steps):
+        etype, _ = env._pending
+        if etype == "none":
+            break
+        a = entry_a if etype == "entry" else exit_a
+        _, _, done, info = env.step([a])
+        markers.extend(info.get("trades", []))
+        if done:
+            break
+    return markers
+
+
+def _reignite_panel(n=260):
+    """RUN ignites twice: a runup (entry 1), a mild drift up that holds it in profit, then a second
+    volume spike (the re-ignition). Mirrors the scale-in fixture so a held in-profit re-ignition tags
+    SCALE_IN."""
+    idx = pd.RangeIndex(n) * 3600
+    rng = np.random.default_rng(0)
+    px = np.ones(n)
+    for i in range(50, 70):          # ignition-1 runup
+        px[i] = px[i - 1] * 1.03
+    for i in range(70, 110):         # mild drift up: stays in profit, no trailing-stop trip
+        px[i] = px[i - 1] * 1.002
+    for i in range(110, 130):        # ignition-2 runup (re-ignition while held + in profit)
+        px[i] = px[i - 1] * 1.03
+    for i in range(130, n):
+        px[i] = px[i - 1] * (1.001 if i % 2 else 0.999)
+    cols = {"RUN": pd.Series(px, index=idx).pct_change().fillna(0.0),
+            "C1": pd.Series(rng.normal(0, 0.003, n), index=idx),
+            "C2": pd.Series(rng.normal(0, 0.003, n), index=idx)}
+    returns = pd.DataFrame(cols)
+    btc = pd.Series(np.cumprod(1 + rng.normal(0, 0.004, n)) * 1e4, index=idx)
+    vol = pd.DataFrame({c: pd.Series(100.0, index=idx) for c in cols})
+    vol.loc[idx[46:58], "RUN"] = 500.0    # spike 1 -> ignition window ~50-53
+    vol.loc[idx[106:118], "RUN"] = 500.0  # spike 2 -> ignition window ~107-113
+    liq = {c: 1e9 for c in cols}
+    return returns, btc, vol, liq
+
+
+def test_entry_tags_ignition_with_obs():
+    """A fresh ignition entry tags IGNITION and carries a populated obs (the state acted on)."""
+    markers = _collect_markers(_env(), entry_a=1.0, exit_a=1.0)
+    buys = [m for m in markers if m[0] == "RUN" and m[1] > 0]
+    assert buys, "RUN's ignition must open a position (a BUY marker)"
+    tok, usd, fee, t, px, reason, obs = buys[0]
+    assert reason == IGNITION
+    assert reason not in FORCED_REASONS, "an entry is the agent's sized act, not forced"
+    assert set(obs) == OBS_KEYS and all(np.isfinite(v) for v in obs.values())
+
+
+def test_scale_in_tags_scale_in():
+    """scale_in=True: a held in-profit token's re-ignition add tags SCALE_IN (not IGNITION)."""
+    returns, btc, vol, liq = _reignite_panel()
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5, vol_spk=4,
+                vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0,
+                action_mode="discrete", n_action_levels=4, rule_default=True, scale_in=True)
+    env = EventRungEnv(returns, btc, liq, **base)
+    env.reset(start=40)
+    markers = []
+    for _ in range(800):
+        et, _ = env._pending
+        if et == "none":
+            break
+        _, _, done, info = env.step([0])             # idx0: enter at rule sizing / hold exits
+        markers.extend(info.get("trades", []))
+        if done:
+            break
+    buys = [m for m in markers if m[0] == "RUN" and m[1] > 0]
+    assert len(buys) >= 2, "RUN should open then scale in on the re-ignition"
+    assert buys[0][5] == IGNITION, "the first (flat) entry is IGNITION"
+    assert any(m[5] == SCALE_IN for m in buys[1:]), "a held in-profit re-ignition add must tag SCALE_IN"
+
+
+def test_ema_only_exit_tags_ema_break():
+    """An exit triggered by cush<0 with the trailing stop NOT hit tags EMA_BREAK (discretionary)."""
+    env = _env(stop_k=0.5)                            # wide stop so only the ema-break fires
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0, "cost_px": 1.0,
+                  "tp_i": 0}
+    env._px[bar, j] = 0.9                             # peak 1.0, stop_k 0.5 -> 0.5 threshold NOT hit
+    env._cush[bar, j] = -0.05                         # below EMA -> ema-break fires
+    ev = env._scan_bar(bar)
+    assert ("exit", t, EMA_BREAK, False) in ev, "cush<0 with stop un-hit -> EMA_BREAK, not both"
+
+
+def test_trailing_stop_exit_tags_trailing_stop():
+    """An exit with the trailing stop hit but price above EMA tags TRAILING_STOP (discretionary)."""
+    env = _env(stop_k=0.1)
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "cost_px": 1.0,
+                  "tp_i": 0}
+    env._px[bar, j] = 1.5                             # 25% below peak 2.0 -> stop (1.8) hit
+    env._cush[bar, j] = 0.1                           # above EMA -> ema-break isolated out
+    assert ("exit", t, TRAILING_STOP, False) in env._scan_bar(bar)
+
+
+def test_both_stop_and_ema_sets_the_co_fire_flag():
+    """When the trailing stop AND the EMA break co-fire, precedence picks TRAILING_STOP but the
+    both_stop_ema flag is set so the forensics aren't lossy."""
+    env = _env(stop_k=0.1)
+    env.reset(start=40)
+    env._px, env._cush = env._px.copy(), env._cush.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 2.0, "origin": 1.0, "cost_px": 1.0,
+                  "tp_i": 0}
+    env._px[bar, j] = 1.5                             # 25% below peak -> stop hit
+    env._cush[bar, j] = -0.05                         # AND below EMA -> ema break too
+    ev = env._scan_bar(bar)
+    assert ("exit", t, TRAILING_STOP, True) in ev     # stop wins; co-fire recorded on the event
+    env._set_pending(("exit", t, TRAILING_STOP, True))   # the dispatch threads reason+both into the marker
+    env._trades = []
+    env._do_exit(t, 0.0, env._pending_reason)         # full cut -> a SELL marker (reason as step() passes)
+    sells = [m for m in env._trades if m[0] == t and m[1] < 0]
+    assert sells and sells[0][5] == TRAILING_STOP
+    assert sells[0][6]["both_stop_ema"] is True, "the co-fire flag must reach the marker obs"
+
+
+def test_disaster_floor_exit_tags_loss_floor_forced():
+    """A position past the disaster floor force-cuts and tags LOSS_FLOOR (a FORCED reason), even when
+    the agent answers idx3 (hold/override)."""
+    env = _env(action_mode="discrete", n_action_levels=4, rule_default=True, loss_floor=0.2)
+    env.reset(start=40)
+    env._px = env._px.copy()
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, j], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, j]}
+    later = bar + 1
+    env._px[later, j] = env._px[bar, j] * 0.7         # -30% < -20% floor
+    env.bar = later
+    env._trades = []
+    env._do_exit(t, 1.0)                              # idx3-equivalent: try to hold -> floor overrides
+    sells = [m for m in env._trades if m[0] == t and m[1] < 0]
+    assert sells, "the floor force-cut must emit a SELL marker"
+    assert sells[0][5] == LOSS_FLOOR
+    assert sells[0][5] in FORCED_REASONS
+
+
+def test_intrabar_stop_tags_intrabar_stop_forced():
+    """The resting-stop intrabar floor fill tags INTRABAR_STOP (FORCED)."""
+    returns, btc, vol, liq = _panel()
+    low_frac = pd.DataFrame(1.0, index=returns.index, columns=returns.columns)
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5, vol_spk=4,
+                vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0,
+                intrabar_floor=True, loss_floor=0.2, low_frac=low_frac)
+    env = EventRungEnv(returns, btc, liq, **base)
+    env.reset(start=40)
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, j], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, j]}
+    env._trades = []
+    env._stop_fill(t, env.pos[t]["cost_px"] * (1.0 - env.loss_floor))
+    sells = [m for m in env._trades if m[0] == t and m[1] < 0]
+    assert sells and sells[0][5] == INTRABAR_STOP
+    assert sells[0][5] in FORCED_REASONS
+
+
+def test_rotation_out_tags_rotation_out_forced():
+    """A holding closed by _rotate_for (to fund a stronger ignition) tags ROTATION_OUT (FORCED)."""
+    env = _env()
+    env.reset(start=40)
+    env._cush = env._cush.copy()
+    t = env.universe[0]                               # the laggard to rotate out
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, j], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, j]}
+    incoming = env.universe[1]
+    env._cush[bar, j] = -0.5                          # the holding is the WEAKEST cushion
+    env._cush[bar, env.col_ix[incoming]] = 0.5        # the candidate is stronger -> rotation proceeds
+    env.cash = 0.0
+    env._trades = []
+    env._rotate_for(incoming, want=1000.0)            # needs cash -> closes the laggard
+    sells = [m for m in env._trades if m[0] == t and m[1] < 0]
+    assert sells and sells[0][5] == ROTATION_OUT
+    assert sells[0][5] in FORCED_REASONS
+
+
+def test_profit_take_tags_profit_take():
+    """A take-profit prompt answered with a sell tags PROFIT_TAKE (discretionary)."""
+    env = _env(action_mode="discrete", n_action_levels=4, rule_default=True, tp_rungs=(0.25,))
+    env.reset(start=40)
+    t = env.universe[0]
+    j = env.col_ix[t]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": 1.0, "origin": 1.0,
+                  "tp_i": 0, "cost_px": 1.0}
+    env._px = env._px.copy()
+    env._px[bar, j] = 1.3                             # +30% -> crosses the +25% rung
+    assert ("profit", t) in env._scan_bar(bar)
+    env._pending = ("profit", t)
+    env._trades = []
+    env._do_profit(t, 0.0)                            # sell into strength (keep 0)
+    sells = [m for m in env._trades if m[0] == t and m[1] < 0]
+    assert sells and sells[0][5] == PROFIT_TAKE
+    assert sells[0][5] not in FORCED_REASONS, "taking profit is the agent's discretionary act"
+
+
+def test_basket_open_tags_basket_open():
+    """basket_default buys the whole basket at reset; each opening BUY tags BASKET_OPEN."""
+    returns, btc, vol, liq = _panel()
+    env = EventRungEnv(returns, btc, liq, volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200,
+                       vol_mult=2.5, vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8,
+                       seed=0, action_mode="discrete", n_action_levels=4, rule_default=True,
+                       basket_default=True, vol_target=0.005, cap_floor=0.02)
+    env.reset(start=40)
+    opens = list(env._trades)
+    assert opens, "the basket open must emit markers at reset"
+    assert all(m[5] == BASKET_OPEN for m in opens)
+    assert all(set(m[6]) == OBS_KEYS for m in opens)
+
+
+def test_obs_is_populated_on_every_marker():
+    """Every recorded marker carries the 6-key obs dict (the state acted on)."""
+    markers = _collect_markers(_env(tp_rungs=(0.25,)), entry_a=1.0, exit_a=0.0)
+    assert markers, "the episode must produce markers"
+    for m in markers:
+        assert len(m) == 7, "marker tuple = (tok, usd, fee, time, px, reason, obs)"
+        assert set(m[6]) == OBS_KEYS, "obs must hold the documented keys"
+
+
+def test_forced_reasons_membership_is_exact():
+    """FORCED_REASONS is exactly {LOSS_FLOOR, INTRABAR_STOP, ROTATION_OUT} — the rest discretionary."""
+    assert FORCED_REASONS == {LOSS_FLOOR, INTRABAR_STOP, ROTATION_OUT}
+    for r in (IGNITION, SCALE_IN, BASKET_OPEN, EMA_BREAK, TRAILING_STOP, PROFIT_TAKE):
+        assert r not in FORCED_REASONS
+
+
+def test_markers_are_byte_identical_recording_only():
+    """HARD CONSTRAINT: the markers are recording-only — return / max-drawdown / trade-count must be
+    the deterministic golden values (the reward is equity-based; adding reason+obs changes nothing the
+    policy or the equity path sees). These goldens were captured on this exact synthetic panel."""
+    env = _env(record_trace=True)
+    env.reset(start=40)
+    ntrades = 0
+    while True:
+        et, _ = env._pending
+        if et == "none":
+            break
+        a = 1.0 if et == "entry" else 0.0
+        _, _, done, info = env.step([a])
+        ntrades += len(info["trades"])
+        if done:
+            break
+    eq = [e for _, e in env._eq_trace]
+    ret = eq[-1] / eq[0] - 1.0
+    peak, maxdd = eq[0], 0.0
+    for e in eq:
+        peak = max(peak, e)
+        maxdd = max(maxdd, (peak - e) / peak)
+    assert eq[-1] == pytest.approx(15875.454436865408, rel=0, abs=1e-6)
+    assert ret == pytest.approx(0.5875454436865408, rel=0, abs=1e-9)
+    assert maxdd == pytest.approx(0.11876140553437244, rel=0, abs=1e-9)
+    assert ntrades == 103
+    assert len(eq) == 202

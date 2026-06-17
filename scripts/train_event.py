@@ -44,8 +44,9 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
     obs = env.reset(start=WARMUP)
     records, fees, raw = [], 0.0, []
     if env._trades:                                    # basket_default buys the WHOLE basket in reset();
-        ofills = [{"token": t, "usd": u, "fee": c, "time": ft, "px": px}      # step() clears _trades each
-                  for t, u, c, ft, px in env._trades]                          # call, so the opening buy is
+        ofills = [{"token": t, "usd": u, "fee": c, "time": ft, "px": px, "reason": rsn, "obs": ob}
+                  for t, u, c, ft, px, rsn, ob in env._trades]                  # step() clears _trades each
+        #                                                                       # call, so the opening buy is
         records.append({"time": int(eval_r.index[WARMUP]), "fills": ofills,    # lost unless emitted HERE —
                         "weights": {t: env._pos_value(t) / max(env._equity(), 1.0) for t in env.pos},
                         "trades_usd": {f["token"]: f["usd"] for f in ofills},   # the missing buy that made
@@ -57,8 +58,9 @@ def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
         raw.append(float(np.asarray(a).reshape(-1)[0]))
         obs, _, done, info = env.step(a)
         if info.get("trades"):
-            fills = [{"token": t, "usd": u, "fee": c, "time": ft, "px": px}
-                     for t, u, c, ft, px in info["trades"]]   # per-fill TRUE time + _px-basis exec price
+            fills = [{"token": t, "usd": u, "fee": c, "time": ft, "px": px, "reason": rsn, "obs": ob}
+                     for t, u, c, ft, px, rsn, ob in info["trades"]]   # per-fill TRUE time + _px exec px
+            #                                                          # + trigger reason + state-acted-on
             records.append({"time": info["trade_time"], "weights": info["weights"], "fills": fills,
                             "trades_usd": {f["token"]: f["usd"] for f in fills},   # legacy dicts (other consumers)
                             "trade_fees": {f["token"]: f["fee"] for f in fills}})
