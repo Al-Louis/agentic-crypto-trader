@@ -1897,3 +1897,43 @@ Workflow (build → 3 skeptics: causality SOUND, dd-realism SOUND, **selection F
   near breakeven, and the rule LOSES THE BULL. The one lever the agent can pull that the rule cannot is EXIT
   discretion (let winners run / cut givebacks) — exactly what **P-EMABREAK** (running) tests. CAVEAT: 23 cold weeks,
   the DQ driven by ~1 week, VAL Part-A below the n-floor, TEST frozen. Full: [[Probe Suite]].
+
+## 2026-06-17 — P-EMABREAK verdict: NO-GO (the EMA-break is NOT a pathology) — the exit arm is CLOSED
+
+P-EMABREAK (workflow: build → 3 skeptics ALL SOUND → decide NO). Probe `scripts/probe_emabreak.py` (uncommitted),
+leakage-clean (re-audited; the future-volume-wipe leaves `surge[break]` byte-identical — the decisive causality proof).
+- **The EMA-break leak is REGIME BETA, not a pathology.** The regime-baseline skeptic killed the hypothesis:
+  ignition EMA-breaks resume to a new high **NO MORE** than random below-EMA dips (lift **−17..−22% on TRAIN**, ~0 on
+  VAL). The 22–55% "resumer rate" is bull/horizon drift — it rises monotonically 22→57% with H in two positive-alt
+  regimes; a true trend-break test would be horizon-insensitive.
+- **Surge-alive (the forensic's signal) adds ZERO OOS over the giveback obs the agent already carries** — incremental
+  AUC **+0.007 VAL, CI straddles 0** on every split/horizon, and it **inverts to −0.10 OOS within the shallow-giveback
+  bucket** (the exact place the forensic cared). The only separating features (giveback, cush) are ALREADY obs slots →
+  NOT an obs-coverage gap.
+- **The realizable hold-through edge is ~0.** You can't identify resumers at the break OOS, so a hold-through rule must
+  also keep the non-resuming trend-breaks: ride-to-H and a 25%-trailing-stop held-exit both net **+0.0%/+0.8%** (CIs
+  straddle 0); only an oracle captures the headline.
+- **The ZEC forensic was an ANECDOTE.** The Apr-9 ZEC re-ignition has the exact forensic profile yet at H=48 is NOT a
+  resumer (given-up +3.8%); its "+60% over 9 days" is ~216 bars out (oracle-only). Of 5 VAL ZEC events, only 2 resume.
+  "Surge rising at the exit" does not generalize. NO drift (the proxy was stress-tested vs a random-dip baseline + failed).
+
+### THE ALPHA-HUNT MAP (2026-06-17) — comprehensively mined; `wkw` is the substrate ceiling
+
+Five lever-classes tested this session — all closed:
+
+| lever | probe | verdict |
+|-------|-------|---------|
+| entry SELECTION | P-REIGNITE | refuted (held re-ignitions no better than fresh) |
+| `scale_in` (concentrate into held) | `wsi` sweep | REFUTED on the gate (−2.75%, DD↑12.2%, KILL met) |
+| exit REWARD / peak-timing | P-EXIT-REWARD | NO-GO (run-up real but not learnable; giveback-dominated; thin book) |
+| CAPACITY / participation / sizing | capacity probe | NULL (gates don't bind; loosening funds worse; sizing-down = beta give-up) |
+| EMA-break premature exit + surge-at-break | P-EMABREAK | NO-GO (not a pathology; surge adds 0 over giveback; hold-through nets ~0) |
+
+**Conclusion:** the selective-ignition substrate + the current obs {surge, cush, giveback, unreal, surge_decay, accel,
+held_frac} is comprehensively mined. The run-up that exists is largely **regime beta NOT capturable by any
+state-conditioned exit on the obs the agent has** — and the agent ALREADY sees the only separating features (giveback,
+cush), so it is a training-dynamics / data-ceiling limit, NOT an obs-coverage gap. **`wkw` (rdLe4 + wick_reject 0.25) is
+the ceiling of this substrate**: +5.1pts vs rung-0, DQ-protective 7.84%, and it FIXES the rule's own DQ breach (35.53%).
+**NEXT (decision-critical): validate `wkw` on the FROZEN TEST** — the real OOS check of the deployable, still unspent,
+before the live window (Jun 22–28); the human's one-time, irreversible call. (A genuinely NEW obs/feature —
+higher-timeframe, order-flow — could reopen the exit hunt; the current-obs family is what's exhausted.)
