@@ -20,10 +20,11 @@ aws s3api create-bucket --bucket alexlouis-act-private --region us-east-1
 aws s3api put-public-access-block --bucket alexlouis-act-private `
   --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws s3api put-bucket-encryption --bucket alexlouis-act-private `
-  --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+  --server-side-encryption-configuration file://deploy/iam/private-bucket-encryption.json
 ```
 
-(us-east-1 needs no `LocationConstraint`. Use SSE-KMS instead of AES256 if you want a CMK.)
+(us-east-1 needs no `LocationConstraint`. The encryption config is a `file://` arg because
+PowerShell strips the quotes from inline JSON. Use SSE-KMS instead of AES256 if you want a CMK.)
 
 ### 2. Grant the EC2 trading host read access (scoped to `models/*`)
 
