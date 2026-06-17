@@ -1664,3 +1664,58 @@ base: a gentler tp set (e.g. {0.10,0.15,0.25,0.50}, prompt at +10–25% not +5%)
 giveback-penalty reward** (a soft exit-timing incentive that doesn't force early sells), or more seeds to
 beat the variance. HALTED for human review (the loop wanted to continue; per direction, the human picks the
 next lever).
+
+## 2026-06-17 — ENTRY-SIDE finding: the agent acts on ~11% of ignitions and CANNOT scale in
+
+Before the give-back work, a probe of the *entry* side — s3 (`ppo-event-rdLe4-wtp`) actual fills vs **every**
+ignition, vol-top-8 val, 356 ignition-bars, fwd-48 run-up:
+
+| category | count | fwd-48 run-up |
+|----------|------:|--------------:|
+| entered | 38 (11%) | +11.3% |
+| ignition while HELD (no scale-in prompt) | 138 (39%) | +10.4% |
+| flat, skipped or cooled | 180 (51%) | +12.1% |
+
+- The agent acts on **~11% of ignition-bars**; the missed 89% are **as good as the ones it took** (+10–12%
+  run-up either way) → its selection adds no edge (the entry-side face of the reward-bound diagnosis).
+- **It cannot add to a held position.** `_scan_bar` (L399-409) emits an entry prompt only for tokens NOT in
+  `self.pos` (`if t in self.pos … continue`), further gated by a 48-bar `cooldown` after any exit and a
+  `reclaimed` rule (re-enter only above the prior exit origin). A held token's re-ignition is invisible.
+- **ZEC s3 is the poster child:** entered Mar 15 (that run +26%), exited Mar 18; re-entered Apr 1, scaled
+  out to a sliver as it chopped; the **Apr 9 16:00 re-ignition (+16.2% run-up) fired while it held the sliver
+  → NO scale-in prompt** → it rode only the remnant up ~240→360, then re-established a full position only on
+  Apr 23 *at the top*. The big scale-in was structurally impossible.
+- Caveat: counts are per ignition-BAR, so consecutive bars of one event inflate "held"; the *distinct*
+  re-ignitions-while-holding are fewer but real (ZEC Apr 9) — exactly the runs we want. Methodology +
+  scope: [[AI Training]] §"Probe methodology & scope".
+
+### NEXT EXPERIMENT (design) — allow SCALE-IN on held winners (one structural lever)
+
+Relax the no-add constraint so a held token with a fresh ignition gets an entry prompt the agent can take —
+guarded so it adds to **winners**, never pyramids into the floor:
+
+1. **Prompt (`_scan_bar`):** for a held token, emit `("entry", t)` on a fresh armed ignition IF (a) **in
+   profit** — `_px[bar] > pos.cost_px` (never average down), and (b) **room** — current exposure < the
+   per-token risk-parity cap. (cooled/reclaimed gates stay for FRESH entries only; a scale-in is a
+   continuation, not a re-entry.)
+2. **Blended cost basis:** add `cost_px` to the position (size-weighted avg entry). On a scale-in
+   `cost_px = (usd·cost_px + add·_px[bar])/(usd+add)`, `usd += add`. The **floor, unrealized-gain, and
+   tp_rungs reference `cost_px`** in place of `_px[entry_bar]` (a refactor of every `_px[p["entry_bar"]]`
+   site: the floor at :353/:378/:446, unreal at :396/:466, val at :479/:530). → the −20% floor is measured
+   from the blended cost, so adding to a winner *raises* the basis: a scale-in **structurally cannot loosen
+   the floor**.
+3. **Size cap (`_do_entry`):** a scale-in adds `min(agent_action_size, per_token_cap − current_exposure)` —
+   total exposure never exceeds the existing `vol_target`/`cap_floor` risk-parity cap; no unbounded pyramiding.
+4. **Arming:** disarm after a scale-in, re-arm on a fresh ignition cluster (one add per distinct event), as
+   for fresh entries.
+
+**Guards vs "pyramid into the floor":** in-profit-only (no averaging down) + per-token cap (bounded) +
+blended-basis floor (−20% from weighted cost). A losing position is never added to.
+
+**Tests:** (a) held + fresh ignition while in profit → scale-in prompt; `_do_entry` blends cost_px + respects
+the cap. (b) held + UNDERWATER + ignition → NO prompt (in-profit guard). (c) floor fires off the blended
+cost_px after a scale-in. (d) no add past the per-token cap. (e) flag OFF → byte-identical to current.
+
+**SUCCESS** = on the wkw base, cold-weekly `beats_rung0` + `survives_dq` with HIGHER realized return than wkw
+(it capitalizes on re-ignitions like ZEC Apr 9) and worst-week DD not worse. **KILL** = if it over-pyramids
+(DD up) or doesn't beat wkw → revert, and reconsider the cooldown/reclaimed gates (the 51% bucket) instead.
