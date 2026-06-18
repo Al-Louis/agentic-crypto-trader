@@ -2000,3 +2000,80 @@ contradicting the cold-weekly refutal of `wsi`). Decomposed both published bundl
   may be on incommensurable per-asset scales (env `_px` units vs real prices). The PnL-based "overall" numbers are
   EXACT (recon $0.00), so the comparison stands — but any intra-week **equity/DD widget** that marks positions against
   candle closes would be garbage. Tension with the ef0af8f marker-price fix → worth a check before trusting DD curves.
+
+## 2026-06-18 — `wxc4` (`exit_commit 12→4`): REFUTED — the 12-bar commit is CHURN-PROTECTION, not lateness slack
+
+Motivated by the participation/lateness hunt (a workflow ranked `exit_commit` as the one untested, alpha-bearing lever:
+shorten the post-trim commit so capital recycles ~3× sooner into fresh ignitions = earlier re-entry, no new concurrent
+exposure). Single variable vs `wkw` (`exit_commit 12→4`), 1M, 4 seeds @ `a332386`. Graded on val cold-weekly:
+
+| seed | val return | maxDD | gate |
+|------|-----------:|------:|:----:|
+| s0 | −3.78% | 9.1% | ✗ |
+| s1 | +2.15% | 6.5% | ✓ |
+| s2 | −4.88% | 15.7% | ✗ |
+| s3 | +0.57% | 13.9% | ✓ |
+| **mean** | **−1.48%** | worst 15.7% | 2/4 |
+
+**REFUTED — all three kills tripped: loses `wkw` (+4.53%) by ~6pts, loses rung-0 (−0.58%), worst-seed DD 15.7% > 12%.**
+The hypothesis inverts: the 12-bar `exit_commit` isn't lateness slack, it's **churn protection** — cutting it to 4 let
+the agent re-trade into noise (whipsaw), dropping returns AND ~doubling DD. The "late re-entry" a workflow flagged as
+recoverable alpha was the commit period earning its keep. `exit_commit` stays 12. (NB: wxc4 was launched outside the
+driver's verdict flow, so its best seed was published to the leaderboard manually; +0.75%/wk weekly_score, not top-3.)
+
+## 2026-06-18 — `ef5m` (ef @ **5M** timesteps): KILLED before grading (overkill); + the vec-env benchmark
+
+Launched ef (`entry_forward`, the deploy-pick config) at 5M timesteps (5× the 1M baseline) to test whether longer
+training lifts it. **KILLED on the user's call before grading** — overkill: a vec-env benchmark measured ~400 fps, so
+5M × 4 seeds ≈ **~14h**, not worth it on a config whose 1M seed-mean was already +0.39% (refuted). Reverted,
+`loop_state.active` cleared, never graded.
+
+**VEC-ENV BENCHMARK** (real ef env, CPU 8-core box, 50k steps each, `model.learn` wall): `SubprocVecEnv` **397 fps** vs
+`DummyVecEnv` **360 fps** → SubprocVecEnv ~10% FASTER, KEEP it. (Tested after an LSTM-PPO article recommended
+`make_vec_env`+`DummyVecEnv`; that advice assumes a GPU or a trivially-cheap env — neither is us. Our env step
+[voltopk-8 selection + obs build + OHLC-fraction panels] is heavy enough that parallel env-stepping beats per-step IPC.)
+
+## 2026-06-18 — `ent01` (`ent_coef 0.4→0.1`): REFUTED — high entropy is LOAD-BEARING → DRIFT ALARM, loop HALTED
+
+An LSTM-PPO-for-stocks article uses `ent_coef≈0.005`; ours is **0.4** (the notable outlier vs every default). Hypothesis:
+less forced exploration lets the policy commit more (vs the ~11%-of-ignitions selectivity). Single variable vs `wkw`
+(`ent_coef 0.4→0.1`), 1M, 4 seeds @ `a332386`. Val cold-weekly:
+
+| seed | val return | maxDD | gate |
+|------|-----------:|------:|:----:|
+| s0 | −5.04% | 9.7% | ✗ |
+| s1 | −3.39% | 8.1% | ✗ |
+| s2 | −1.81% | 15.4% | ✗ |
+| s3 | +0.61% | 5.1% | ✓ |
+| **mean** | **−2.41%** | worst 15.4% | 1/4 |
+
+**REFUTED — lowering exploration HURT: loses `wkw` by ~7pts, loses rung-0 (−1.8pts), worst DD 15.4%, only 1/4 gate.**
+So `ent_coef=0.4` is **load-bearing**: the `rule_prior` anchors the init policy toward the rung-0 rule, and the high
+entropy is exactly what lets PPO explore *away* from it to the selective edge; at 0.1 the policy collapses toward the
+rule before it learns to deviate. The article's ~0.005 is for a from-scratch policy with NO rule prior — it does not
+transfer to our rule-anchored setup. Don't re-propose low `ent_coef`.
+
+**DRIFT ALARM (stall 3/3, iter 8) → loop HALTED.** No edge-over-rung-0 improvement in 3 graded experiments over `wkw`'s
++5.1pts. Combined with the prior refutations (entry-selection · scale_in · exit-reward · EMA-break · capacity/
+participation), **every lever class is now closed — `wkw` (rdLe4 + wick_reject 0.25) is the substrate CEILING**
+(+5.1pts vs rung-0, DQ-protective 7.84%). The frozen TEST on `wkw` is still UNSPENT (the human's one-shot OOS
+certification). Only a genuinely-NEW obs/feature (higher-timeframe, order-flow) could reopen the hunt — the current-obs
+family is exhausted.
+
+## 2026-06-18 — Dashboard Leaderboard + champion SHIPPED; `ef-s2` = the deploy pick (the pivot to deployment)
+
+Built the rolling top-3 leaderboard for the "Simulated Trades" dashboard ([[Dashboard Leaderboard]]). **Pivoted the
+ranker OFF `edge_vs_rung0`** (the rung-0 rule rips +19.8%/wk on the test-window bull → drags every risk-managed policy's
+edge negative → ranks a *refuted* config #1 = actively misleading for comparing our own models) to two model-own scores:
+**`weekly_score`** (OOS val+test per-week mean = "best in a random week", the hackathon lens) + **`cumulative_score`**
+(28-week sum, the deployment lens). Phases 1/2/3 committed+pushed (`834f9b0` two-score ranker / `fdf631d` verdict-hook +
+`--config-seed-mean` override / `a332386` champion); the verdict-hook auto-publishes each sweep's best seed (confirmed
+firing on ent01-s3). Board live: **#1 ef-s2 (+5.8%/wk) / #2 wkw-s3 (+3.2%) / #3 wsi-s3 (+3.0%)**; **champion = ef-s2**
+(`simulated_champion.json`, rank-1, auto-tracked).
+
+**`ef-s2` (`ppo-event-rdLe4-ef-503b784-s2`) is the DEPLOY pick** — the best single seed by `weekly_score` (deploy the
+seed, NOT the config seed-mean; ef's config is refuted but ef-s2 is its strongest seed). Its `policy.zip` +
+`vecnormalize.pkl` + `manifest.json` are pushed to `s3://alexlouis-act-private/models/ppo-event-rdLe4-ef-503b784-s2/`
+for the EC2 paper harness ([[event-forward-run-harness]]). **THE REFRAME (2026-06-18): training has converged to its
+ceiling; the live, unverified edge is the ef-s2 EC2 forward-test, with the June 22–28 window close.** Open call: spend
+the frozen TEST to certify the candidate + commit to deployment, or open a genuinely-new obs/feature lever.
