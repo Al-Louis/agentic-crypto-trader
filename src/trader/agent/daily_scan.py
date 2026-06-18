@@ -25,6 +25,7 @@ import time
 from datetime import datetime, timezone
 
 from trader import config
+from trader.agent import event_live as _event_live  # noqa: F401 — its import puts scripts/ on sys.path
 
 DEFAULT_TARGET = "s3://alexlouis-apentic-data"
 
