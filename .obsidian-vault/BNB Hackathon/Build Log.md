@@ -1044,3 +1044,55 @@ Engineering for this session (numbers/verdicts: [[Experiment Log]] §2026-06-16,
 - **The `entry_forward` reward-shaping sweep (`ppo-event-rdLe4-ef`) was LAUNCHED and is TRAINING**
   (in progress — NO verdict yet; do not read it as a result). Direction + design → [[Experiment Log]]
   §2026-06-16, [[AI Training]] §"As-built (2026-06-16)".
+
+## 2026-06-17/18 — ef-s2 goes live: the paper forward-run harness on EC2 (→ [[Live Forward-Run Harness]])
+
+Deployed the trained RL champion **ef-s2** (`ppo-event-rdLe4-ef-503b784-s2`) to the EC2 host for a
+live **paper** forward-run on BSC, ahead of the June 22 window. Branch `feat/live-event-harness`
+(unmerged; the box runs the branch). Full subsystem doc → **[[Live Forward-Run Harness]]**.
+
+- **Architecture — reuse the validated loop, don't reimplement.** Each hour re-run
+  `train_event.evaluate_event_policy` + `EventRungEnv` VERBATIM over the current **cold-week** window
+  (Mon 00:00 UTC open, 168-bar warmup prepad, fresh **$10k**, vol-top-8 reselected at the open, LSTM
+  reset — the `simulate_weekly` cadence), swapping only recorded panel → **live rolling panel**, and
+  diff the fills (newest-bar fill = this hour's decision). Obs-parity becomes a data check, not a
+  reimplementation. **$10k cold-weekly is mandatory** (the env prices fills on its internal index;
+  another capital changes the AMM-cost fraction → fill skew). Modules: `event_live` (cold-week window
+  + fill-diff + `LiveEventTrader`), `live_data` (hourly updater reusing the exact producers; invariants
+  finalization + append-immutability), `event_runner` (env fills → hard `trader.risk` guardrails +
+  ledger + telemetry; the env IS the paper book), `event_agent` (hourly loop, **PAPER-ONLY** — live
+  refuses, no TWAK signing path yet). **Offline obs-parity gate** (`tests/test_live_data.py`): replayed
+  bars match recorded `r_alt`+volume EXACTLY (rtol 1e-9). ~20 new tests; suite green.
+- **Live feed = GeckoTerminal BSC pools (parity-locked), NOT CMC.** ef-s2 trained on GeckoTerminal
+  pool candles; CMC is CEX-aggregated spot → would push the frozen model out-of-distribution (and the
+  existing `cmc_market` has no 1h history). Decided with the user. Anchor stays ccxt/Binance.US.
+- **Private model store** (weights are core IP, must not be public): `s3://alexlouis-act-private/models/`
+  (Block Public Access + SSE, no CDN), EC2 role scoped `s3:GetObject`; provenance `metrics.json` pulled
+  from the public bundle. `deploy/private-model-store.md` + `deploy/iam/private-models-*.json`.
+- **Deployed LIVE** (`trader-event-agent.service`, replaces the disabled HoldCore unit). torch
+  2.12.1+cpu + sb3-contrib + ccxt on the box; on-box dry-run gate passed; first live tick
+  2026-06-17T23:49Z, publishing to `data.alexlouis.dev/trading`.
+- **429 degenerate-universe bug (user-caught, FIXED `cdbcf03`).** The user spotted XRP/LINK trades:
+  `fetch_alt_latest` had no 429 retry, so GeckoTerminal's rate limit silently starved ~12 of 20 tokens
+  each tick (WARN hidden on block-buffered stdout) → the vol-top-8 fell back to the low-vol majors with
+  data, not the volatile microcaps. Fix: exp-backoff 429 retry + WARN→stderr + 3s pacing. Verified true
+  vol-top-8 = SIREN/COAI/SKYAI/UB/BANANAS31/B/ZEC/HUMA (XRP #15, LINK #16 excluded); clean run trades
+  only true-top-8 (first fill HUMA). 19/20 tokens fresh live; **XAUt** pool is genuinely inactive
+  (perma-stale, never selected). Lessons: log to stderr under systemd; any hourly external fetch needs
+  429 backoff; a degenerate universe is silent (`uni=8` is just k=8) — inspect the per-token vol ranking
+  (`deploy/inspect_universe.py`). This makes the [[Project Overview]] "thin BSC liquidity" risk concrete.
+- **Daily market-volatility scan automated on EC2** (`trader.agent.daily_scan`, systemd
+  `trader-daily-scan.timer` @ 00:10 UTC). Refreshes the top-level `market_metrics.json` (vol/corr
+  dashboard, via the existing `compute_market_metrics`) over current data AND appends a **`selected`**
+  block = the model's ACTUAL current vol-top-8, read from the SAME env the harness trades
+  (`eval_universe_and_caps`). ef-s2 selects WEEKLY, so `selected` changes weekly while metrics refresh
+  daily — surfaces the real traded set transparently, **no model change** (the daily-informational
+  decision; a daily re-pick would be OOD for the frozen model). Torch-free selection; laptop-tested;
+  verified on the box (selected = SIREN/COAI/SKYAI/UB/BANANAS31/B/ZEC/HUMA, wk 2026-06-15). Top-level
+  publish needs a scoped `market_metrics.json` PutObject grant (the box role is otherwise `trading/*`-only)
+  — `deploy/iam/market-metrics-put-policy.json`. → [[Apentic Data Contract]] §market_metrics.json.
+- **Earlier this session (host stand-up, ~06-12):** EC2 host phases A–F completed (provision → harden →
+  key ceremony → systemd paper) and the **`trading/` telemetry publisher built** (`trader.agent.publish`,
+  put-only role) — see [[EC2 Trading Host Runbook]] (incl. the as-found corrections: TWAK never shows the
+  mnemonic; the headless keychain copy is deleted; the SIGTERM clean-stop fix) and [[Apentic Data Contract]]
+  §trading/.

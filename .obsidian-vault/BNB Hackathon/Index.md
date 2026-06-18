@@ -25,6 +25,7 @@ This is the map of content (MOC) for my entry into the [[BNB Hack - AI Trading A
 - [[Social Media Scanner]] - X.com scanner for breaking news such as hacks or adoption
 - [[Remote Capabilities]] - Training AI from host computer, results dashboards, CI/CD
 - [[Apentic Data Contract]] - The static-JSON contract between training and the web frontend
+- [[Live Forward-Run Harness]] - Running the trained RL champion (ef-s2) live in paper mode on EC2: weekly-replay reuse, live data feed, private weights store, the deployment
 - [[Experiment Log]] - Rigid, reproducible record of every training iteration + the current champion
 - [[Build Log]] - Chronological record of what's been built and the key decisions behind it
 

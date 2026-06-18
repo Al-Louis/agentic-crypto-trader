@@ -1,0 +1,44 @@
+# trader-daily-scan.service — daily market-volatility scan -> market_metrics.json (oneshot).
+# Paired with trader-daily-scan.timer (fires 00:10 UTC). Install:
+#   sudo install -m 0644 deploy/trader-daily-scan.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now trader-daily-scan.timer
+#
+# Reads the data/ panels the hourly trader-event-agent keeps fresh (no own network refresh), so it
+# runs after the 00:03 tick. Publishes the TOP-LEVEL market_metrics.json via the instance role —
+# requires the market_metrics PutObject grant (deploy/iam/market-metrics-put-policy.json). The
+# `selected` block reflects the model's CURRENT weekly vol-top-8 (informational; no model change).
+
+[Unit]
+Description=Apentic daily market scan -> market_metrics.json (+ today's traded set)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/srv/trader/agentic-crypto-trader
+EnvironmentFile=/etc/trader/trader.env
+Environment=HOME=/srv/trader
+ExecStart=/srv/trader/venv/bin/python -m trader.agent.daily_scan --run-dir /srv/trader/models/ppo-event-rdLe4-ef-503b784-s2 --window last --publish
+
+# --- sandbox / hardening (mirrors trader-event-agent.service) ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/trader
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryDenyWriteExecute=no

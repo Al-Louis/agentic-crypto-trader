@@ -320,7 +320,12 @@ exactly the key-on-remote-box question owned by [[Remote Capabilities]].
   answered there: no Secret Service on a server, so the root-owned `0600` env-file IS the
   unlock path (option (b) above); the flagged residual is that the AWS control plane joins
   the trust base (snapshots read the volume; guardrails don't protect *stolen* keys — only
-  bankroll sizing does). Remaining: the user executes it.
+  bankroll sizing does). Remaining: the user executes it. **Host is LIVE (paper) since 2026-06-12.**
+- **Trained-weights confidentiality (handled 2026-06-17).** The RL policy is core IP and must not
+  be public; the results bucket is CloudFront-public, so weights ship via a **dedicated private
+  bucket** `s3://alexlouis-act-private/models/` (Block Public Access + SSE, no CDN behavior), with
+  the EC2 instance role scoped to `s3:GetObject` only. Procedure + IAM: `deploy/private-model-store.md`,
+  `deploy/iam/private-models-{get,put}-policy.json` · [[Live Forward-Run Harness]].
 - **x402 on BSC.** Confirm the live BSC x402 routes (USDC/USDT) and whether our data/inference
   spend uses the TWAK native path or the BNB SDK `X402Signer`. (`twak x402 quote` is read-only
   and needs no wallet — cheap to probe once credentials exist.)

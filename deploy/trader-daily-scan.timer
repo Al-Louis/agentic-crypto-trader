@@ -1,0 +1,14 @@
+# trader-daily-scan.timer — fire the daily market scan at the start of each UTC trading day.
+# 00:10 UTC: after the Monday 00:00 week-open and the event agent's 00:03 data-refresh tick, so the
+# Monday scan reflects the freshly-selected week's vol-top-8. Persistent=true reruns a missed fire
+# (e.g. the box was down) on the next boot.
+
+[Unit]
+Description=Run the Apentic daily market scan at 00:10 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:10:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
