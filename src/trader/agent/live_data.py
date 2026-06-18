@@ -111,9 +111,26 @@ def refresh_factor_features(selection: list[dict], *, ohlcv_root: str = OHLCV_RO
 
 # --- network fetch (live only; not exercised by the offline parity gate) -----
 
-def fetch_alt_latest(pool: str, *, network: str = "bsc", limit: int = 300) -> list[list]:
-    """Most-recent 1h OHLCV page for a pool (GeckoTerminal). `[ts_sec, o, h, l, c, v]` rows."""
-    return gt.fetch_ohlcv(pool, timeframe="hour", aggregate=1, limit=limit, network=network)
+def fetch_alt_latest(pool: str, *, network: str = "bsc", limit: int = 300,
+                     max_429_retries: int = 5) -> list[list]:
+    """Most-recent 1h OHLCV page for a pool (GeckoTerminal). `[ts_sec, o, h, l, c, v]` rows.
+
+    Retries on HTTP 429 with exponential backoff (GeckoTerminal rate-limits hard — without this,
+    a single 429 silently drops a token for the whole tick, which degenerated the live vol-top-8
+    to only the tokens that happened not to 429). Mirrors the backfill downloader's 429 policy."""
+    import time  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+
+    attempt = 0
+    while True:
+        try:
+            return gt.fetch_ohlcv(pool, timeframe="hour", aggregate=1, limit=limit, network=network)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < max_429_retries:
+                time.sleep(min(8 * (2 ** attempt), 60))
+                attempt += 1
+                continue
+            raise
 
 
 def refresh_anchors(days: int = 10, root: str = ANCHOR_ROOT) -> dict:
@@ -122,9 +139,16 @@ def refresh_anchors(days: int = 10, root: str = ANCHOR_ROOT) -> dict:
     return download_anchor(["BTC/USDT", "BNB/USDT"], ["1h"], days=days, root=root)
 
 
+def _stderr(msg: str) -> None:
+    """Default logger -> stderr (systemd journal). stdout is block-buffered under systemd, so a
+    stdout WARN can sit invisibly in the buffer for a long time — exactly how the 429 skips hid."""
+    import sys  # noqa: PLC0415
+    print(msg, file=sys.stderr, flush=True)
+
+
 def update_live(selection: list[dict], now_wall: int, *, ohlcv_root: str = OHLCV_ROOT,
                 anchor_root: str = ANCHOR_ROOT, features_out: str = FEATURES_OUT,
-                anchor_days: int = 10, min_interval: float = 2.5, logger=print) -> dict:
+                anchor_days: int = 10, min_interval: float = 3.0, logger=_stderr) -> dict:
     """One hourly refresh of all three surfaces, then the factor regen. `now_wall` (unix seconds,
     injectable for tests) gates bar finalization. Returns a per-token appended-bar count + the
     anchor totals. The caller (the loop) then runs the validated loaders/driver UNCHANGED.

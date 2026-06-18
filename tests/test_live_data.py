@@ -55,6 +55,38 @@ def _write_history_part(tmp_root: str, sym: str, pool: str, hist: pd.DataFrame) 
     part.to_parquet(os.path.join(d, f"p_{int(part['timestamp'].min())}.parquet"), index=False)
 
 
+# --- 429 retry/backoff (the bug that degenerated the live universe) ----------
+
+def test_fetch_alt_latest_retries_on_429_then_succeeds(monkeypatch):
+    import time
+    import urllib.error
+    n = {"c": 0}
+
+    def fake(pool, **kw):
+        n["c"] += 1
+        if n["c"] < 3:
+            raise urllib.error.HTTPError("u", 429, "Too Many Requests", None, None)
+        return [[1700000000, 1, 1, 1, 1, 1]]
+
+    monkeypatch.setattr(ld.gt, "fetch_ohlcv", fake)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)        # no real backoff in the test
+    out = ld.fetch_alt_latest("0xpool")
+    assert n["c"] == 3 and out == [[1700000000, 1, 1, 1, 1, 1]]
+
+
+def test_fetch_alt_latest_reraises_after_max_retries(monkeypatch):
+    import time
+    import urllib.error
+
+    def always_429(pool, **kw):
+        raise urllib.error.HTTPError("u", 429, "rate", None, None)
+
+    monkeypatch.setattr(ld.gt, "fetch_ohlcv", always_429)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    with pytest.raises(urllib.error.HTTPError):
+        ld.fetch_alt_latest("0xpool", max_429_retries=2)
+
+
 # --- finalization ------------------------------------------------------------
 
 def test_finalized_bars_drops_the_forming_bar():
