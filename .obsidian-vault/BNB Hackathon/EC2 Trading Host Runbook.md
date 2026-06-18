@@ -308,6 +308,34 @@ check anyway); within minutes `https://data.alexlouis.dev/trading/heartbeat.json
 filenames per the loop's publisher — [[Apentic Data Contract]] §trading/) is fresh, proving
 the put-only role works.
 
+### Phase F-bis — deploy the RL champion (ef-s2) for the paper forward-run (DONE 2026-06-17)
+
+The HoldCore unit above (`trader-agent.service`) was the placeholder that proved the loop. The
+**actual forward-run** runs the trained event-driven champion via a second unit
+(`deploy/trader-event-agent.service`) that **replaces** it. Architecture, parity rationale, and the
+429 fix live in **[[Live Forward-Run Harness]]**; here is just the host procedure:
+
+1. **Private weights** (not public — `deploy/private-model-store.md`): create `s3://alexlouis-act-private`
+   (Block Public Access + SSE), grant the instance role `s3:GetObject` on `models/*`
+   (`deploy/iam/private-models-get-policy.json`); the desktop/admin uploads `policy.zip` +
+   `vecnormalize.pkl` to `models/<run-id>/`. The box pulls them via the instance role (boto3, the
+   `remote` extra — no admin creds on the box); provenance `metrics.json` comes from the **public**
+   bundle (`data.alexlouis.dev/<run-id>/metrics.json` — eval metadata isn't secret).
+2. **Toolchain:** `pip install torch (CPU index) sb3-contrib ccxt` into `/srv/trader/venv` (~1 GB; fits
+   the 16 GiB disk; watch the 2 GiB+swap during load).
+3. **Dry-run gate (before enable):** `python -m trader.agent.event_agent --run-dir
+   /srv/trader/models/<run-id> --once --no-refresh` over recorded data — proves the model loads, the
+   LSTM threads, and a tick produces fills.
+4. **Enable:** `sudo systemctl disable --now trader-agent` (stop the placeholder), archive its ledger,
+   `install` + `enable --now trader-event-agent`. Ticks on start (catch-up + heartbeat) then hourly at
+   HH:03. **PAPER-ONLY** — the event harness has no TWAK signing path yet, so live mode refuses loudly
+   (live-week registration/funding is Phase G–H, unchanged).
+
+**Checkpoint F-bis:** `systemctl is-active trader-event-agent` → `active`; a `[tick …]` line shows
+`wk=<Monday> eq=$… fills+N`; `deploy/inspect_universe.py` shows the vol-top-8 selected from the full
+20-token pool (NOT a NaN-starved subset — the 429-degenerate-universe lesson in [[Live Forward-Run Harness]]);
+`data.alexlouis.dev/trading/status.json` is fresh with `mode: paper`.
+
 **One-time, from the laptop (USER-ACTION F1):** add a CloudFront cache behavior on the data
 distribution for path pattern `trading/*` using the managed **CachingDisabled** policy (keep
 `SimpleCORS` response headers). This is the freshness answer: no invalidations from the box,

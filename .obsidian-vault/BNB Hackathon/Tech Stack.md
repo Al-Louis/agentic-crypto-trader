@@ -63,7 +63,10 @@ agentic-crypto-trader/
 > this original sketch once tested (see [[Simulated Market]]):
 > - **OHLCV history** → **GeckoTerminal** (CoinGecko on-chain, *keyless*) by pool address;
 >   DexScreener has no history, CMC history is CEX-centric/tier-gated. Cached to resumable
->   Parquet (`trader.data.downloader`).
+>   Parquet (`trader.data.downloader`). **Also the LIVE forward-run feed** (`trader.agent.live_data`,
+>   hourly append + 429 backoff) — parity-locked to GeckoTerminal because ef-s2 trained on these
+>   BSC-pool candles; CMC was rejected as the live feed (CEX-aggregated → out-of-distribution for
+>   the frozen model). See [[Live Forward-Run Harness]].
 > - **Screening** → **DexScreener** (*keyless*): liquidity / volume / turnover / pool age.
 > - **Contract resolution** → **CMC** `cryptocurrency/map`+`info` (`CMC_API_KEY`): symbol →
 >   canonical BSC contract, fixing the 35% symbol-search ambiguity (`trader.data.cmc`).

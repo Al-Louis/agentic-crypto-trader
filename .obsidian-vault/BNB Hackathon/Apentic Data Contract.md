@@ -176,6 +176,9 @@ revealed the agent's continuous-eval results don't survive weekly sessions — s
 
 A third top-level surface for the **live agent loop** (consumer: the planned
 `/apentic/trading` page — design in [[Real-time Monitoring]] §public monitoring surface).
+**As of 2026-06-17 the producer is the event-driven RL champion forward-run**
+(`trader.agent.event_runner`, multi-token vol-top-8, paper $10k cold-weekly) — the row kinds
+below are unchanged; see [[Live Forward-Run Harness]].
 Differs from the run bundles above in producer and cadence:
 
 - **Producer is the EC2 trading host itself** (put-only instance role scoped to `trading/*`
