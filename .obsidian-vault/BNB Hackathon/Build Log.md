@@ -1081,6 +1081,16 @@ live **paper** forward-run on BSC, ahead of the June 22 window. Branch `feat/liv
   (perma-stale, never selected). Lessons: log to stderr under systemd; any hourly external fetch needs
   429 backoff; a degenerate universe is silent (`uni=8` is just k=8) — inspect the per-token vol ranking
   (`deploy/inspect_universe.py`). This makes the [[Project Overview]] "thin BSC liquidity" risk concrete.
+- **Daily market-volatility scan automated on EC2** (`trader.agent.daily_scan`, systemd
+  `trader-daily-scan.timer` @ 00:10 UTC). Refreshes the top-level `market_metrics.json` (vol/corr
+  dashboard, via the existing `compute_market_metrics`) over current data AND appends a **`selected`**
+  block = the model's ACTUAL current vol-top-8, read from the SAME env the harness trades
+  (`eval_universe_and_caps`). ef-s2 selects WEEKLY, so `selected` changes weekly while metrics refresh
+  daily — surfaces the real traded set transparently, **no model change** (the daily-informational
+  decision; a daily re-pick would be OOD for the frozen model). Torch-free selection; laptop-tested;
+  verified on the box (selected = SIREN/COAI/SKYAI/UB/BANANAS31/B/ZEC/HUMA, wk 2026-06-15). Top-level
+  publish needs a scoped `market_metrics.json` PutObject grant (the box role is otherwise `trading/*`-only)
+  — `deploy/iam/market-metrics-put-policy.json`. → [[Apentic Data Contract]] §market_metrics.json.
 - **Earlier this session (host stand-up, ~06-12):** EC2 host phases A–F completed (provision → harden →
   key ceremony → systemd paper) and the **`trading/` telemetry publisher built** (`trader.agent.publish`,
   put-only role) — see [[EC2 Trading Host Runbook]] (incl. the as-found corrections: TWAK never shows the

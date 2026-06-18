@@ -44,12 +44,25 @@ an expandable per-config seed breakdown from `seeds_detail`.
 
 ## market_metrics.json — volatility / correlation dashboard (top-level)
 
-Published by `scripts/publish_market_metrics.py [--publish]` (sibling of `leaderboard.json`,
-no-cache, invalidated each publish). A self-contained market-structure snapshot for the
-**volatility / correlation screen** — it validates the risk picture the agent design hinges on:
-the alts span ~8× the median vol, they **decouple from BTC** (alts pump while BTC bleeds), and
-the token×token correlation is near-zero (so risk-parity sizing collapses portfolio drawdown).
-Producer: `trader.report.market_metrics.compute_market_metrics` (pure, tested).
+Published two ways: ad-hoc `scripts/publish_market_metrics.py [--publish]` (laptop/desktop, with
+CloudFront invalidation), and — **as of 2026-06-17 — a DAILY automated scan on the EC2 box**
+(`trader.agent.daily_scan`, systemd `trader-daily-scan.timer` at 00:10 UTC). A self-contained
+market-structure snapshot for the **volatility / correlation screen** — it validates the risk
+picture the agent design hinges on: the alts span ~8× the median vol, they **decouple from BTC**
+(alts pump while BTC bleeds), and the token×token correlation is near-zero (so risk-parity sizing
+collapses portfolio drawdown). Producer: `trader.report.market_metrics.compute_market_metrics` (pure,
+tested).
+
+**`selected` (added 2026-06-17) — the model's ACTUAL traded set.** The daily EC2 scan appends a
+`selected` block read from the SAME env the live harness trades (`eval_universe_and_caps` over the
+current cold-week window): the **vol-top-8 ef-s2 is trading this week** + its risk-parity caps /
+USD allocation. ef-s2 selects **WEEKLY** (causal trailing-168h vol at the Monday open, fixed for the
+week — how it trained), so `selected` changes weekly while the dashboard metrics refresh daily. It
+is informational — it does NOT drive the model (the model self-selects internally). `vol_rankings`
+is the evolving-pool research view; `selected` is the authoritative live pick. The EC2 publish uses
+the instance role (a scoped `market_metrics.json` PutObject grant — `deploy/iam/market-metrics-put-policy.json`)
++ `no-cache`; freshness ideally backed by a CloudFront CachingDisabled behavior on `market_metrics.json`
+(like `trading/*`). See [[Live Forward-Run Harness]].
 
 ```
 { generated, kind?: in window,
@@ -66,8 +79,11 @@ Producer: `trader.report.market_metrics.compute_market_metrics` (pure, tested).
      vol_series: [ { time, ann_vol } ]   // rolling-vol sparkline (downsampled, ~150 pts)
   } ],
   correlation: { symbols: [ …tokens…, "BTC" ], matrix: [[…]] },  // (n+1)² symmetric, unit diagonal
+  vol_rankings: { "24h"|"7d"|"30d"|"90d"|"180d": { ranked:[{symbol,ann_vol,rank}], top8:[…] } },  // evolving-pool view
   summary:     { n_tokens, avg_pairwise_corr, median_pairwise_corr, max_pairwise_corr,
-                 universe_ew_return, regime_label: "bull"|"bear"|"flat" } }
+                 universe_ew_return, regime_label: "bull"|"bear"|"flat" },
+  selected:    { method, run_id, week_start, as_of,        // the MODEL's ACTUAL current vol-top-8
+                 tokens:[…8…], caps:{tok:frac}, alloc_usd:{tok:usd} } }   // weekly cadence — see below
 ```
 
 All `*_return` / `ret_window` / `*_runup` / `*_drawdown` are **fractions** (×100 for display).

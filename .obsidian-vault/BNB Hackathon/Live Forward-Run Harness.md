@@ -113,6 +113,18 @@ steady state, the clean fix is a GeckoTerminal API key (higher limits) — surfa
 data silently drift. Also watch the **≥1-trade/day floor**: ef-s2's published gate shows several
 low-activity weeks (a real DQ risk for the live window — `daily_floor_ok` in `status.json`).
 
+## Daily market scan (`market_metrics.json`)
+
+A daily EC2 timer (`trader.agent.daily_scan`, `trader-daily-scan.timer` @ 00:10 UTC) refreshes the
+top-level **`market_metrics.json`** dashboard (vol/correlation, via `compute_market_metrics`) and
+appends a **`selected`** block = the model's ACTUAL current vol-top-8, read from the same env path
+the harness trades (`eval_universe_and_caps` over the cold-week window). Because ef-s2 selects
+**weekly**, `selected` changes weekly while the metrics refresh daily — it surfaces the real traded
+set transparently and does **not** drive the model (a daily re-pick would be OOD for the frozen
+model — the explicit design decision). Torch-free. Publishes top-level via the instance role (a
+scoped `market_metrics.json` PutObject grant — the role is otherwise `trading/*`-only). Inspect the
+live pick on-box with `deploy/inspect_universe.py`. Schema → [[Apentic Data Contract]] §market_metrics.json.
+
 ## What's NOT built yet
 - **Live TWAK signing path** for the event harness (paper-only today; live mode refuses). Separate
   from the Phase-G on-chain registration ([[EC2 Trading Host Runbook]]).
