@@ -78,6 +78,21 @@ def append_alt_bars(symbol: str, pool: str, bars: list[list], root: str = OHLCV_
     return len(fresh)
 
 
+def build_close_panel(selection: list[dict], index, root: str = OHLCV_ROOT):
+    """Per-token REAL USD close aligned to `index` — used to translate the env's internal
+    return-index fill prices (which start at 1.0 at the window's warmup start) into real market
+    prices for the telemetry. Mirrors `build_volume_panel`'s alignment (reindex + ffill)."""
+    cols = {}
+    for s in selection:
+        df = load_ohlcv(s["symbol"], s["pair_address"], "hour", 1, root=root)
+        if df.empty:
+            continue
+        ts = df["timestamp"].to_numpy()
+        ts = (ts // 1000) if len(ts) and ts.max() > 1e12 else ts
+        cols[s["symbol"]] = pd.Series(df["close"].to_numpy(), index=ts).reindex(index).ffill()
+    return pd.DataFrame(cols, index=index)
+
+
 # --- factor regen (reuses the exact training feature recipe) -----------------
 
 def _anchor_seconds(symbol: str, root: str = ANCHOR_ROOT) -> pd.DataFrame:
