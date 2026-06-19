@@ -61,6 +61,8 @@ def env_kwargs_from_provenance(prov: dict, returns, build_ohlc_frac_panels) -> d
               scale_in=prov.get("scale_in", False),
               shallow_break_max=prov.get("shallow_break_max", 0.0),
               consol_vol_max=prov.get("consol_vol_max", 0.0),
+              rotate_pump_block=prov.get("rotate_pump_block", 0.0),
+              rotate_pump_win=prov.get("rotate_pump_win", 24),
               cycle_obs=prov.get("cycle_obs", False), no_btc_obs=prov.get("no_btc_obs", False),
               universe_lookback=prov.get("universe_lookback", 0), seed=prov.get("seed", 0))
     if prov.get("intrabar_floor") or (prov.get("wick_reject") or 0) > 0:

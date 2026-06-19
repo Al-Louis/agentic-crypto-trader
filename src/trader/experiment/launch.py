@@ -77,6 +77,8 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "scale_in": ("--scale-in", bool),               # ADD to a held winner on a fresh ignition (fenced)
     "shallow_break_max": ("--shallow-break-max", float),  # suppress a SHALLOW EMA-break (cushion>-x) ...
     "consol_vol_max": ("--consol-vol-max", float),        # ... in a QUIET token (24h vol<y): sideways noise
+    "rotate_pump_block": ("--rotate-pump-block", float),  # anti-chase: don't sell a holding to fund an ...
+    "rotate_pump_win": ("--rotate-pump-win", int),        # ... entry into a token that ran up > x over y bars
     "cycle_obs": ("--cycle-obs", bool),             # SPENT-MOVE obs (ret/bars since prior ignition)
     "n_epochs": ("--n-epochs", int),                # PPO update conservatism (semi-MDP: few decisions)
     "target_kl": ("--target-kl", float),            # PPO early-stop KL per update

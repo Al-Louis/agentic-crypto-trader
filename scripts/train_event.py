@@ -296,6 +296,11 @@ def main() -> None:
                    "sideways noise-dip that shakes the agent out before a pump. 0 = off. loss_floor/trail stay")
     p.add_argument("--consol-vol-max", type=float, default=0.0, help="the QUIET threshold (24h realized vol "
                    "< this) for --shallow-break-max sideways EMA-break suppression. 0 = off")
+    p.add_argument("--rotate-pump-block", type=float, default=0.0, help="ANTI-CHASE rotation brake: skip "
+                   "loser-funded rotation when the candidate has run up > this over --rotate-pump-win bars "
+                   "(don't SELL a holding to chase an already-pumped token). 0 = off")
+    p.add_argument("--rotate-pump-win", type=int, default=24, help="lookback bars for --rotate-pump-block "
+                   "run-up (default 24h)")
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
@@ -440,6 +445,7 @@ def main() -> None:
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
                       scale_in=args.scale_in,
                       shallow_break_max=args.shallow_break_max, consol_vol_max=args.consol_vol_max,
+                      rotate_pump_block=args.rotate_pump_block, rotate_pump_win=args.rotate_pump_win,
                       cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback,
                       no_btc_obs=args.no_btc_obs,
                       fixed_universe=[t.strip() for t in args.fixed_universe.split(",") if t.strip()] or None,
@@ -644,6 +650,7 @@ def main() -> None:
                              "intrabar_floor": args.intrabar_floor, "wick_reject": args.wick_reject,
                              "scale_in": args.scale_in,
                              "shallow_break_max": args.shallow_break_max, "consol_vol_max": args.consol_vol_max,
+                             "rotate_pump_block": args.rotate_pump_block, "rotate_pump_win": args.rotate_pump_win,
                              "det_blacklist": args.det_blacklist, "recurrent": args.recurrent,
                              "lstm_size": args.lstm_size if args.recurrent else None,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,

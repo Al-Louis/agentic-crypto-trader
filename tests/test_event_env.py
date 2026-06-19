@@ -531,6 +531,50 @@ def test_intrabar_stop_tags_intrabar_stop_forced():
     assert sells[0][5] in FORCED_REASONS
 
 
+def _rotate_setup(env, runup):
+    """Stage a rotation: a weak laggard held, a stronger candidate, cash=0, and the candidate's
+    px run-up over rotate_pump_win bars set to `runup`. Returns (laggard, candidate)."""
+    env.reset(start=40)
+    env._cush = env._cush.copy()
+    env._px = env._px.copy()
+    t = env.universe[0]; jt = env.col_ix[t]
+    incoming = env.universe[1]; ji = env.col_ix[incoming]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, jt], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, jt]}
+    env._cush[bar, jt] = -0.5                         # laggard = weakest cushion
+    env._cush[bar, ji] = 0.5                          # candidate stronger -> rotation would proceed
+    b0 = bar - env.rotate_pump_win
+    env._px[bar, ji] = env._px[b0, ji] * (1.0 + runup)   # candidate's recent run-up
+    env.cash = 0.0
+    env._trades = []
+    return t, incoming
+
+
+def test_rotate_pump_block_skips_chase():
+    """With the anti-chase brake on, _rotate_for refuses to liquidate a holding to fund an entry into
+    a candidate that ALREADY ran up past the threshold — but still rotates for a non-pumped candidate."""
+    env = _env(rotate_pump_block=0.20, rotate_pump_win=4)
+    t, incoming = _rotate_setup(env, runup=0.50)          # candidate +50% over the window (> 20% block)
+    env._rotate_for(incoming, want=1000.0)
+    assert not [m for m in env._trades if m[0] == t and m[1] < 0]   # NO sell-to-chase
+    assert env.pos.get(t) is not None                     # laggard still held
+
+    env2 = _env(rotate_pump_block=0.20, rotate_pump_win=4)
+    t2, inc2 = _rotate_setup(env2, runup=0.05)            # candidate only +5% (< 20%): not a chase
+    env2._rotate_for(inc2, want=1000.0)
+    assert [m for m in env2._trades if m[0] == t2 and m[1] < 0]     # rotation proceeds as before
+
+
+def test_rotate_pump_block_off_is_byte_identical():
+    """Default (rotate_pump_block=0.0) rotates regardless of the candidate's run-up — unchanged."""
+    env = _env()                                          # knob off by default
+    assert env.rotate_pump_block == 0.0
+    t, incoming = _rotate_setup(env, runup=2.0)           # candidate +200% — would be blocked if on
+    env._rotate_for(incoming, want=1000.0)
+    assert [m for m in env._trades if m[0] == t and m[1] < 0]       # still rotates (brake off)
+
+
 def test_rotation_out_tags_rotation_out_forced():
     """A holding closed by _rotate_for (to fund a stronger ignition) tags ROTATION_OUT (FORCED)."""
     env = _env()

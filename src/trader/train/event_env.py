@@ -95,6 +95,7 @@ class EventRungEnv:
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
                  scale_in: bool = False,
                  shallow_break_max: float = 0.0, consol_vol_max: float = 0.0,
+                 rotate_pump_block: float = 0.0, rotate_pump_win: int = 24,
                  cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
                  fixed_universe: list | None = None,
                  record_trace: bool = False, seed: int | None = None):
@@ -176,6 +177,15 @@ class EventRungEnv:
         #   (the FF Apr-9 -0.1% case). The loss_floor + trailing stop stay fully active (real breaks still
         #   cut), so downside is bounded while the position survives to catch the pump. Both 0 => OFF (byte-
         #   identical). NOT applied to deep breaks or high-vol breaks (those are real exits).
+        self.rotate_pump_block = float(rotate_pump_block)    # ANTI-CHASE rotation brake (user idea, 2026-06-19):
+        self.rotate_pump_win = int(rotate_pump_win)          #   loser-funded rotation (_rotate_for) currently
+        #   liquidates a holding to FUND an entry into the higher-cushion candidate — so it can SELL a position
+        #   to CHASE a token that ALREADY pumped (s1 W21: sold FF to buy ZEC's 2nd leg @+44% over its cycle;
+        #   BOTH legs lost). When the candidate's run-up over the prior `rotate_pump_win` bars exceeds
+        #   `rotate_pump_block`, SKIP the rotation entirely (the entry then funds from free cash only -> a
+        #   smaller buy or a skip). CASH-funded first-leg entries (ZEC's +23.6% first leg) are untouched —
+        #   only the SELL-to-chase is blocked. 0.0 => OFF (byte-identical). Targets the funding side-effect,
+        #   NOT the agent's discretion (the agent never chose the ROTATION_OUT sell; it's automatic).
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.no_btc_obs = bool(no_btc_obs)                  # neutralize the btc_trend obs slot to a
         #   constant 0: the universe was selected for LOW BTC correlation, so a BTC-anchored regime
@@ -623,7 +633,16 @@ class EventRungEnv:
 
     def _rotate_for(self, tok: str, want: float):
         """Free cash for `tok` by closing the WEAKEST holding (lowest cushion) — but only if it's
-        weaker than the incoming candidate (rung-0's swap-weak-for-strong guard)."""
+        weaker than the incoming candidate (rung-0's swap-weak-for-strong guard). The anti-chase
+        brake (`rotate_pump_block`) refuses to liquidate a holding when the candidate has ALREADY
+        run up too far (the sell-to-chase-a-pump case) — the entry then funds from free cash only."""
+        if self.rotate_pump_block > 0.0:                     # ANTI-CHASE: don't sell a holding to fund an
+            j = self.col_ix[tok]                             #   entry into an already-pumped candidate
+            b0 = self.bar - self.rotate_pump_win
+            if b0 >= 0 and self._px[b0, j] > 0:
+                runup = self._px[self.bar, j] / self._px[b0, j] - 1.0
+                if runup > self.rotate_pump_block:
+                    return                                   # skip rotation -> fund from cash (undersize/skip)
         while self.cash < want and self.pos:
             cur_cush = self._cush[self.bar, self.col_ix[tok]]
             weak = min(self.pos, key=lambda h: self._cush[self.bar, self.col_ix[h]])
