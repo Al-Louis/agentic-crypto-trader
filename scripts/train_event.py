@@ -189,7 +189,7 @@ def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed)
 
 
 def evaluate_weekly_gate(returns, btc, liq, vol, env_kwargs, make_predict, val_start, test_start,
-                         seed, k, vol_target, cap_floor):
+                         seed, k, vol_target, cap_floor, vol_mult=2.5):
     """Grade the policy the way it DEPLOYS: independent COLD weekly sessions (fresh $10k, no cross-week
     holds) over the OOS weeks (val+test), vs rung-0 + Buy&Hold graded the same way, then apply the
     random-week distribution gate ([[AI Training]] §the-fork). A fresh predictor per week = a cold LSTM
@@ -200,7 +200,8 @@ def evaluate_weekly_gate(returns, btc, liq, vol, env_kwargs, make_predict, val_s
         split = we.split_label(ws, val_start, test_start)
         if split == "train":
             continue                                           # gate on OOS weeks only (val+test)
-        base = we.grade_week_baselines(ws, win, liq, vol, k=k, vol_target=vol_target, cap_floor=cap_floor)
+        base = we.grade_week_baselines(ws, win, liq, vol, k=k, vol_target=vol_target, cap_floor=cap_floor,
+                                       vol_mult=vol_mult)
         eq, recs, *_ = evaluate_event_policy(make_predict(), win, btc, liq, vol, env_kwargs)
         # return from the $10k DEPOSIT (capital), NOT eq[0]: a basket_default policy's eq[0] is already
         # post-entry-cost, so dividing by it would manufacture a spurious edge over B&H (which measures
@@ -338,6 +339,9 @@ def main() -> None:
                    "where full history always exists behind the current bar")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
+    p.add_argument("--vol-mult", type=float, default=2.5, help="ignition volume-surge threshold "
+                   "(4h-avg vol / prior-164h-avg >= this). Lower (e.g. 2.0) fires earlier + lets the "
+                   "policy LEARN the cutoff from the surge obs instead of hard-coding 2.5")
     p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
                    "TRAINING data so the agent sees crashes and learns to de-risk into low breadth")
     p.add_argument("--crash-eval", action="store_true", help="add a held-out CRASH regime (a crash spliced "
@@ -415,7 +419,7 @@ def main() -> None:
                        "intrabar_floor": args.intrabar_floor,
                        "high_frac": highf if args.wick_reject > 0 else None,
                        "wick_reject": args.wick_reject}
-    env_kwargs = dict(k=args.k, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
+    env_kwargs = dict(k=args.k, vol_mult=args.vol_mult, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
                       reward_mode=args.reward_mode, r4_beta=args.r4_beta, res_gamma=args.res_gamma,
                       fwd_horizon=args.fwd_horizon, ungate=args.ungate,
@@ -557,7 +561,7 @@ def main() -> None:
     if args.eval_mode == "weekly":                         # the DEPLOYMENT-structure gate (2026-06-14 fork)
         weekly_verdict, weekly_rows = evaluate_weekly_gate(
             returns, btc, liq, vol, env_kwargs, make_predict, int(val_r.index[0]), int(test_r.index[0]),
-            args.seed, args.k, args.vol_target, args.cap_floor)
+            args.seed, args.k, args.vol_target, args.cap_floor, args.vol_mult)
         print_weekly_verdict(weekly_verdict, weekly_rows)
         overall_gate = weekly_verdict["pass"]
         pr = evaluate_and_gate(args.eval_split, held[args.eval_split], btc, liq, vol, env_kwargs,
