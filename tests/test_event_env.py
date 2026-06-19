@@ -71,6 +71,28 @@ def test_fixed_universe_mode():
         _env(universe_mode="fixed", fixed_universe=["NOPE"])   # token not in panel
 
 
+def test_sideways_ema_break_suppression():
+    """shallow+quiet EMA-break suppression: OFF builds no svol (byte-identical); ON builds it and yields
+    no MORE EMA_BREAK exits than OFF over the same driven episode (loss_floor/trailing untouched)."""
+    def ema_breaks(**kw):
+        env = _env(**kw)
+        assert (env._svol is not None) == (kw.get("shallow_break_max", 0) > 0 and kw.get("consol_vol_max", 0) > 0)
+        env.reset(start=40)
+        n = 0
+        for _ in range(800):
+            et, _tok = env._pending
+            if et == "none":
+                break
+            _o, _r, done, info = env.step([1.0 if et == "entry" else 0.0])
+            n += sum(1 for tr in info.get("trades", []) if len(tr) > 5 and tr[5] == EMA_BREAK)
+            if done:
+                break
+        return n
+    off = ema_breaks()
+    on = ema_breaks(shallow_break_max=0.05, consol_vol_max=0.05)
+    assert on <= off                                      # suppression can only REMOVE shallow-quiet breaks
+
+
 def _run(env, entry_a=1.0, exit_a=0.0, start=40):
     """Drive an episode with fixed per-event-type actions; record each decision."""
     env.reset(start=start)

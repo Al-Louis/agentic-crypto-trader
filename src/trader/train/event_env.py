@@ -94,6 +94,7 @@ class EventRungEnv:
                  low_frac: pd.DataFrame | None = None, intrabar_floor: bool = False,
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
                  scale_in: bool = False,
+                 shallow_break_max: float = 0.0, consol_vol_max: float = 0.0,
                  cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
                  fixed_universe: list | None = None,
                  record_trace: bool = False, seed: int | None = None):
@@ -168,6 +169,13 @@ class EventRungEnv:
         if self.basket_default and not self.rule_default:
             raise ValueError("basket_default builds on rule_default's discrete 4-level head; set rule_default=True")
         self.rule_entry_frac = 0.20                         # the rung-0 RULE's fixed sizing (the benchmark)
+        self.shallow_break_max = float(shallow_break_max)    # SIDEWAYS-CHOP EMA-break suppression (user idea):
+        self.consol_vol_max = float(consol_vol_max)          #   when BOTH the break is SHALLOW (cushion in
+        #   (-shallow_break_max, 0)) AND the token is QUIET (24h realized vol < consol_vol_max), DON'T fire
+        #   the EMA-break — it's a noise dip in a tight consolidation that shakes the agent out before a pump
+        #   (the FF Apr-9 -0.1% case). The loss_floor + trailing stop stay fully active (real breaks still
+        #   cut), so downside is bounded while the position survives to catch the pump. Both 0 => OFF (byte-
+        #   identical). NOT applied to deep breaks or high-vol breaks (those are real exits).
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.no_btc_obs = bool(no_btc_obs)                  # neutralize the btc_trend obs slot to a
         #   constant 0: the universe was selected for LOW BTC correlation, so a BTC-anchored regime
@@ -212,6 +220,9 @@ class EventRungEnv:
         self._cush = cushion.to_numpy()
         self._surge = surge.clip(0.0, SURGE_CLIP).to_numpy()
         self._ignite = ignite if isinstance(ignite, np.ndarray) else ignite.to_numpy()
+        # short-window (24h) realized vol for the sideways-chop EMA-break suppression ("quiet" test)
+        self._svol = (self.returns.rolling(24, min_periods=8).std().to_numpy()
+                      if shallow_break_max > 0.0 and consol_vol_max > 0.0 else None)
         # causal universe-selection volatility: trailing `universe_lookback` bars (0 = the historical
         # default, warmup=168h/7d). The lookback is an UNTESTED axis (user simulator design,
         # 2026-06-12): 24=1d, 168=1wk, 720=1mo, 2160=3mo, 4320=6mo (data permitting).
@@ -447,6 +458,10 @@ class EventRungEnv:
             stop_hit = self._px[bar, j] < p["peak_px"] * (1.0 - self.stop_k)   # TRAILING stop off the
             #                              peak (matches canonical rung0.py:121 + _rule_equity_curve:400)
             ema_hit = self._cush[bar, j] < 0.0
+            if (ema_hit and self._svol is not None                  # SIDEWAYS-CHOP suppression: a SHALLOW
+                    and self._cush[bar, j] > -self.shallow_break_max     # break (price barely below EMA) in a
+                    and self._svol[bar, j] < self.consol_vol_max):       # QUIET token is a noise dip -> HOLD
+                ema_hit = False                                     # (loss_floor + trailing stop still bind)
             if stop_hit or ema_hit:
                 reason = TRAILING_STOP if stop_hit else EMA_BREAK   # precedence: stop > ema
                 ev.append(("exit", t, reason, bool(stop_hit and ema_hit)))   # both co-fired? (forensics)

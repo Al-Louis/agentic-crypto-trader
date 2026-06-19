@@ -37,7 +37,7 @@ from trader.strategy.candidate import select_vol_tokens
 def build_rung0(returns: pd.DataFrame, k: int = 8, ema_span: int = 72, tokens: list[str] | None = None,
                 volume: pd.DataFrame | None = None, vol_mult: float = 2.5, vol_spike: int = 24,
                 vol_base: int = 168, vol_fast: int = 4, trend_buf: float = 0.0,
-                trend_gate: bool = True, max_weight: float = 0.25):
+                trend_gate: bool = True, max_weight: float = 0.25, exit_ema_span: int | None = None):
     """Return a stateless `signal(hist) -> {token: dict}` of per-bar primitives.
 
     Each token dict has: price, ema, spike, rising, ignite, cushion (= price/ema - 1, used by the
@@ -67,6 +67,10 @@ def build_rung0(returns: pd.DataFrame, k: int = 8, ema_span: int = 72, tokens: l
             px = (1.0 + hist[t].fillna(0.0)).cumprod()
             ema_s = px.ewm(span=ema_span, adjust=False).mean()
             price, ema = float(px.iloc[-1]), float(ema_s.iloc[-1])
+            # exit_ema: a SEPARATE (typically longer) EMA for the price<ema weakness-exit, so the exit can
+            # be detuned without touching the ignition's trend gate. None => exit uses the same `ema`
+            # (byte-identical). Entry trend_ok / cushion always use `ema`.
+            exit_ema = float(px.ewm(span=exit_ema_span, adjust=False).mean().iloc[-1]) if exit_ema_span else ema
             spike = False                                          # sharp volume surge
             if vol is not None and t in vol.columns:
                 v = vol[t].loc[:i_now].to_numpy()
@@ -76,7 +80,7 @@ def build_rung0(returns: pd.DataFrame, k: int = 8, ema_span: int = 72, tokens: l
             rising = len(px) > vol_spike and price > float(px.iloc[-vol_spike - 1])
             ema_prev = float(ema_s.iloc[-vol_fast - 1]) if len(ema_s) > vol_fast else ema
             trend_ok = (not trend_gate) or (price > ema * (1.0 + trend_buf) and ema >= ema_prev)
-            out[t] = {"price": price, "ema": ema, "spike": spike, "rising": rising,
+            out[t] = {"price": price, "ema": ema, "exit_ema": exit_ema, "spike": spike, "rising": rising,
                       "ignite": bool(spike and rising and trend_ok), "cushion": price / ema - 1.0}
         return out
 
@@ -118,7 +122,7 @@ def run_rung0(returns: pd.DataFrame, signal_fn, liquidity: dict, capital: float 
             for t in [s for s in sig if st[s]["held"]]:            # 1) exits on held positions
                 s, d = st[t], sig[t]
                 s["peak"] = max(s["peak"], d["price"])
-                if d["price"] < s["peak"] * (1.0 - stop_k) or d["price"] < d["ema"]:
+                if d["price"] < s["peak"] * (1.0 - stop_k) or d["price"] < d.get("exit_ema", d["ema"]):
                     v = float(pos[t])
                     if abs(v) >= 1.0:
                         trade(t, -v)
