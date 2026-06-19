@@ -159,6 +159,9 @@ def main() -> None:
     p.add_argument("--run-id", required=True)
     p.add_argument("--no-publish", action="store_true")
     p.add_argument("--max-weeks", type=int, default=0, help="cap for a quick run (0 = all)")
+    p.add_argument("--vol-mult", type=float, default=None, help="override the ignition surge threshold "
+                   "(for runs trained pre-2026-06-19 whose provenance never recorded vol_mult, so it "
+                   "would otherwise default to 2.5 — e.g. ef2 trained at 2.0; pass --vol-mult 2.0)")
     args = p.parse_args()
     config.load_dotenv()
 
@@ -178,6 +181,9 @@ def main() -> None:
     returns, btc, _anchor, liq = load_data()
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = env_kwargs_from_provenance(prov, returns, build_ohlc_frac_panels)
+    if args.vol_mult is not None:                              # recover the trained vol_mult that an old
+        env_kwargs["vol_mult"] = args.vol_mult                 # provenance never recorded (else 2.5 default)
+        print(f"[sim-weekly] vol_mult override -> {args.vol_mult} (provenance had {prov.get('vol_mult')})")
 
     # Split boundaries from the SAME train_rl.time_split the gate uses (don't hardcode timestamps).
     train_r, val_r, _test_r = time_split(returns)
@@ -218,6 +224,10 @@ def main() -> None:
         assets, recon_pnl = [], 0.0
         for r, sym in enumerate(ranked):
             cs = remap_candles(token_candles.get(sym, []))
+            if not cs:                                        # token with NO data this week (a fixed/forced
+                continue                                      # universe can include a not-yet-listed token):
+                #   no candles to chart + no trades + 0 PnL. Emitting an empty-candle asset crashes the
+                #   dashboard (computeBacktest reads candles[0].t); the recon check below still balances.
             last_t = cs[-1]["t"] if cs else d1
             positions = fold_positions(token_trades.get(sym, []), last_t, token_pnl.get(sym, 0.0))
             recon_pnl += sum(po["qty"] * (po["exit_price"] - po["entry_price"]) for po in positions)
