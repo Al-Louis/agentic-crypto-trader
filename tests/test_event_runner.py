@@ -188,8 +188,78 @@ def test_fill_price_is_real_usd_not_env_index(tmp_path, panels):
     assert f["price"] == pytest.approx(float(cp.at[f["bar_ts"], f["token"]]), rel=1e-6)  # real USD
 
 
+# -- daily >=1-trade/day compliance overlay (Rule-1) ------------------------
+
+def test_compliance_action_schedule():
+    import datetime as dt
+
+    from trader.agent.compliance import compliance_action
+
+    def at(h):
+        return int(dt.datetime(2026, 6, 24, h, 3, tzinfo=dt.timezone.utc).timestamp())
+    assert compliance_action(at(1)) == "buy"
+    assert compliance_action(at(23)) == "sell"
+    assert compliance_action(at(0)) is None and compliance_action(at(12)) is None
+
+
+def test_compliance_round_trip_records_floor_fills(tmp_path, panels):
+    """BUY 3% BNB at 01:00, SELL it back at 23:00 — two recorded fills (the >=1-trade/day floor),
+    allowlisted, off the env book, sized at 3% of equity."""
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    runner = _runner(tmp_path, bnb_price_fn=lambda ts: 600.0)
+    rb = runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)   # Wed 01:00
+    rs = runner.tick(ws + (2 * 24 + 23) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)  # Wed 23:00
+    comp = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+            if r["kind"] == "fill" and r.get("compliance")]
+    assert sorted(r["reason"] for r in comp) == ["COMPLIANCE_BUY", "COMPLIANCE_SELL"]
+    assert rb.compliance_trades == 1 and rs.compliance_trades == 1
+    assert all(r["guardrail_ok"] and r["token"] == "BNB" for r in comp)   # BNB allowlisted -> not blocked
+    buy = next(r for r in comp if r["reason"] == "COMPLIANCE_BUY")
+    assert buy["from"] == "USDT" and buy["to"] == "BNB"
+    assert buy["usd_in"] == pytest.approx(0.03 * rb.equity_usd, rel=1e-6)   # 3% of equity
+
+
+def test_compliance_idempotent_same_day(tmp_path, panels):
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    runner = _runner(tmp_path, bnb_price_fn=lambda ts: 600.0)
+    buy_ts = ws + (2 * 24 + 1) * 3600
+    runner.tick(buy_ts, panels=panels, predict_fn=RULE, refresh_data=False)
+    r2 = runner.tick(buy_ts + 90, panels=panels, predict_fn=RULE, refresh_data=False)   # re-tick same hour
+    buys = [r for r in store.read_rows(tmp_path / "agent.jsonl") if r.get("reason") == "COMPLIANCE_BUY"]
+    assert len(buys) == 1 and r2.compliance_trades == 0     # no double-buy
+
+
+def test_compliance_pnl_tracked(tmp_path, panels):
+    """BNB +10% intraday -> the 3% sleeve realizes ~+10% of its notional (minus the small AMM cost)."""
+    import datetime as dt
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+
+    def px(ts):
+        return 660.0 if dt.datetime.fromtimestamp(int(ts), dt.timezone.utc).hour == 23 else 600.0
+    runner = _runner(tmp_path, bnb_price_fn=px)
+    runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    runner.tick(ws + (2 * 24 + 23) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    buy_usd = next(r["usd_in"] for r in store.read_rows(tmp_path / "agent.jsonl")
+                   if r.get("reason") == "COMPLIANCE_BUY")
+    assert runner._compliance_pnl > 0
+    assert runner._compliance_pnl == pytest.approx(0.10 * buy_usd, rel=0.1)   # ~10% gain less cost
+
+
+def test_compliance_disabled_when_frac_zero(tmp_path, panels):
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    runner = _runner(tmp_path, compliance_frac=0.0, bnb_price_fn=lambda ts: 600.0)
+    r = runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    assert r.compliance_trades == 0
+    assert not any(x.get("compliance") for x in store.read_rows(tmp_path / "agent.jsonl"))
+
+
 def test_forward_run_policy_allows_universe_and_cash_leg():
     pol = forward_run_policy(["ADA", "zec"], capital=10_000.0)
     assert "ADA" in pol.allowlist and "ZEC" in pol.allowlist and "USDT" in pol.allowlist
+    assert "BNB" in pol.allowlist                          # the daily compliance round-trip leg
     assert pol.drawdown_stop_pct == 30.0 and pol.chain == "bsc"
     assert pol.per_trade_usd == 10_000.0
