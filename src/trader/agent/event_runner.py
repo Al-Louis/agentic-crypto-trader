@@ -98,6 +98,15 @@ class EventRunner:
         return sum(1 for r in rows if r.get("kind") == "fill"
                    and str(r.get("ts") or "").startswith(day_utc))
 
+    def _ledger_cursor(self, ws: int) -> int:
+        """The fill-diff resume point: the latest fill bar_ts already recorded for the current
+        week (>= ws) in the ledger, else ws-1. Read from disk so a restart resumes idempotently
+        (the store's crash-recovery rule) instead of re-recording the week and duplicating fills."""
+        bars = [int(r["bar_ts"]) for r in store.read_rows(self.agent_ledger_path)
+                if r.get("kind") == "fill" and isinstance(r.get("bar_ts"), int)
+                and int(r["bar_ts"]) >= ws]
+        return max(bars) if bars else ws - 1
+
     def _real_price(self, token: str, bar_ts: int) -> float | None:
         """The token's real USD close at the fill's bar (for display) — None if unavailable, in
         which case the caller keeps the env's internal index price."""
@@ -140,17 +149,20 @@ class EventRunner:
                                         predict_fn=predict_fn)
         ws = res["week_start"]
 
-        # week rollover: a fresh cold $10k session — reset the acted cursor + the drawdown anchor
+        # week rollover OR a process restart (in-memory cursor lost): resume the fill-diff cursor
+        # from the LEDGER — the latest fill bar already recorded for this week — so a restart never
+        # re-records the week's fills (the duplicate-on-restart bug). A genuine new week has no
+        # fills >= ws yet, so the cursor is ws-1 and the week records from its open.
         new_week = ws != self._week_start
         if new_week:
             self._week_start = ws
-            self._acted_ts = ws - 1                # surface the whole week's fills from the open
-            self._week_peak_eq = self.capital
-        after = self._acted_ts if self._acted_ts is not None else ws - 1
+            self._acted_ts = self._ledger_cursor(ws)
+        after = self._acted_ts if self._acted_ts is not None else self._ledger_cursor(ws)
 
         eq_series = res["equity"]
         equity = float(eq_series.iloc[-1]) if len(eq_series) else self.capital
-        self._week_peak_eq = max(self._week_peak_eq, equity)
+        # week high-water from the full replay curve (restart-safe), not in-memory tracking
+        self._week_peak_eq = max(self.capital, float(eq_series.max()) if len(eq_series) else self.capital)
         dd_pct = ((self._week_peak_eq - equity) / self._week_peak_eq * 100.0
                   if self._week_peak_eq > 0 else 0.0)
 
