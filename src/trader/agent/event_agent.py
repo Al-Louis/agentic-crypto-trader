@@ -73,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
                    "(assume data/ is already current — for the on-box dry-run against recorded data)")
     p.add_argument("--capital", type=float, default=10_000.0, help="cold-weekly session capital "
                    "(ef-s2 trained at 10000; changing it breaks AMM-cost/fill parity)")
+    p.add_argument("--candle-window", type=int, default=720, help="trailing 1h candles to publish "
+                   "per token to trading/candles/ (default 720 = 30d)")
     return p
 
 
@@ -107,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
                              vecnorm_path=os.path.join(args.run_dir, "vecnormalize.pkl"))
     publish_target = config.get("APENTIC_PUBLISH_TARGET")
     publisher = build_publisher(AGENT_LEDGER_PATH, publish_target) if publish_target else None
-    runner = EventRunner(trader, selection=load_selection(),
+    selection = load_selection()
+    runner = EventRunner(trader, selection=selection,
                          agent_ledger_path=AGENT_LEDGER_PATH, capital=args.capital,
                          publisher=publisher, mode=mode)
 
@@ -122,6 +125,16 @@ def main(argv: list[str] | None = None) -> int:
               f"eq=${r.equity_usd:,.2f} dd={r.drawdown_pct:.1f}% "
               f"fills+{r.fills_recorded}/blocked{r.fills_blocked} "
               f"trades_today={r.trades_today} uni={len(r.universe)}", file=sys.stderr)
+        # publish per-token candlesticks under trading/candles/ (within the put-only grant);
+        # fail-safe — a publish error must never stop the loop.
+        if publish_target:
+            try:
+                from trader.agent.candles import publish_candles  # noqa: PLC0415
+                n = publish_candles(selection, publish_target, window_bars=args.candle_window)
+                print(f"[candles] published {n} token files -> {publish_target}/candles/",
+                      file=sys.stderr)
+            except Exception as e:  # noqa: BLE001
+                print(f"candle publish warning: {e!r}", file=sys.stderr)
 
     if args.once:
         _tick(int(args.now if args.now is not None else _now()))
