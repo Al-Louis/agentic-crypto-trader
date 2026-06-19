@@ -11,6 +11,7 @@ currently-traded vol-top-8. See [[Apentic Data Contract]] §trading/.
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 
 from trader.agent.live_data import OHLCV_ROOT
@@ -18,7 +19,16 @@ from trader.data.downloader import load_ohlcv
 from trader.report.apentic import _slug
 
 INTERVAL_SECONDS = 3600
-DEFAULT_WINDOW_BARS = 720          # trailing 30 days of hourly candles
+DEFAULT_WINDOW_BARS = 168          # trailing 7 days of hourly candles (quick-glance charts)
+SIG_FIGS = 6                       # round OHLCV to N significant figures (chart precision; trims size)
+
+
+def _round(x: float) -> float:
+    """Round to `SIG_FIGS` significant figures — handles both microcap ($0.000012) and large
+    ($446) prices without per-token scale assumptions; full 15-digit floats are wasteful for a chart."""
+    if x == 0 or not math.isfinite(x):
+        return 0.0
+    return round(x, -int(math.floor(math.log10(abs(x)))) + (SIG_FIGS - 1))
 
 
 def build_candle_payload(symbol: str, pool: str, *, window_bars: int = DEFAULT_WINDOW_BARS,
@@ -31,8 +41,8 @@ def build_candle_payload(symbol: str, pool: str, *, window_bars: int = DEFAULT_W
     df = df.tail(window_bars)
     ts = df["timestamp"].to_numpy()
     to_sec = (lambda t: int(t) // 1000) if len(ts) and ts.max() > 1e12 else (lambda t: int(t))
-    candles = [{"t": to_sec(t), "o": float(o), "h": float(h), "l": float(low), "c": float(c),
-                "v": float(v)}
+    candles = [{"t": to_sec(t), "o": _round(o), "h": _round(h), "l": _round(low), "c": _round(c),
+                "v": _round(v)}
                for t, o, h, low, c, v in zip(df["timestamp"], df["open"], df["high"],
                                              df["low"], df["close"], df["volume"])]
     return {"token": symbol, "slug": _slug(symbol), "generated": generated,

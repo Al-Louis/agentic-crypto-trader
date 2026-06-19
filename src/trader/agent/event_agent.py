@@ -73,8 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
                    "(assume data/ is already current — for the on-box dry-run against recorded data)")
     p.add_argument("--capital", type=float, default=10_000.0, help="cold-weekly session capital "
                    "(ef-s2 trained at 10000; changing it breaks AMM-cost/fill parity)")
-    p.add_argument("--candle-window", type=int, default=720, help="trailing 1h candles to publish "
-                   "per token to trading/candles/ (default 720 = 30d)")
+    p.add_argument("--candle-window", type=int, default=168, help="trailing 1h candles to publish "
+                   "per token to trading/candles/ (default 168 = 7d, quick-glance)")
     return p
 
 

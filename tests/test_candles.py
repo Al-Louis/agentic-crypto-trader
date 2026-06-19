@@ -5,7 +5,16 @@ import os
 
 import pytest
 
-from trader.agent.candles import build_candle_payload, publish_candles
+from trader.agent.candles import SIG_FIGS, _round, build_candle_payload, publish_candles
+
+
+def test_round_sig_figs():
+    # 6 significant figures across microcap and large-price scales
+    assert _round(0.623252777844019) == 0.623253
+    assert _round(446.55512) == 446.555
+    assert _round(0.0000123456789) == 1.23457e-05
+    assert _round(0.0) == 0.0
+    assert SIG_FIGS == 6
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEL = os.path.join(REPO, "data", "selection.json")
