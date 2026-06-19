@@ -208,6 +208,38 @@ Incident: the `eff-s1` (fixed-13) bundle shipped with 11 empty-candle assets and
 it was de-listed, then re-published clean (0 empty-candle assets) after the producer guard. See
 [[Experiment Log]] §2026-06-19.
 
+### 2026-06-19 — compliance overlay schema fields (`assets[].compliance`, `weeks[].compliance_pnl`)
+
+The `simulate_weekly.py` bundle gains two fields so the dashboard can show the **≥1-trade/day
+compliance overlay** (the forced daily BNB↔USDT rebalance that satisfies Rule-1 — a deploy
+guardrail, not a strategy signal; see [[Live Forward-Run Harness]] and [[AI Training]]). Both are
+**additive** and leave the existing weekly-simulation shape above unchanged.
+
+```jsonc
+"assets": [ { …, "compliance": true } ],   // bool — true ONLY on the BNB compliance asset
+"weeks":  [ { …, "compliance_pnl": -74.0 } ]   // float — the sleeve's realized PnL for the week
+```
+
+- **`assets[].compliance`** (bool) is `true` **only** on the single BNB compliance asset appended
+  to each week; it is absent/false on every strategy (vol-top-8) asset.
+- The compliance asset carries the **same `candles` + `positions` shape as a strategy asset** —
+  BNB hourly OHLCV (from the BNB anchor parquet) plus the daily 01:00-UTC-buy → 23:00-UTC-sell
+  round-trips (cost baked into the prices, the `simulate_weekly.fold_positions` convention). So the
+  page **derives its trades itself** the same way it does for any asset, and — because it always
+  has non-empty candles — it never trips the empty-candle crash (the INVARIANT above holds).
+- **Its PnL is a SEPARATE SLEEVE, not in the env book.** The compliance asset is **NOT** added to
+  `recon_pnl` / `eq` / `weeks[].return` / `weeks[].dd` / the `weekly_score`. The strategy env stays
+  at exactly **$10k for fill/obs-parity**, so the leaderboard rank is **unchanged** (no silent
+  re-grade). The sleeve's realized PnL is reported separately as **`weeks[].compliance_pnl`**.
+- **`weeks[].compliance_pnl`** (float) is the compliance sleeve's realized PnL for that week,
+  distinct from `weeks[].return`/`weeks[].dd` (which remain the strategy book). It is **directional
+  drag/gain** — a 22-hour daily long-BNB exposure (a sample week realized **−$74 = −0.74%** of the
+  $10k book), so it tends to drag in a bear week. Producer: `scripts/simulate_weekly.py` (commit
+  `b43d0e2`); the live counterpart records the same round-trips as `fill` rows + a separate
+  `compliance_pnl_usd` in the equity ledger row (`trader.agent.event_runner`, commit `d936101`).
+- **Not yet verified end-to-end on the desktop** — the dashboard render of the compliance asset is
+  pending a `simulate_weekly` re-run after the sbq sweep.
+
 ## Producer side (this repo)
 - Single-asset: `trader.report.export_run` (+ `roundtrips_from_position`).
 - Portfolio: `trader.report.export_portfolio_run`; `scripts/train_rl.py` records per-step

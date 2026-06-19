@@ -1241,3 +1241,40 @@ val open and compounds; the cold-weekly sim re-picks causally every Monday and i
 grader. A `vol_mult` provenance bug — never recorded, so the sim defaulted to 2.5 while ef2 trained at
 2.0 — was found and fixed; all 4 ef2 seeds were re-published at the correct 2.0. Detail: [[Experiment Log]]
 §2026-06-19, [[Simulated Market]].)
+
+## 2026-06-19 — the ≥1-trade/day floor is a DEPLOY GUARDRAIL, now implemented (does NOT touch the honest gate)
+
+The competition's **≥1-trade/day rule (Rule-1, a hard DQ axis)** has always been treated here as a
+**deploy guardrail — a forced daily rebalance — NOT a strategy discriminator** (see the §2026-06-18
+note: "In AI Training terms, the activity floor was always meant to be a deploy guardrail ... not a
+strategy discriminator"). The event champion is **selective** (idle between ignitions), so several cold
+weeks legitimately miss the floor; that is correct policy behavior, not a training failure to chase.
+
+It is now **implemented as the BNB↔USDT compliance overlay** (a separate sleeve), so the floor is
+satisfied without re-shaping the policy or the reward:
+
+- **The overlay is OFF the honest grader.** It runs as a **separate sleeve** in both the live runner
+  (`src/trader/agent/event_runner.py`, `d936101`) and the sim replay (`scripts/simulate_weekly.py`,
+  `b43d0e2`): each UTC day BUY 3% of equity into BNB at 01:00 and SELL back to USDT at 23:00 (two
+  recorded trades/day, flat overnight). It is **NOT** added to `recon_pnl` / the week return / DD / the
+  cold-weekly `weekly_score` — the strategy env stays at exactly $10k for fill/obs-parity, so **the
+  leaderboard rank is UNCHANGED (no silent re-grade)**. The sleeve's realized PnL is tracked separately
+  (`compliance_pnl_usd` in the equity ledger row; `weeks[].compliance_pnl` in the bundle).
+- **It is a guardrail, not a signal.** Pure module `src/trader/agent/compliance.py`
+  (`COMPLIANCE_TOKEN=BNB`, `BUY_HOUR=1`, `SELL_HOUR=23`, `DEFAULT_FRAC=0.03`); routed through the same
+  trader.risk guardrails; idempotent by **bar-day** so a restart/re-tick never double-trades. It is
+  **not** part of the decision core and must never be confused with a learned entry — the selective
+  thesis (sit in cash through chop) is intact.
+- **Honest caveat (training-relevant):** the 01:00→23:00 hold is a **22-hour daily long-BNB exposure**,
+  so it is **directional** — it DRAGS in a down/bear week (a sample week realized −$74 = −0.74% of the
+  $10k book) and gains in an up week. Given the bearish live-week thesis it will tend to drag; that drag
+  is the price of Rule-1 and is tunable (BUY_HOUR / SELL_HOUR / DEFAULT_FRAC). It sits in the **separate
+  sleeve**, so it does NOT bias the policy's honest cold-weekly evaluation.
+
+**STATUS:** paper/sim logic only, committed + pushed (`d936101` + `b43d0e2` on
+`feat/live-event-harness`). LIVE on-chain execution of these trades on June 22 still needs the **TWAK
+signing path** (separate, not built — this fixed BNB↔USDT swap is the ideal first live trade). The
+end-to-end dashboard render of the compliance asset is NOT yet verified on the desktop (pending a
+`simulate_weekly` re-run after the sbq sweep). Execution detail (runner overlay, schedule, sleeve
+PnL, dashboard schema fields) lives in the Live Forward-Run Harness note + [[Simulated Market]] — this
+note owns training, not execution.

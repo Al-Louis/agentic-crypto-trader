@@ -1164,3 +1164,50 @@ decayed; it re-entered only the following week, after the pump).
 session; the working route to the training desktop was the **Windows OpenSSH binary**
 (`C:\Windows\System32\OpenSSH\ssh.exe` / `scp.exe`) invoked from the **Bash tool** — the in-session MCP
 `rl_loop_*` tools stay unreliable (drive sweeps via `scripts/rl_loop.py`, fresh process per call).
+
+## 2026-06-19 — ≥1-trade/day compliance overlay (Rule-1 deploy guardrail)
+
+The competition requires **≥1 trade every UTC day** (Rule-1, a hard DQ axis). The runner already
+TRACKED this (`daily_floor_ok` in `status.json`) but nothing SATISFIED it — the event champion is
+selective (idle between ignitions), so several cold weeks miss the floor. Closed the gap with a deploy
+**guardrail**, not a strategy signal: each UTC day BUY 3% of equity into **BNB** at 01:00 and SELL it
+back to USDT at 23:00 — two recorded trades/day, flat overnight. BNB↔USDT is the deep, already-allowlisted
+pair (the Phase-2 spike-trade policy). A forced daily rebalance to clear Rule-1, NOT part of the decision
+core. In [[AI Training]] terms the activity floor was always meant to be a deploy guardrail; this is it.
+
+- **`d936101` — `compliance.py` (pure) + the live-runner overlay.** `src/trader/agent/compliance.py`:
+  `compliance_action(now_ts)` → `'buy'` @ 01:00 / `'sell'` @ 23:00 / `None` by the UTC hour;
+  `compliance_cost(usd)` → AMM cost via the same broker (deep BNB liquidity ≈ LP fee + gas, a few $/day);
+  `compliance_positions(...)` → the per-week daily round-trips for the sim (cost baked into prices like
+  `simulate_weekly.fold_positions`); constants `COMPLIANCE_TOKEN=BNB`, `BUY_HOUR=1`, `SELL_HOUR=23`,
+  `DEFAULT_FRAC=0.03`. In `src/trader/agent/event_runner.py` a `_run_compliance` overlay runs each hourly
+  tick and records the buy/sell as `'fill'` ledger rows (so they COUNT toward `trades_today` / the daily
+  floor), routed through the SAME `trader.risk` guardrails (BNB added to the `forward_run_policy`
+  allowlist). Kept OFF the `EventRungEnv` book — the env must stay at exactly $10k for fill/obs-parity, so
+  the 3% is a **separate sleeve** with its own realized PnL (`compliance_pnl_usd` in the equity ledger
+  row). IDEMPOTENT off the ledger by **bar-day** (`bar_ts`, not the wall-clock `ts`) so a restart / re-tick
+  never double-trades (works under simulated-time replay AND live); BNB price from the BNB anchor parquet
+  (`data/anchor/BNB_USDT/1h.parquet`). Sized by `compliance_frac` (0 disables); `TickResult` gained
+  `compliance_trades`. **14 runner tests (6 compliance-specific)** (schedule, the floor-satisfying
+  round-trip + 3% sizing + allowlisted, same-day idempotency, sleeve PnL, `frac=0` disable, BNB in the policy).
+- **`b43d0e2` — `simulate_weekly` replays the same overlay → new bundle fields.**
+  `scripts/simulate_weekly.py` replays the overlay into each simulated week so the dashboard shows the
+  floor-satisfying trades the live runner makes: it appends a FLAGGED asset (`compliance:true`) carrying
+  BNB candles (from the BNB anchor) + the daily round-trip positions. **Separate sleeve** — NOT added to
+  `recon_pnl` / `eq` / the `weekly_score`, so the env stays $10k for parity and the leaderboard rank is
+  UNCHANGED (no silent re-grade); each week carries a `compliance_pnl` field. Skips cleanly (with a
+  WARNING) if no BNB anchor; the per-week recon check is unaffected. New dashboard schema:
+  `assets[].compliance` (bool, true ONLY on the BNB compliance asset) and `weeks[].compliance_pnl` (float,
+  the sleeve's realized PnL for that week, separate from `weeks[].return` / `weeks[].dd`).
+
+**Caveat (not buried):** the 01:00→23:00 hold is a **22-hour daily long-BNB exposure**, so it is
+DIRECTIONAL — it DRAGS in a down/bear week (a sample week realized **−$74 = −0.74%** of the $10k book) and
+GAINS in an up week; given the bearish live-week thesis it will tend to drag. It is the price of Rule-1,
+tunable via `BUY_HOUR` / `SELL_HOUR` / `DEFAULT_FRAC` (a shorter hold = less directional risk).
+
+**STATUS (precise):** PAPER/sim logic, committed + pushed (`d936101` + `b43d0e2` on
+`feat/live-event-harness`). **LIVE execution of these trades on June 22 still needs the TWAK SIGNING PATH**
+(separate, not built; this fixed BNB↔USDT swap is the ideal first live trade). Live-window start assumed
+**2026-06-22 00:00 UTC** (verify vs the rules). The end-to-end DASHBOARD render of the compliance asset is
+NOT yet verified on the desktop (pending a `simulate_weekly` re-run after the sbq sweep).
+→ [[Live Forward-Run Harness]], [[AI Training]].
