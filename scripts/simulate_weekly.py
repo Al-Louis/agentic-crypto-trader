@@ -26,6 +26,8 @@ import pickle
 import sys
 from datetime import datetime, timezone
 
+import pandas as pd  # noqa: E402 — for the BNB anchor read (compliance overlay)
+
 sys.path.insert(0, "scripts")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -185,6 +187,26 @@ def main() -> None:
         env_kwargs["vol_mult"] = args.vol_mult                 # provenance never recorded (else 2.5 default)
         print(f"[sim-weekly] vol_mult override -> {args.vol_mult} (provenance had {prov.get('vol_mult')})")
 
+    # BNB anchor for the daily >=1-trade/day COMPLIANCE overlay (Rule-1) — replayed into the sim so the
+    # dashboard shows the same floor-satisfying trades the live runner makes. A SEPARATE sleeve: NOT in
+    # the env book / recon / weekly_score (the env stays $10k for fill-parity); its realized PnL is
+    # reported per week as `compliance_pnl`. None -> overlay skipped (sim still valid).
+    bnb_close = bnb_ohlc = None
+    try:
+        _b = pd.read_parquet(os.path.join("data", "anchor", "BNB_USDT", "1h.parquet"))
+        _b = _b.set_index("timestamp").sort_index()
+        if _b.index.max() > 1e12:                              # ms -> s (match the BTC anchor in load_data)
+            _b.index = (_b.index // 1000).astype("int64")
+        bnb_close, bnb_ohlc = _b["close"], _b
+    except Exception as e:  # noqa: BLE001 — no BNB anchor on this box -> skip the overlay, don't fail
+        print(f"[sim-weekly] WARNING: no BNB anchor for the compliance overlay ({e}); skipping it")
+
+    def _bnb_px(ts, _s=bnb_close):
+        if _s is None:
+            return None
+        prior = _s.index[_s.index <= int(ts)]
+        return float(_s.loc[prior[-1]]) if len(prior) else None
+
     # Split boundaries from the SAME train_rl.time_split the gate uses (don't hardcode timestamps).
     train_r, val_r, _test_r = time_split(returns)
     train_end, val_end = int(train_r.index[-1]), int(val_r.index[-1])
@@ -242,9 +264,29 @@ def main() -> None:
         # equity trace is seeded at reset(start=WARMUP), so do NOT drop another WARMUP (that zeroed
         # every DD). See week_return_dd.
         wk_return, dd = week_return_dd(eq)
+
+        # >=1-trade/day compliance overlay (Rule-1): the daily BNB<->USDT round-trip, appended as a
+        # FLAGGED asset WITH BNB candles (so the page never hits the empty-candle crash). NOT added to
+        # recon_pnl/eq above -> the strategy weekly_score / DD stay parity-clean; its realized PnL is
+        # reported separately as `compliance_pnl` (mirrors the live runner's separate sleeve).
+        compliance_pnl = 0.0
+        if bnb_close is not None:
+            from trader.agent.compliance import (COMPLIANCE_TOKEN, DEFAULT_FRAC,  # noqa: PLC0415
+                                                 compliance_positions)
+            cpos, compliance_pnl = compliance_positions(ws, we, _bnb_px, frac=DEFAULT_FRAC,
+                                                        capital=START_CAPITAL)
+            ccs = [{"t": int(t), "o": float(rw.open), "h": float(rw.high), "l": float(rw.low),
+                    "c": float(rw.close), "v": float(rw.volume)}
+                   for t, rw in bnb_ohlc[(bnb_ohlc.index >= ws) & (bnb_ohlc.index < we)].iterrows()]
+            if cpos and ccs:
+                assets.append({"symbol": COMPLIANCE_TOKEN, "class": "major", "compliance": True,
+                               "vol_rank": len(assets) + 1,
+                               "alloc_usd": round(DEFAULT_FRAC * START_CAPITAL, 2),
+                               "candles": ccs, "positions": cpos})
+
         weeks.append({"index": len(weeks), "label": f"W{len(weeks) + 1:02d}", "start": ws, "end": we,
                       "split": label_week_split(ws, train_end, val_end),
-                      "return": wk_return, "dd": dd,
+                      "return": wk_return, "dd": dd, "compliance_pnl": round(compliance_pnl, 2),
                       "portfolio_start": START_CAPITAL, "assets": assets})
         flag = "  <-- RECON GAP" if recon_err > RECON_TOL_USD else ""
         print(f"[wk] {datetime.fromtimestamp(ws, timezone.utc).date()} "
