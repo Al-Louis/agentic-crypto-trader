@@ -231,13 +231,20 @@ trading/heartbeat.json  { generated, mode, tick, equity_usd }
 trading/status.json     { generated, mode, tick, equity_usd, peak_usd, drawdown,
                           below_dust, trades_today, daily_floor_ok, n_fills, n_refusals }
 trading/equity.json     { generated, mode, series: [{ ts, equity_usd, drawdown }] }
-trading/trades.json     { generated, mode, fills: [<fill rows>], refusals: [<refusal rows>] }
+trading/trades.json     { generated, mode, fills: [<fill rows + time/time_utc>], refusals: [...] }
 ```
 
 - **`generated` is the newest `heartbeat`/`equity` row `ts`, never the wall clock** — a
   stopped loop publishes *as* stale, so the frontend's dead-man aging is honest by
-  construction. `trades_today`/`daily_floor_ok` count `fill` rows on `generated`'s UTC day
-  vs the ≥1/day floor.
+  construction.
+- **Trade TIME = the bar, in UTC (fixed 2026-06-19).** Each published fill carries `time`
+  (unix seconds, exact UTC hour) + `time_utc` (`2026-06-17T16:00:00Z`), and its `ts` is
+  **overwritten to the trade time** so any consumer reading `ts` shows when the trade happened;
+  the original write time is kept as `recorded_ts`. The raw ledger `ts` is the wall-clock time
+  the row was *written* during the weekly replay (≈ now on a restart) — NOT the trade time, so
+  it must never be shown as the trade time. `trades_today`/`daily_floor_ok` likewise count by the
+  **trade bar's** UTC day (not the write `ts`) vs the ≥1/day floor — else a post-restart
+  re-record would mark the whole week's trades as "today".
 - **Convention note:** the loop's ledger emits `drawdown_pct` as a **percent** (e.g. `4.2`
   = 4.2%); the published `drawdown` fields are **fractions**, normalized in `project()` and
   nowhere else.

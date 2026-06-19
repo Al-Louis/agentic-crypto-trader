@@ -5,6 +5,7 @@ No network: `publish_trading` is exercised against a local directory target (the
 `put_bytes` code path s3:// takes, minus boto3), and the loop integration uses FakeFeed.
 """
 
+import datetime as _dt
 import json
 from pathlib import Path
 
@@ -16,9 +17,13 @@ from trader.agent.feed import FakeFeed
 from trader.agent.loop import Loop, LoopConfig
 from trader.agent.publish import build_publisher, project, publish_trading
 
+# the fill's TRADE bar (exact UTC hour) — distinct from its write `ts`; on the same UTC day as
+# the marks below so it counts toward trades_today
+_BAR_TS = int(_dt.datetime(2026, 6, 12, 1, 0, 0, tzinfo=_dt.timezone.utc).timestamp())
+
 ROWS = [
     {"kind": "fill", "mode": "paper", "from": "CASH", "to": "BNB", "usd_in": 1.0,
-     "usd_out": 0.99, "cost_usd": 0.01, "units_from": 1.0, "units_to": 0.00165,
+     "usd_out": 0.99, "cost_usd": 0.01, "units_from": 1.0, "units_to": 0.00165, "bar_ts": _BAR_TS,
      "price_from": 1.0, "price_to": 600.0, "reason": "rebal", "ts": "2026-06-12T01:00:00+00:00"},
     {"kind": "refusal", "mode": "paper", "intent": {"from": "BNB", "to": "USDT", "usd": 5.0},
      "refusals": ["PER_TRADE_CAP"], "ts": "2026-06-12T01:00:01+00:00"},
@@ -56,10 +61,23 @@ def test_project_counts_trades_against_daily_floor():
     st = files["status.json"]
     assert st["trades_today"] == 1 and st["daily_floor_ok"] is True
     assert st["n_fills"] == 1 and st["n_refusals"] == 1
-    # a fill on an older UTC day must not count toward today
-    old = [dict(ROWS[0], ts="2026-06-11T23:00:00+00:00"), *ROWS[1:]]
+    # count by TRADE day (bar_ts), NOT the write `ts`: a fill whose bar is an earlier UTC day must
+    # not count toward today, even if it was written (ts) today — the post-restart re-record case
+    older_bar = int(_dt.datetime(2026, 6, 11, 23, 0, 0, tzinfo=_dt.timezone.utc).timestamp())
+    old = [dict(ROWS[0], bar_ts=older_bar), *ROWS[1:]]   # same write ts (today), older trade bar
     assert project(old)["status.json"]["trades_today"] == 0
     assert project(old)["status.json"]["daily_floor_ok"] is False
+
+
+def test_fill_time_is_the_trade_bar_in_utc():
+    """Published fills carry the TRADE time (their bar, exact-hour UTC) — `ts` overwritten to it,
+    plus `time` (unix sec) + `time_utc`; the write time is kept as `recorded_ts`."""
+    f = project(ROWS)["trades.json"]["fills"][0]
+    assert f["time"] == _BAR_TS
+    assert f["time_utc"] == "2026-06-12T01:00:00Z"
+    assert f["ts"] == "2026-06-12T01:00:00Z"            # consumers reading `ts` see the trade time
+    assert f["recorded_ts"] == "2026-06-12T01:00:00+00:00"  # original write time preserved
+    assert f["time_utc"].endswith(":00:00Z")            # exact hour, UTC
 
 
 def test_project_empty_ledger_publishes_nothing():

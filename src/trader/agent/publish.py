@@ -24,6 +24,7 @@ path must never stop a tick.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from trader.agent import store
@@ -35,6 +36,20 @@ DAILY_TRADE_FLOOR = 1
 def _fraction(pct: float | None) -> float | None:
     """Ledger percent -> contract fraction (the one normalization boundary)."""
     return None if pct is None else pct / 100.0
+
+
+def _utc_iso(ts_secs) -> str | None:
+    """Unix seconds -> exact UTC ISO (e.g. 2026-06-17T16:00:00Z). None if not a usable ts."""
+    try:
+        return datetime.fromtimestamp(int(ts_secs), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _trade_time(fill: dict) -> str | None:
+    """A fill's TRADE time = its bar timestamp in UTC (exact hour). NOT `ts`, which is the
+    wall-clock time the row was written during the replay (≈ now on a restart, not the trade)."""
+    return _utc_iso(fill.get("bar_ts"))
 
 
 def project(rows: list[dict]) -> dict[str, dict]:
@@ -58,8 +73,11 @@ def project(rows: list[dict]) -> dict[str, dict]:
     mode = str(newest.get("mode") or "paper")
 
     last_eq = equity_rows[-1] if equity_rows else {}
-    today = generated[:10]  # UTC date of the newest mark, not the wall clock
-    trades_today = sum(1 for r in fills if str(r.get("ts") or "").startswith(today))
+    today = generated[:10]  # current UTC date (newest mark's write time ≈ now)
+    # count by the TRADE day (bar time), not the write time: after a restart the whole week is
+    # re-recorded "now", so a write-time count would mark every fill as today (and the >=1/day
+    # floor would read wrong). A trade counts on the UTC day it actually executed.
+    trades_today = sum(1 for f in fills if (_trade_time(f) or "")[:10] == today)
 
     heartbeat = {
         "generated": generated,
@@ -89,10 +107,24 @@ def project(rows: list[dict]) -> dict[str, dict]:
             for r in equity_rows
         ],
     }
+    # Present each fill's time as the TRADE time (its bar, exact-hour UTC): `time` = unix seconds,
+    # `time_utc` = ISO Z, and `ts` is overwritten to the trade time so any consumer reading `ts`
+    # shows when the trade happened, not when the replay wrote the row. The write time is kept as
+    # `recorded_ts` for debugging.
+    pub_fills = []
+    for f in fills:
+        tt = _trade_time(f)
+        pf = dict(f)
+        pf["recorded_ts"] = f.get("ts")
+        if tt is not None:
+            pf["time"] = int(f["bar_ts"])
+            pf["time_utc"] = tt
+            pf["ts"] = tt
+        pub_fills.append(pf)
     trades = {
         "generated": generated,
         "mode": mode,
-        "fills": fills,
+        "fills": pub_fills,
         "refusals": refusals,
     }
     return {"heartbeat.json": heartbeat, "status.json": status,
