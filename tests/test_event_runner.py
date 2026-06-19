@@ -112,6 +112,64 @@ def test_guardrail_blocks_off_allowlist_fills(tmp_path, panels):
         assert all("NOT_ALLOWLISTED" in r["refusals"] for r in refusals)
 
 
+def _week_with_fills(returns, btc, liq, vol):
+    """A Monday week where the rule predictor produces >=1 fill, so the diff tests aren't vacuous."""
+    idx = [int(t) for t in returns.index]
+    have, pos = set(idx), {t: i for i, t in enumerate(idx)}
+    trader = LiveEventTrader(_prov())
+    ek = trader.env_kwargs(returns)
+    for t in idx:
+        if t % WEEK_SECS == MONDAY_PHASE and pos[t] >= WARMUP and (t + 160 * 3600) in have:
+            res = trader.evaluate_week(returns, btc, liq, vol, t + 167 * 3600, ek, predict_fn=RULE)
+            if res["fills"]:
+                return t, ek
+    raise AssertionError("no week with rule fills in recorded data")
+
+
+def test_offset_now_records_every_fill_once(tmp_path, panels):
+    """Regression for the wall-clock-vs-bar-time cursor bug: ticks fire a few min PAST the bar
+    (real HH:03 schedule), so a wall-clock cursor drops fills whose bar-time < the prior tick's
+    wall-time (the dropped HUMA EMA_BREAK exit). Every env fill must be recorded EXACTLY once."""
+    returns, btc, liq, vol = panels
+    ws, ek = _week_with_fills(returns, btc, liq, vol)
+    runner = _runner(tmp_path)
+    OFF = 183                                              # minutes past the bar, like the live timer
+    for h in (40, 60, 80, 100, 120, 140, 160):
+        runner.tick(ws + h * 3600 + OFF, panels=panels, predict_fn=RULE, refresh_data=False)
+    rows = store.read_rows(tmp_path / "agent.jsonl")
+    got = sorted((r["bar_ts"], r["token"], "buy" if r["from"] == "USDT" else "sell")
+                 for r in rows if r["kind"] == "fill")
+    last_now = ws + 160 * 3600 + OFF
+    res = LiveEventTrader(_prov())  # ground truth: one replay to the last bar
+    truth = sorted((f.time, f.token, f.side)
+                   for f in res.evaluate_week(returns, btc, liq, vol, last_now, ek, predict_fn=RULE)["fills"])
+    assert len(truth) >= 1                                  # the week genuinely traded
+    assert got == truth                                    # no drop (the bug), no duplicate
+
+
+def test_fill_price_is_real_usd_not_env_index(tmp_path, panels):
+    """The fill `price` is the real USD close (≈ market price), with the env's internal
+    return-index kept as `price_index`."""
+    import json
+    import os
+    returns, btc, liq, vol = panels
+    ws, _ek = _week_with_fills(returns, btc, liq, vol)
+    sel_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "selection.json")
+    selection = [{"symbol": s["symbol"], "pair_address": s["pair_address"]}
+                 for s in json.load(open(sel_path, encoding="utf-8"))]
+    runner = EventRunner(LiveEventTrader(_prov()), selection=selection,
+                         agent_ledger_path=tmp_path / "agent.jsonl")
+    runner.tick(ws + 167 * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    fills = [r for r in store.read_rows(tmp_path / "agent.jsonl") if r["kind"] == "fill"]
+    assert fills
+    from trader.agent.live_data import build_close_panel
+    cp = build_close_panel(selection, returns.index)
+    f = fills[0]
+    assert "price_index" in f and 0.5 < f["price_index"] < 2.0      # the index sits near 1.0
+    assert f["price"] == pytest.approx(float(cp.at[f["bar_ts"], f["token"]]), rel=1e-6)  # real USD
+
+
 def test_forward_run_policy_allows_universe_and_cash_leg():
     pol = forward_run_policy(["ADA", "zec"], capital=10_000.0)
     assert "ADA" in pol.allowlist and "ZEC" in pol.allowlist and "USDT" in pol.allowlist

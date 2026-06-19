@@ -76,6 +76,7 @@ class EventRunner:
         self._publisher = publisher
         self.mode = mode
         self._env_kwargs: dict | None = None
+        self._close_panel = None                  # per-token real USD closes (set each tick)
         self._week_start: int | None = None       # the cold week currently being traded
         self._acted_ts: int | None = None         # newest bar whose fills we've already recorded
         self._week_peak_eq = capital              # within-week equity high-water (drawdown anchor)
@@ -97,6 +98,18 @@ class EventRunner:
         return sum(1 for r in rows if r.get("kind") == "fill"
                    and str(r.get("ts") or "").startswith(day_utc))
 
+    def _real_price(self, token: str, bar_ts: int) -> float | None:
+        """The token's real USD close at the fill's bar (for display) — None if unavailable, in
+        which case the caller keeps the env's internal index price."""
+        cp = self._close_panel
+        if cp is None or token not in cp.columns:
+            return None
+        try:
+            v = float(cp.at[bar_ts, token])
+        except (KeyError, ValueError, TypeError):
+            return None
+        return v if v == v and v > 0 else None      # reject NaN / non-positive
+
     # -- one hourly tick ------------------------------------------------------
     def tick(self, now_ts: int, *, panels=None, predict_fn=None,
              refresh_data: bool = True) -> TickResult:
@@ -114,6 +127,13 @@ class EventRunner:
             vol = build_volume_panel(list(returns.columns), returns.index)
         else:
             returns, btc, liq, vol = panels
+
+        # real USD closes to translate the env's internal return-index fill prices to market
+        # prices (the env's _px starts at 1.0 at the window warmup start, not USD).
+        self._close_panel = None
+        if self.selection:
+            from trader.agent.live_data import build_close_panel  # noqa: PLC0415
+            self._close_panel = build_close_panel(self.selection, returns.index)
 
         env_kwargs = self._ensure_env_kwargs(returns)
         res = self.trader.evaluate_week(returns, btc, liq, vol, now_ts, env_kwargs,
@@ -153,9 +173,14 @@ class EventRunner:
                 blocked += 1
             # paper: record the env's fill either way, tagged with the guardrail verdict; in live
             # an !allowed verdict would BLOCK signing (the env fill would not be mirrored on-chain).
+            # `price` is the REAL USD market close at the bar; `price_index` is the env's internal
+            # return-index the PnL/equity is computed in (kept for traceability).
+            real_px = self._real_price(f.token, int(f.time))
             store.append({"kind": "fill", "mode": self.mode, "from": frm, "to": to,
                           "usd_in": usd, "usd_out": usd, "cost_usd": float(f.fee),
-                          "price": float(f.price), "reason": f.reason, "token": f.token,
+                          "price": real_px if real_px is not None else float(f.price),
+                          "price_index": float(f.price),
+                          "reason": f.reason, "token": f.token,
                           "trigger": f.reason, "obs": f.obs, "bar_ts": int(f.time),
                           "guardrail_ok": bool(verdict.allowed),
                           "guardrail_codes": verdict.codes},
@@ -172,7 +197,10 @@ class EventRunner:
         store.append({"kind": "heartbeat", "mode": self.mode, "tick": now_ts,
                       "equity_usd": equity, "week_start": ws}, self.agent_ledger_path, now=None)
 
-        self._acted_ts = now_ts
+        # advance the cursor by the latest BAR timestamp processed, NOT wall-clock now_ts: fills
+        # are keyed by bar-time, which lags wall-time by ~the bar duration, so a wall-clock cursor
+        # silently drops every fill after the first tick (the missed-exit bug).
+        self._acted_ts = int(res["win_index"][-1]) if res.get("win_index") else now_ts
         if self._publisher is not None:
             try:
                 self._publisher()
