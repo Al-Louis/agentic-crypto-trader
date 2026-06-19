@@ -25,6 +25,12 @@ if [ "$REWARD_MODE" = "overlay" ]; then               # 2026-06-14 FORK: long-de
   # Default = HOLD the risk-parity basket (= B&H floor); the policy learns to TILT off it. Feedforward
   # first (earn the LSTM): weekly episodes (168), the substrate guards, vs the random-week gate.
   EXTRA="--reward-mode relative --rule-default --basket-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --eval-prepad --loss-floor 0.2 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 8 --vol-target 0.005 --cap-floor 0.02 --no-btc-obs --eval-mode weekly --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.2 --lr 3e-4 --lr-end 3e-5 --episode-bars 168"
+elif [ "$REWARD_MODE" = "ef2" ]; then                 # ef-s2 deploy config (ppo-event-rdLe4-ef, exact
+  PFX="ppo-event-rdLe4-ef2"                           # from ledger) + the user's 2 knobs: k 8->10
+  # (close the ZEC-class universe cut) and vol_mult 2.5->2.0 (fire earlier; let the policy learn the
+  # surge cutoff from the obs). EVERYTHING else byte-identical to ef-s2. ONE experiment, 2 coupled
+  # knobs vs the ef control. Gate baseline now ignites on the SAME k/vol_mult (honest comparison).
+  EXTRA="--reward-mode entry_forward --recurrent --lstm-size 256 --rule-default --exit-commit 12 --dust-usd 10 --rule-prior 2.0 --tp-rungs 0.25,0.5,1.0,2.0 --harvest-obs --eval-prepad --loss-floor 0.2 --intrabar-floor --wick-reject 0.3 --det-blacklist 672 --action-mode discrete --n-action-levels 4 --universe-mode voltopk --k 10 --vol-mult 2.0 --vol-target 0.005 --cap-floor 0.02 --crash-train 1 --crash-eval --crash-depth -0.6 --crash-beta 1.4 --norm-reward --dd-lambda 0.0 --dd-soft 0.15 --ent-coef 0.4 --n-epochs 10 --lr 3e-4 --lr-end 3e-5 --episode-bars 336 --fwd-horizon 24 --eval-mode weekly --stop-k 0.25 --cooldown 48 --max-entry-frac 0.34"
 elif [ "$REWARD_MODE" = "overlay-curh" ]; then        # OVERLAY-2: overlay + HORIZON CURRICULUM (ramp
   PFX="ppo-event-overlay-curh"                        # episode_bars 672->336->168 over training). Long
   # episodes first teach holding the bull (the missed-run cost is in-episode/creditable — probe-confirmed:
