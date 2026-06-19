@@ -41,7 +41,8 @@ def forward_run_policy(universe: list[str], capital: float = 10_000.0, *,
     """Guardrail policy for the paper forward-run: allowlist = the traded universe + the stable
     cash leg; caps sized so faithful env fills pass (paper placeholders — Phase G sets the live
     dollar caps); the allowlist + 30% drawdown stop are the binding limits."""
-    allow = frozenset({str(t).upper() for t in universe} | {cash_leg.upper()})
+    from trader.agent.compliance import COMPLIANCE_TOKEN  # the daily >=1-trade/day round-trip leg
+    allow = frozenset({str(t).upper() for t in universe} | {cash_leg.upper(), COMPLIANCE_TOKEN.upper()})
     return Policy(allowlist=allow, per_trade_usd=capital, daily_usd=capital * 10.0,
                   max_slippage_pct=max_slippage_pct, drawdown_stop_pct=dd_stop_pct,
                   lifetime_usd_ceiling=capital * 1_000.0, chain="bsc")
@@ -60,6 +61,7 @@ class TickResult:
     fills_blocked: int
     trades_today: int
     universe: list[str] = field(default_factory=list)
+    compliance_trades: int = 0          # >=1-trade/day overlay fills recorded this tick (0/1)
 
 
 class EventRunner:
@@ -67,7 +69,8 @@ class EventRunner:
 
     def __init__(self, trader: LiveEventTrader, *, selection: list[dict],
                  agent_ledger_path: Path, capital: float = 10_000.0,
-                 policy: Policy | None = None, publisher=None, mode: str = "paper"):
+                 policy: Policy | None = None, publisher=None, mode: str = "paper",
+                 compliance_frac: float = 0.03, bnb_price_fn=None):
         self.trader = trader
         self.selection = selection
         self.agent_ledger_path = Path(agent_ledger_path)
@@ -75,6 +78,10 @@ class EventRunner:
         self.policy = policy                      # built lazily from the env universe if None
         self._publisher = publisher
         self.mode = mode
+        self.compliance_frac = float(compliance_frac)   # >=1-trade/day overlay size (0 disables it)
+        self._bnb_price_fn = bnb_price_fn          # injectable BNB USD price(now_ts) for tests
+        self._bnb_anchor = None                    # cached BNB close series (False = unavailable)
+        self._compliance_pnl = 0.0                 # cumulative realized PnL of the compliance sleeve
         self._env_kwargs: dict | None = None
         self._close_panel = None                  # per-token real USD closes (set each tick)
         self._week_start: int | None = None       # the cold week currently being traded
@@ -118,6 +125,84 @@ class EventRunner:
         except (KeyError, ValueError, TypeError):
             return None
         return v if v == v and v > 0 else None      # reject NaN / non-positive
+
+    # -- daily >=1-trade/day compliance overlay -------------------------------
+    def _bnb_price(self, now_ts: int) -> float | None:
+        """BNB USD close at/just-before `now_ts`, from the BNB anchor parquet (same source the harness
+        keeps fresh) — or an injected fn for tests. None if unavailable (then compliance is skipped,
+        never fabricated)."""
+        if self._bnb_price_fn is not None:
+            return self._bnb_price_fn(int(now_ts))
+        if self._bnb_anchor is None:
+            try:
+                import os  # noqa: PLC0415
+                import pandas as pd  # noqa: PLC0415
+                a = pd.read_parquet(os.path.join("data", "anchor", "BNB_USDT", "1h.parquet"))
+                a = a.set_index("timestamp").sort_index()
+                if a.index.max() > 1e12:                 # ms -> s (match load_data's BTC anchor)
+                    a.index = (a.index // 1000).astype("int64")
+                self._bnb_anchor = a["close"]
+            except Exception:  # noqa: BLE001 — no BNB anchor on this box -> skip compliance, don't crash
+                self._bnb_anchor = False
+        if self._bnb_anchor is False:
+            return None
+        s = self._bnb_anchor
+        prior = s.index[s.index <= int(now_ts)]
+        if len(prior) == 0:
+            return None
+        v = float(s.loc[prior[-1]])
+        return v if v == v and v > 0 else None
+
+    def _run_compliance(self, now_ts: int, equity: float, spent_today: float) -> int:
+        """The Rule-1 guardrail: BUY 3% BNB at 01:00 UTC, SELL it back at 23:00 UTC, each day. Records
+        the leg as a `fill` (so it counts toward the >=1-trade/day floor), routed through the same risk
+        guardrails. Idempotent off the ledger (a restart / re-tick never double-trades). Kept off the env
+        book — a separate sleeve whose realized PnL is tracked in `self._compliance_pnl`. Returns 0/1."""
+        from trader.agent.compliance import (BUY_REASON, CASH_LEG, COMPLIANCE_TOKEN, SELL_REASON,
+                                             compliance_action, compliance_cost)
+        if self.compliance_frac <= 0.0:
+            return 0
+        action = compliance_action(now_ts)
+        if action is None:
+            return 0
+        # group "today" by the BAR time (bar_ts == now_ts for our fills), NOT the wall-clock `ts` the
+        # store stamps — so the once-per-day idempotency holds under simulated-time replay AND live.
+        day_start = (int(now_ts) // 86400) * 86400
+        today = [r for r in store.read_rows(self.agent_ledger_path)
+                 if r.get("compliance") and isinstance(r.get("bar_ts"), int)
+                 and day_start <= int(r["bar_ts"]) < day_start + 86400]
+        bought = next((r for r in today if r.get("reason") == BUY_REASON), None)
+        sold = any(r.get("reason") == SELL_REASON for r in today)
+        px = self._bnb_price(now_ts)
+        if px is None:
+            return 0                                     # no BNB price -> skip, never fabricate a fill
+
+        if action == "buy" and bought is None:
+            usd = self.compliance_frac * equity
+            frm, to, reason = CASH_LEG, COMPLIANCE_TOKEN, BUY_REASON
+        elif action == "sell" and bought is not None and not sold:
+            usd_buy, px_buy = float(bought.get("usd_in") or 0.0), float(bought.get("price") or px)
+            usd = (usd_buy / px_buy) * px if px_buy > 0 else usd_buy   # BNB-leg value at the sell price
+            frm, to, reason = COMPLIANCE_TOKEN, CASH_LEG, SELL_REASON
+        else:
+            return 0                                     # already done today (idempotent) / nothing to sell
+
+        cost = compliance_cost(usd)
+        intent = TradeIntent(from_asset=frm, to_asset=to, usd=usd, chain="bsc",
+                             slippage_pct=self.policy.max_slippage_pct)
+        verdict = check_trade(self.policy, intent, self._risk_state(equity, spent_today))
+        if reason == SELL_REASON:
+            self._compliance_pnl += usd - float(bought.get("usd_in") or 0.0) - cost
+        store.append({"kind": "fill", "mode": self.mode, "compliance": True, "from": frm, "to": to,
+                      "usd_in": usd, "usd_out": usd, "cost_usd": cost, "price": px, "price_index": px,
+                      "reason": reason, "trigger": reason, "token": COMPLIANCE_TOKEN, "obs": None,
+                      "bar_ts": int(now_ts), "guardrail_ok": bool(verdict.allowed),
+                      "guardrail_codes": verdict.codes}, self.agent_ledger_path, now=None)
+        if not verdict.allowed:
+            store.append({"kind": "refusal", "mode": self.mode, "compliance": True,
+                          "intent": {"from": frm, "to": to, "usd": usd}, "refusals": verdict.codes},
+                         self.agent_ledger_path, now=None)
+        return 1
 
     # -- one hourly tick ------------------------------------------------------
     def tick(self, now_ts: int, *, panels=None, predict_fn=None,
@@ -202,9 +287,14 @@ class EventRunner:
                               "intent": {"from": frm, "to": to, "usd": usd},
                               "refusals": verdict.codes}, self.agent_ledger_path, now=None)
 
+        # >=1-trade/day compliance overlay (Rule-1): a small BNB<->USDT round-trip, recorded as a fill
+        # so it counts toward the daily floor. Off the env book (separate sleeve); idempotent off ledger.
+        compliance_n = self._run_compliance(now_ts, equity, spent_today)
+
         store.append({"kind": "equity", "mode": self.mode, "tick": now_ts,
                       "equity_usd": equity, "peak_usd": self._week_peak_eq,
                       "drawdown_pct": dd_pct, "week_start": ws,
+                      "compliance_pnl_usd": self._compliance_pnl,
                       "below_dust": equity <= 1.0}, self.agent_ledger_path, now=None)
         store.append({"kind": "heartbeat", "mode": self.mode, "tick": now_ts,
                       "equity_usd": equity, "week_start": ws}, self.agent_ledger_path, now=None)
@@ -221,4 +311,5 @@ class EventRunner:
 
         return TickResult(now_ts=now_ts, week_start=ws, new_week=new_week, equity_usd=equity,
                           drawdown_pct=dd_pct, fills_recorded=recorded, fills_blocked=blocked,
-                          trades_today=self._trades_today(day_utc), universe=list(res["universe"]))
+                          trades_today=self._trades_today(day_utc), universe=list(res["universe"]),
+                          compliance_trades=compliance_n)
