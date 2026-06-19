@@ -35,6 +35,7 @@ Status: ☐ pending · ▶ running · ✅ done · ✗ refuted · ~ inconclusive
 | 6 | **P-CLUSTER** | entry sizing | is an ISOLATED ignition alpha vs a BROAD co-firing cluster beta froth — surviving a btc_trend partial-effect control? | med | MEDIUM — alpha-vs-beta, on the low-BTC-corr thesis | ☐ |
 | 7 | **P-CYCLE-CI** | entry | which single cycle component (bars- vs ret-since prior ignition) survives CI+FDR? ship one slot or none | cheap | MED-LOW — a re-pass of `probe_knowledge.py`, NOT new | ☐ |
 | 8 | **P-MOVEAGE** | continuation | does causal within-move maturity (÷ token-typical run length) beat the raw `held_frac` obs on Spearman IC? | heavy | LOW-MED — highest leakage; expected INCONCLUSIVE | ☐ |
+| 9 | **P-VOLREGIME** | regime / entry+exit | do two GENUINELY-NEW features — a vol-regime ratio (`σ_fast/σ_slow`) + a robust return-impulse (`\|r\|/median\|r\|`) — carry *incremental* IC over the existing obs (which has NO realized-vol term)? | cheap | MED — the one obs the hunt-map left open (NEW info, not a `surge`/`cush` re-pack); skeptical prior (vol-redundancy null 5×) | ✗ 2026-06-17 — **NULL on the gate (6th vol-redundancy null); EXIT arm INCONCLUSIVE (data-starved).** Neither feature clears incremental-IC CI-excludes-0 + sign-stable + FDR. Wire nothing |
 
 **Methodological refinements (what makes each honest — folded in by the skeptic pass):**
 - **Continuous IC on a temporal holdout is the PRIMARY deliverable**; bucket grids are human-readable illustration only (thin +10% cells, ~13% base rate, ~321 val ignitions).
@@ -84,6 +85,29 @@ Priority = the exit. The agent already has the exit head (`_do_exit`/`_do_profit
 - **2026-06-17** — **P-REIGNITE DONE (`scripts/probe_reignite.py`, uncommitted): SELECTION premise REFUTED, CAPACITY premise open.** Held + in-profit re-ignitions (bucket B; VAL n=169, TRAIN n=228 — well above the n≥30 floor) carry strong *absolute* run-up (VAL fwd48 +15.7% mean / +11.1% median, 92% win) — adding to a held winner is NOT chasing duds — but **B−A vs fresh single-leg ignitions is a well-powered NULL**: small and every 95% CI straddles 0 on both splits (VAL fwd48 B−A −1.3% [−17.5,+14.5]; surge-matched −3.7%..+4.0%). Held re-ignitions are *not better entries* than fresh → `scale_in` buys **no selection edge**. **Narrative correction:** the ZEC Apr-9 +16.2% poster-child lands in bucket **A** — under the *rule* the prior leg was already stopped out (rule FLAT → fresh entry); the "missed re-ignition" was the *trained s3 agent's* sliver-hold, a different book. **Survives:** the *capacity* premise — the rule funds only ~6–12% of flat ignition candidates (39/637 train, 20/163 val; usually capacity-constrained), so `scale_in` could still help by deploying more capital into the equally-good held-winner stream — a sizing/portfolio question only the `wsi` sweep's equity curves vs the honest gate can judge, NOT a run-up probe. Verdict = **STOP-AND-RECONSIDER on selection**; let the `wsi` sweep finish as the capacity test but temper expectations (a null / slight-negative is consistent); the clearer next big arm is **P-EXIT-REWARD**.
 - **2026-06-17** — **P-EXIT-REWARD DONE (`scripts/probe_exit_reward.py`, uncommitted): NO-GO — do not spend a desktop slot.** Build → 3 adversarial skeptics (leakage SOUND, incremental FLAWED, stats INCONCLUSIVE) → decision NO. The oracle confirms the run-up is **REAL** (+9.3%/trade train, +14.2%/trade val above the rule's ~breakeven). But the CAUSAL surrogate (obs-only, fit-train/eval-val) closes only **+6.4% (H24) / +13.5% (H48)** of the gap; the move/token-clustered **95% CI straddles 0** [−10%,+20.4%]; the entire edge is **one token (Q — leave-it-out → −1.5%, below the rule)**; it wins **<50% of trades** (4/20); and it shows **no significant incremental over the giveback obs the policy already carries** (giveback-dominated logit, fair giveback-logit floor → incremental +12.1% [−23.7%,+70.4%], inside noise). Leakage-clean (independently re-audited, reproduces to the digit; the train-argmax threshold 0.95 ≠ val-argmax 0.75 = the no-peek signature), drift alarm held (oracle = upper-bound only, never the bar). **THE BINDING LIMIT IS DATA/POWER:** the rule funds only **39 train / 20 val closed trades** (~8 token-clusters) of ~952/321 ignitions — >95% of ignitions never become trades an exit can act on. The exit-is-alpha thesis is **unresolved-by-data, NOT refuted**.
 
+- **2026-06-17** — **P-VOLREGIME specced** (from the `mlmodelpoly` external-repo review; see
+  [[reviewed-mlmodelpoly-repo]]). The two transferable ideas from that repo (vol-regime ratio + robust
+  impulse) became a single gated obs-probe targeting the ONE opening the hunt-map left — a *genuinely
+  new* obs axis (verified: no realized-vol term in `_obs`), gated on **incremental IC over the existing
+  obs**. Skeptical prior (vol-redundancy null 5×); cheap/torch-free; does not block the frozen-`wkw`-TEST
+  call. Script to build: `scripts/probe_volregime.py`. ☐ pending.
+
+- **2026-06-17** — **P-VOLREGIME DONE (`scripts/probe_volregime.py`, uncommitted): NULL on the gate —
+  the 6th vol-redundancy null; EXIT arm INCONCLUSIVE.** Causality self-test PASS (recompute from
+  `returns[:bar+1]` matches the array to 1e-9). **ENTRY** (well-powered: 109 train / 38 val ignitions,
+  move-collapsed): `volreg` is the only sign-stable feature — partial-IC vs H48 run-up **+0.082 train /
+  +0.135 val** — but **both CIs straddle 0** (p=0.23/0.21) and it FAILS facet BH-FDR; `rimp` weakly
+  negative & non-robust (TRAIN H48 CI just excludes 0 p=0.044 but fails FDR; VAL straddles, p=0.79). So
+  the only NEW-info candidate the hunt-map left open is null-leaning-INCONCLUSIVE on entry — fails on
+  power (thin val cells), not a believed edge (drift alarm held). **EXIT** (rule discretionary stop/ema
+  exits): **37 train / 17 val — val BELOW the n≥30 floor → INCONCLUSIVE**; the lone nominal hit (`rimp`
+  exit H24 train −0.349, CI excludes 0) doesn't replicate at H48 and has no powered val counterpart
+  (noise). The thin exit book directly re-confirms the CAPACITY meta-finding (the rule trades so little
+  there isn't enough exit book to test an exit feature offline — the same 20-trade wall P-EXIT-REWARD
+  hit). **Verdict: wire nothing** (CI-excludes-0 + sign-stable + FDR all required; none met). The
+  `mlmodelpoly` import added no capturable alpha — consistent with the review's prior. Does NOT affect
+  the frozen-`wkw`-TEST call.
+
 ## META-FINDING (2026-06-17) — the binding constraint may be CAPACITY / PARTICIPATION
 
 P-REIGNITE and P-EXIT-REWARD independently hit the **same wall**: the rule **trades very little** — it funds only ~5–12% of flat ignition candidates (**39 train / 20 val** closed trades), capacity/rotation-gated (risk-parity caps + 48-bar cooldown + reclaimed gate + swap-weak-for-strong rotation). Consequences: (a) the exit-timing problem is **data-starved** offline (20 val trades); (b) the agent leaves **~95% of the +EV ignition stream untouched**. Both the entry-selection edge (refuted) and the exit-reward edge (not learnable on this book) sit **downstream of a more basic limit: how much of the +EV ignition stream can the agent safely participate in?** `scale_in` (the live `wsi` sweep) is one capacity lever; the 51% flat-skip/cooled bucket and the cooldown/reclaimed/rotation gates are the others. **NEXT research direction: a CAPACITY / PARTICIPATION probe** — are the ~95% unfunded ignitions +EV, and what is the *portfolio-DD* cost of participating in more of them (the real DQ object, not per-trade)? Two caveats on power: the *agent* trades more than the *rule* (its training sees more exit-decisions than the rule's 20-trade book), so the offline exit-probe's power limit is partly an artifact of measuring the rule; and the desktop's highest-*confidence* use right now is the **frozen-TEST spend on `wkw`** (the real OOS check of the best-known, still unspent — the human's one-time, irreversible call).
@@ -103,6 +127,139 @@ The capacity/participation arm (workflow: build → 3 skeptics, **selection FLAW
 P-EMABREAK (workflow, 3 skeptics SOUND → NO): the EMA-break premature-exit is **regime beta, not a pathology** — ignition EMA-breaks resume NO MORE than random below-EMA dips (lift −17..−22% TRAIN); the surge-alive discriminator adds **0 OOS over the giveback obs the agent already carries** (incremental AUC +0.007, CI straddles 0; *inverts* within the shallow-giveback bucket); the realizable hold-through edge is ~0 (you can't identify resumers OOS, so you must hold the trend-breaks too); the ZEC case is an anecdote (its +60% is ~216 bars out, oracle-only). The exit arm is CLOSED.
 
 **THE HUNT MAP — all five lever-classes closed this session:** entry-selection (P-REIGNITE, refuted) · `scale_in` (`wsi`, refuted on the gate) · exit-reward/peak-timing (P-EXIT-REWARD, NO-GO) · capacity/sizing (capacity probe, NULL) · EMA-break/surge-at-break (P-EMABREAK, NO-GO). The selective-ignition substrate + the current obs {surge, cush, giveback, unreal, surge_decay, accel, held_frac} is **comprehensively mined**; the run-up that exists is regime beta NOT capturable by a state-conditioned exit on the obs available (the agent already sees the only separating features, giveback + cush → a training-dynamics / data-ceiling limit, NOT an obs gap). **`wkw` (rdLe4 + wick_reject 0.25) is the substrate ceiling**: +5.1pts vs rung-0, DQ-protective 7.84%, fixes the rule's own 35.53% DQ breach. **NEXT (decision-critical): the frozen-TEST validation of `wkw`** — the real OOS check of the deployable, still unspent, before the live window (Jun 22–28); the human's one-time, irreversible call. A genuinely NEW obs/feature (higher-timeframe, order-flow) could reopen the exit hunt — the *current-obs* family is what's exhausted.
+
+## P-VOLREGIME — spec (2026-06-17, from the [[reviewed-mlmodelpoly-repo|mlmodelpoly]] review)
+
+The hunt-map closer states the *current* obs family {surge, cush, giveback, unreal, surge_decay, accel,
+held_frac} is exhausted, **but explicitly names "a genuinely NEW obs/feature (higher-timeframe,
+order-flow)" as the one thing that could reopen the exit hunt.** Reviewing the external `mlmodelpoly`
+repo surfaced two cheap candidates that are *verified absent* from our 13-dim obs vector
+(`[is_exit, cush, surge, unreal, held_frac, giveback, cash/eq, exposure, n_pos/k, dd, btc_trend,
+rule_expo, breadth]`, `event_env._obs` L888) — critically **there is NO realized-volatility term in the
+obs** (`_std` drives `_pick_universe` + risk-parity `_token_caps` only, never the policy). So these are
+NEW *information*, not a re-pack of `surge` (a *volume* ratio) or `cush` (price-vs-EMA). This is the
+disciplined test of exactly that escape hatch.
+
+> **Honest prior — skeptical.** Vol-derived functionals have hit the **redundancy null five times**
+> (last: the depth-normalized-turnover de-risking arm, dominated by what the risk-parity caps already
+> encode). The bar is therefore **incremental IC over the existing obs**, not raw IC. Expect a real
+> chance of INCONCLUSIVE / refute; the value is that it's the *one* obs question the session left open,
+> and it's cheap + torch-free.
+
+### The two candidate features (causal, leakage-free)
+
+Mapped from mlmodelpoly's `volatility.py` (the RVOL-tilted fast/slow σ blend) and `features.py`
+(robust median-normalized impulse). We expose the **state**, not their hand-tuned sizing heuristic — the
+LSTM learns the (possibly non-monotone, contrarian) response, per the thesis guardrail.
+
+1. **`volreg` — vol-regime ratio.** `σ_fast(tok,bar) / σ_slow(tok,bar)`, where σ is the trailing realized
+   stdev of `returns` (the same series `_std` uses): `σ_fast` over `VOL_FAST=24` bars, `σ_slow` over
+   `VOL_SLOW=168` bars, both right-anchored at `bar` (causal — no shift needed; rolling std at `bar` uses
+   only `…bar`). Squash `log(volreg)` with `tanh` so contractions/expansions land in [−1,1]. Reads "is
+   this token's vol expanding *relative to its own baseline* right now" — orthogonal to the *level* of vol
+   (which the obs lacks anyway) and to `surge` (volume). Do **not** add mlmodelpoly's RVOL-weighted blend
+   *weight* as a feature — that's a sizing rule; the ratio is the observable, the policy is the blender.
+2. **`rimp` — robust return-impulse.** `|r_1bar(tok,bar)| / median(|r|, win=168)` over the trailing
+   window (median/MAD-style, robust to the heavy alt tails — the same robust-z discipline already used in
+   the turnover-alert ops spec). Sign-free magnitude anomaly: "how big is this bar's move vs this token's
+   typical bar." `tanh`-squash. Distinct from `cush` (cumulative distance) and the harvest r24/r3d/r7d
+   (multi-bar returns) — none normalize the *single-bar* move by the token's typical bar.
+
+Precompute `_volreg[bar,j]`, `_rimp[bar,j]` alongside `_std`/`_surge` in `__init__` (vectorized
+rolling ops; ~free). Probe reads them off a constructed env over the panel — **no torch, laptop-local, no
+desktop contention** (the P-SURGE-SHAPE pattern: `scripts/probe_volregime.py`).
+
+### The gate (what makes it honest)
+
+- **PRIMARY = incremental continuous IC.** For each feature, residualize forward return (H∈{24,48}h)
+  on the existing-obs baseline {surge, cush, giveback, unreal, held_frac, btc_trend, breadth} (OLS), then
+  Spearman-IC the feature against the residual. Report ΔIC vs the baseline-only fit with a
+  **move-clustered / 168h-block / token-paired bootstrap CI**. Buckets illustrate only (thin +10% cells).
+- **TWO contexts, one headline each** (facet-level BH-FDR across both + any future vol probe):
+  - **ENTRY (ignition bars):** does the feature predict fwd run-up / a size-up signal among valid
+    ignitions (det_blacklist excluded, the P-SURGE-SHAPE population)?
+  - **EXIT (giveback-matched bars):** does it discriminate **resumers from trend-breaks** *among bars at
+    the same giveback* — the exact discrimination P-DECEL/P-EMABREAK ran. This is the reopening test: the
+    hunt-map says giveback+cush can't separate them; the question is whether a NEW vol-regime/impulse axis
+    can where the current obs provably can't (incremental AUC over the giveback-logit floor, CI must
+    exclude 0).
+- **n-floor → INCONCLUSIVE** below ~30 per cell / the bootstrap CI bands (not refute, not pass).
+- **Causality asserts:** `volreg`/`rimp` read only `…bar`; unit-test that swapping in future bars changes
+  the value (no accidental shift-forward), mirroring the P-MOVEAGE `b0+72 ≤ b` guard.
+
+### Decision rule (survival → integration)
+
+Each feature surviving facet-level FDR with a **sign-stable incremental IC** earns exactly **ONE appended
+obs slot**, added as a **single-variable** flag on the `wkw` base (`vol_regime_obs` / `impulse_obs`,
+default-OFF/byte-identical), then validated on the **cold-weekly gate** (paired-bootstrap CI-low > rung-0)
+*before* any TEST spend — never bundled, never a fixed gate (the discipline that kept `wkw` clean). If
+both survive, they go in as two separate sweeps, not one. If neither shows incremental IC, **STOP** — log
+the sixth vol-redundancy null and do not wire anything (the dilution risk the rdLc/turnover precedents
+warn against). This probe does **not** gate or delay the frozen-`wkw`-TEST decision, which remains the
+session's highest-confidence move and runs independently.
+
+## EMA-break re-probed on the POLICY (2026-06-19) — the SUBSTRATE CORRECTION
+
+The 2026-06-17 EMA-break verdicts (P-EMABREAK NO-GO, conditional-EMA-break REFUTED) **all ran on the
+rung-0 RULE.** The user flagged this as a methodological flaw: the rule's *only* exits are
+sell-on-weakness (trailing stop / EMA-cross), so it structurally gives back pumps — it is the wrong
+substrate for any exit / profit-taking question. The **deployable POLICY** has the `tp_rungs`
+profit-take ladder + a learned hold/override, so it captures pumps differently. This session re-ran the
+exit forensic on the policy (`probe_policy_exits`); the four EMA-break conditionings (P&L / consolidation /
+deep-dip inverse / EMA-period) were all done on the **rule** — the flawed substrate. **Meta-lesson: probe
+the DEPLOYABLE substrate (the policy), not the rule, for any exit / profit-taking question.**
+
+### `probe_policy_exits` — the substrate correction (the headline)
+Ran on **ef2-s0** over the OOS cold weeks (`scripts/probe_policy_exits.py`). Exit-trigger mix:
+**74% EMA_BREAK / 15% PROFIT_TAKE / 7% ROTATION_OUT / ~5% stops.** The policy's *own* EMA-break sells
+**give back +3.5% mean fwd-48h** (55% recover) — so the EMA-break IS a real leak on the policy too, but
+**the P&L engine is the few pumps the policy HOLDS to the week close, not profit-taking:** 4
+held-to-end positions made **$6235** (best TAG **$5432**) vs 66 exited trades making **$4782** combined.
+**TAG's +170% rip was captured by HOLDING** (no exit fired, force-closed near the high), NOT by the
+profit-take ladder. This re-frames the exit facet: the agent's alpha comes from *not selling* clean
+rips, and the EMA-break shaking it out in sideways is the leak to plug.
+
+### EMA-break conditioned FOUR ways (all on the rule) — re-confirmations + one new cell
+1. **P&L gate** = the prior conditional-EMA-break / P-EMA-COND — already refuted (see below).
+2. **Consolidation / low-vol suppression (NEW worst cell):** the **consol-and-shallow** cell — a shallow
+   EMA-break during tight low-vol consolidation, the **FF pattern** — was the **WORST** (terminal
+   fwd-48h **−5.4%, 8% win rate**). FF was the 8% anecdote; most consolidation breaks keep falling.
+3. **Deep-dip INVERSE (do deep + high-vol breaks bounce?):** REFUTED — the break-depth forward-return
+   trend is **MONOTONICALLY NEGATIVE** (deeper = worse); the deep-and-high-vol cell is **n=4 with ZERO
+   val events**, and the earlier +13.9% high-vol reading was a **thin single-dimension artifact** that
+   vanished with proper conditioning + train data.
+4. **EMA-PERIOD sweep (global + exit-only, spans 50–240):** **no net win** — a longer EMA gives no robust
+   val gain, worse test return, and MORE DQ weeks (it holds losers/givebacks longer).
+
+### DQ-week anatomy (the 2 cold weeks that breach the 30% DD gate)
+- **Mar 23** — a pure loser: peaked 1.04x, ended −25%.
+- **Apr 13** — caught SIREN's +163% pump to a +23% peak, then **GAVE IT ALL BACK and ended −14%** — a
+  giveback that ends NEGATIVE, not a profitable-but-DQ'd false alarm.
+A longer EMA makes **both** worse.
+
+### The fix that came out of it — SIDEWAYS EMA-BREAK SUPPRESSION (built, retrain pending)
+Mechanism of the leak: the EMA-break fires on shallow noise-dips during tight sideways consolidation,
+shaking the agent out before the pump (the FF Apr-9 case: a −0.1% cushion NOISE break, then a 48h
+cooldown locked re-entry through FF's real +106%/+151% rip). **Fix:** when a break is **SHALLOW**
+(`cushion > -shallow_break_max`) AND the token is **QUIET** (24h realized vol < `consol_vol_max`), do
+NOT fire the EMA-break; the loss_floor (−20%) and trailing stop stay fully active. Asymmetric: bounded
+downside via the floor, large upside via pump capture. The user chose the "shallow + quiet" definition
+(most surgical — a deep break or a high-vol break still cuts). Both knobs 0 ⇒ OFF, byte-identical (30
+env tests pass). Committed `abf089b`, wired through REWARD_KEYS + train_event + provenance + simulate.
+**Planned experiment:** retrain ef2 + `shallow_break_max=0.02` + `consol_vol_max=0.015` (FF-validated
+thresholds), 4 seeds, graded honest cold-weekly vs ef2 (pending the user's green-light — shared
+desktop). Open co-factor: ROTATION_OUT can still swap a held-but-flat token out before its pump (a
+second shakeout mechanism) — the next thread if suppression helps but rotation caps it. (See
+[[Trading Strategies]] for the rotation lever and [[Market Conditions]] for the live-week read.)
+
+### Two meta-lessons from this session
+- **Probe the policy, not the rule.** The rule's structural sell-on-weakness exits make it the wrong
+  substrate for any exit/profit-taking question; the policy's `tp_rungs` + learned hold change the
+  answer (held-to-end pumps are the P&L engine, invisible on the rule).
+- **Explore conditional sub-regimes instead of blanket-refuting a lever.** The EMA-break is not
+  uniformly beta: the consol+shallow cell is the worst (−5.4%, 8% win), distinct from deep/high-vol
+  breaks — grounding every cell (terminal return, val/test split, n-floor, DQ-aware) caught a
+  single-dimension +13.9% artifact and located the real, surgical fix.
 
 ## Conditional EMA-break (user hypothesis, 2026-06-17) — REFUTED (beta)
 

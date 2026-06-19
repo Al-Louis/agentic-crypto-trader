@@ -1096,3 +1096,71 @@ live **paper** forward-run on BSC, ahead of the June 22 window. Branch `feat/liv
   put-only role) — see [[EC2 Trading Host Runbook]] (incl. the as-found corrections: TWAK never shows the
   mnemonic; the headless keychain copy is deleted; the SIGTERM clean-stop fix) and [[Apentic Data Contract]]
   §trading/.
+
+## 2026-06-19 — fixed-universe mode, vol_mult provenance, rung-0 demotion, sideways EMA-break suppression
+
+Four commits (build order; numbers/verdicts → [[Experiment Log]] §2026-06-19, [[AI Training]], the
+fixed-13 closed branch and the EMA-break investigation — do not re-derive them here). Started from the
+"+51% val vs 25% over 6mo" discrepancy: RESOLVED as two graders of different things — "+51%" was the
+CONTINUOUS eval (one long episode, universe picked ONCE at val open, returns compound) vs "25%" the
+cold-weekly sim (causal vol-top-k RE-PICKED every Monday, fresh $10k per week, summed). The cold-weekly
+sim is the deployment-honest grader; the discrepancy traced to FF's Apr 9-10 +100%-plus roundtrip being
+in the once-picked continuous basket but NOT in the Apr-6 week's causal top-10 (its trailing vol had
+decayed; it re-entered only the following week, after the pump).
+
+- **`abf089b` — sideways EMA-break suppression + rung-0 `exit_ema_span` + the EMA-break probes.** The
+  leak: the 72-bar-EMA weakness-exit fires on shallow noise-dips during tight sideways consolidation,
+  shaking the agent out before a pump (the FF Apr-9 case: a −0.1% cushion NOISE break, then the 48h
+  cooldown locked re-entry through FF's real Apr-10 18:00 rip). Fix: when a break is SHALLOW (cushion >
+  −`shallow_break_max`) AND the token is QUIET (24h realized vol < `consol_vol_max`), do NOT fire the
+  EMA-break; the loss_floor (−20%) and trailing stop stay fully active, so real breakdowns still cut
+  (bounded downside) while the position survives noise to catch the pump (asymmetric: bounded downside
+  via the floor, large upside via pump capture). The user chose the "shallow + quiet" definition (most
+  surgical — a deep break or a high-vol break still cuts). Both knobs `0` ⇒ OFF, byte-identical (30 env
+  tests pass). Wired through `launch.REWARD_KEYS` (`shallow_break_max`, `consol_vol_max`) + `train_event`
+  flags + provenance + the `simulate` loader, so it is sweepable via `/rl-loop` and graded honestly.
+  Also in this commit: `rung0` gains a separate `exit_ema_span` (additive/default-off) and the EMA-break
+  investigation probes. **STATUS: committed, NOT yet retrained** — planned next experiment is to retrain
+  ef2 + `shallow_break_max=0.02` + `consol_vol_max=0.015` (the FF-validated thresholds), 4 seeds, graded
+  honest cold-weekly vs ef2 (pending the user's green-light; the desktop is shared). Mechanical check on
+  the bare rule (FF fixed-13 week): OFF sells FF twice (Apr 7 + Apr 9 EMA_BREAK); ON suppresses both and
+  holds FF through the chop. Open co-factor: ROTATION_OUT can still swap a held-but-flat token out before
+  its pump (a second shakeout mechanism) — the next thread if suppression helps but rotation caps it.
+- **`6db0674` — `simulate_weekly` dataless-asset guard + a `--vol-mult` override + `delist_sim_model.py`.**
+  Driven by a FRONTEND CRASH: the eff-s1 fixed-13 `simulated_trades.json` carried 11 empty-candle assets
+  (the FIXED universe forced not-yet-listed tokens — ASTER/HUMA/SIREN/ZEC in early weeks — into the
+  basket with no OHLCV), so `candles` was `[]` and the simulations frontend crashed in `computeBacktest`
+  at `backtest.ts:261` (`const t0 = candles[0].t` → undefined). Three fixes: (1) PRODUCER GUARD —
+  `simulate_weekly` now skips any asset with empty candles (a dataless token has no trades and 0 PnL; the
+  per-week recon still balances); (2) `scripts/delist_sim_model.py` rewrites `simulated_models.json`
+  without a given run-id + invalidates CloudFront (the S3 publisher can PUT but not byte-delete, so this
+  is a DE-LIST — bytes remain, just unlisted; → [[Apentic Data Contract]], the no-byte-delete publisher
+  fact); (3) eff-s1 was re-published clean. The `--vol-mult` override lets older runs be re-graded at
+  their correct vol_mult (see `2345fd6`). Page healed.
+- **`8009973` — contract DIRECTION RESET: rung-0 demoted to a reference floor (docs).** rung-0 is
+  demoted from the BINDING gate to a REFERENCE floor (the same demotion Buy&Hold got 2026-06-15). The
+  corrected gate: a config earns a version iff it (1) SURVIVES the DQ gate (worst single-week maxDD <
+  ~30%, still HARD) AND (2) IMPROVES on the previous best iteration (the champion) on the honest
+  cold-weekly metric. rung-0, Buy&Hold and Random are all computed/reported references, none binding;
+  the loop north-star becomes margin-vs-prior-champion and the drift alarm fires on
+  no-improvement-over-champion. Deploy on the best single seed; select configs on the seed-mean. This
+  commit wrote the reset into the [[Agent Communication Contract]]; **CODE TODO (not yet shipped):**
+  `weekly_gate` / `honest_gate` / `loop_control.decide` / `rl_north_star` still enforce `beats_rung0`.
+- **`2345fd6` — fixed-universe mode + record vol_mult in provenance.** `EventRungEnv` gains
+  `universe_mode="fixed"` + a `fixed_universe` token list (NO causal weekly re-pick; `k` auto-syncs to the
+  list length; obs width unchanged). `train_event` gains `--universe-mode fixed` + `--fixed-universe` and
+  now RECORDS `vol_mult` + `fixed_universe` in provenance; `REWARD_KEYS` gains both;
+  `simulate.env_kwargs_from_provenance` now reads `vol_mult` (was defaulting to 2.5) and `fixed_universe`.
+  This closed a real **vol_mult PROVENANCE BUG**: `train_event` never recorded `vol_mult`, so the loader
+  defaulted to the constructor's 2.5 — but ef2 TRAINED at vol_mult 2.0, so every PUBLISHED ef2 sim ran
+  the policy OFF-DISTRIBUTION at 2.5, depressing its numbers (ef2-s1 cold-weekly +4.9%/wk at 2.5 vs
+  +6.0% at the correct 2.0). All 4 ef2 seeds were re-published at the correct 2.0. The fixed-universe
+  mode was built to test a FIXED-13 universe (drop the 7 most-BTC-correlated/lowest-vol tokens so a
+  high-vol spike like FF is never selected out mid-week) — that experiment is a CLOSED BRANCH (ef2 beats
+  fixed-13 on both seed-mean and best-seed; causal vol-top-k stays the substrate), but the
+  `universe_mode="fixed"` machinery remains as tooling. → [[Experiment Log]].
+
+**Operational note (→ [[Remote Capabilities]], [[MCP Server]]):** the PowerShell SSH TOOL was DEAD this
+session; the working route to the training desktop was the **Windows OpenSSH binary**
+(`C:\Windows\System32\OpenSSH\ssh.exe` / `scp.exe`) invoked from the **Bash tool** — the in-session MCP
+`rl_loop_*` tools stay unreliable (drive sweeps via `scripts/rl_loop.py`, fresh process per call).

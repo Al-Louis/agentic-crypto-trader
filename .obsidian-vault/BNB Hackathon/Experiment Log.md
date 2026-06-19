@@ -2077,3 +2077,309 @@ seed, NOT the config seed-mean; ef's config is refuted but ef-s2 is its stronges
 for the EC2 paper harness ([[event-forward-run-harness]]). **THE REFRAME (2026-06-18): training has converged to its
 ceiling; the live, unverified edge is the ef-s2 EC2 forward-test, with the June 22–28 window close.** Open call: spend
 the frozen TEST to certify the candidate + commit to deployment, or open a genuinely-new obs/feature lever.
+
+## 2026-06-18 — SELECTION direction-filter (USER hypothesis): REFUTED across all regimes — the bear risk is STRENGTH, not crashers
+
+**Hypothesis (user).** `_pick_universe` ranks by `returns.rolling(168).std()` — symmetric, direction-blind — so the
+vol-top8 roster pulls in downward-spiraling tokens (SIREN #1 this morning: −90%/wk, ±20%/day). Premise: those crashers are
+risky dead weight; a direction-aware selection filter (drop trailing-down names) should help, especially into a bear week.
+
+**Method.** `scripts/probe_selection_direction.py` — replicates `_pick_universe` over the full panel (5123 bars × 20 tok,
+193 selection points, step 24h) using the env's OWN precomputed arrays (`_std`/`_px`/`_cush`/`_ignite`, byte-faithful).
+Buckets each top-8 slot by trailing-7d return; measures forward-7d return, forward maxDD, win, ignitions/wk. Counterfactual:
+keep vol-top8 among trailing-ret ≥ −10% (fill from next-best). Sliced by **universe** regime (alts decouple from BTC, so
+the EW-universe trend is the regime, per [[Market Conditions]]): ALL / TRAILING-BEAR (causal, uni 336h < −5%, 26% of pts) /
+FORWARD-BEAR (scenario/lookahead, uni fwd-week < 0, 45% of pts).
+
+**Premise CONFIRMED, fix REFUTED.** The roster IS direction-blind — **24% of slots are crashing/falling (trailing <−10%),
+53% are below-EMA at selection.** But the crashers are not dead weight — they carry the **best** forward return (the
+contrarian bounce, the same mean-reversion every probe here finds), and a direction filter LOSES forward return in **every**
+regime:
+
+| regime | crashing tier fwd-7d (win) | rising/ripping fwd-7d | filter Δ (fwd-ret / maxDD) |
+|---|--:|--:|--:|
+| ALL (1544 slots) | +15.8% (57%) | +8.7% / +12.6% | −1.22pts / +1.58pts |
+| TRAILING-BEAR (408) | **+27.9%** (63%) | +4.8% / **−18.1%** (n=7) | **−3.88pts** / +2.88pts |
+| FORWARD-BEAR (688) | **+3.1%** (only positive tier) | −7.8% / **−19.0%** | −0.46pts / +1.72pts |
+
+**Robustness verdict — the bear slice STRENGTHENS the result, and inverts the risk story:**
+- The "+15.8% is recovery-sampled" caveat is refuted: conditioning on the market *already* falling (causal) makes the
+  capitulation bounce **stronger** (+27.9%), and even in weeks that actually close down, crashers are the **only positive
+  tier** (+3.1%). The stretched-down names revert hardest exactly when it's most bearish.
+- **The bear risk lives in EXTENDED-STRENGTH, not crashers.** In both bear slices the rising/ripping tiers collapse
+  (−18% / −19% fwd) — chasing strength into a bear is the real hazard. The agent already has partial defense (`cush` in the
+  obs; high-cush/extended is the mean-reversion signal the reward weights). This is [[ignition-edge-is-contrarian-not-strength]]
+  in its sharpest form.
+- The direction filter is **most** costly precisely in the bear week the user worried about (−3.88pts of forward return for
+  +2.9pts of maxDD relief). **Excluding downtrenders re-imports the strength bias the probes have refuted six ways.**
+
+**Implication.** The selection-direction lever is a **dead end** — do NOT build it; the crashers are where the bounce + the
+upside tail (the tournament objective) live. What separates a good week from a bad one is **not** the token's trailing
+direction but the **universe regime** (in forward-bear weeks *every* tier is negative; crashers just lose least) — which
+points back at the **regime / risk-off-to-cash** lever ([[Trading Strategies]] §"Perps vs. defensive rotation"), not a
+re-rank of which volatile names sit on the roster. Probe kept at `scripts/probe_selection_direction.py`. Caveat: forward-bear
+is lookahead (scenario characterization, not a tradeable rule); token forward returns ≠ agent PnL (the `cush>0` ignition gate
+means the agent buys the *turn*, not the falling knife).
+
+## 2026-06-18 — Per-token IGNITION-EDGE selection: REFUTED (no OOS persistence) → but the entry trigger is NEGATIVE-EV on the TRAIN era (the defensive-plateau mechanism)
+
+Follow-on to the selection-direction probe. Question (user): with 8 idiosyncratic lowcaps, is there a consistent
+learnable ignition→forward-return signal across them, or is it concentrated — and would selecting the universe by
+*ignition-edge quality* (not raw vol) be a real lever? Two probes, panel-only, byte-faithful to deployment.
+
+**Step 1 — `scripts/probe_token_signal.py` (FULL PANEL, pooled).** Per-token ignition (`_ignite`) fwd-24h return, vs the
+token's unconditional drift (lift), weighted by selection frequency. *Looked* promising: ~6 tokens (TAC +5.4%, TAG +5.0%,
+ZEC +4.7%, B/UB +3.1%, SKYAI +2.8%, win 55–66%) carried an above-cost edge; but the **two most-selected** names were dead
+(**Q** sel 93% / +0.4% below cost; **SIREN** sel 83% / **−5.5% lift** — the worst in the universe), and only 6/20 cleared
+the ~1% cost wall. Hypothesis formed: the vol-selector over-weights the ultra-high-vol names (Q/SIREN/COAI) where ignitions
+*fail*, poisoning the **token-agnostic** shared policy (a negative-edge token whose features overlap the good ones teaches
+"this pattern loses," suppressing good entries). Proposed lever: curate the universe by ignition-edge, not raw vol.
+
+**Step 2 — `scripts/probe_token_signal_persist.py` (WALK-FORWARD).** Per-token edge on TRAIN vs VAL vs TEST; rank
+persistence; and a train-derived filter applied to held-out selection (no leakage). **The lever is REFUTED:**
+- **Spearman(train,val) = −0.03, Spearman(train,test) = +0.11**; top-8-by-edge overlap **3/8** on both (≈ random). Signs
+  flip across splits (TAG −/+/+, TAC −/+/−, SKYAI −/+/−, SIREN −/−/+). The Step-1 "6 signal-bearers" was a **pooling
+  artifact** — the positives came from the val/test bull windows; pooled, they dominate the mean. Selecting on ignition-edge
+  = fitting era-specific noise. **Vol stays the only persistent selection axis** (Spearman +0.66); ignition-edge does not.
+
+**The finding underneath (the real prize).** On the **TRAIN split, ignition-edge is NEGATIVE on 19 of 20 tokens** (only
+**ZEC** positive, +0.61%; ZEC is also the lone **+ + +** token across all three splits — matches the user's chart read that
+ZEC is the one major that behaves). **The agent's own entry trigger has negative expected value on the bear-heavy training
+era** — so the "defensive / won't size up" plateau is the agent *correctly* fitting a distribution where buying the
+volume-spike is a dead-cat bounce that fails (the forward-bear finding, now at per-token resolution). The positive ignition
+payoffs live only in the val/test **bull micro-windows** (TAC +9% val, ZEC +11% test). **Mechanistic root of the plateau:
+the entry edge is REGIME-CONDITIONAL, and the agent has no clean regime signal to gate bull-ignition (size up) vs
+bear-ignition (skip).** No per-token selection or token-count curriculum fixes this — only a regime signal does. Reinforces
+the reward-bound diagnosis (2026-06-16) and converges on the regime / risk-off-to-cash lever ([[Trading Strategies]]).
+
+**Eval-regime caveat (flagged, not resolved).** Train is bear-heavy; val/test catch the spring bull; the **deploy week is
+forecast bear** ([[Market Conditions]]). So grading on val/test bull windows may *penalize defensiveness that is correct for
+a bear live week* — weigh this before chasing "harvest the bull" levers ([[benchmark-driven-drift]]). Probes kept at
+`scripts/probe_token_signal.py` + `scripts/probe_token_signal_persist.py`.
+
+## 2026-06-18 — Per-regime cold-week split: CHOP is the battleground, CASH beats deployment in 71% of weeks → the regime signal's job is chop→cash (reward), not harvest
+
+Gate for "where the regime signal lives" (harvest-vs-de-risk). ef-s2 needs torch+weights (on S3, not local), but it is MORE
+defensive than the rung-0 RULE, so **cash (0%) ≤ ef-s2 ≤ rung-0 RULE ≤ Buy&Hold** on exposure — bracket the agent with the
+pure-numpy baselines, bucketed by week regime via `trader.train.weekly_eval` (the deployment-honest cold-week grader).
+`scripts/probe_regime_split.py`, 28 cold weeks (fresh $10k each).
+
+**Surprise #1 — the alts barely have bear weeks.** By the universe's OWN weekly EW move (bull >+10% / bear <−10%):
+
+| split | bull | flat | bear |
+|---|--:|--:|--:|
+| train | 3 | 13 | 1 |
+| val | 3 | 2 | 1 |
+| test | 2 | 3 | 0 |
+| **total** | **8 (29%)** | **18 (64%)** | **2 (7%)** |
+
+Genuine bear weeks are **2/28** — the alts decouple from BTC's macro bear and pump on their own dynamics ([[Market
+Conditions]]). The real axis is **chop vs rip**, not bull vs bear. Bull weeks are concentrated in **val/test (5 of 8)** — the
+agent is structurally **undertrained on the harvest regime** (held out).
+
+**Surprise #2 — CASH beats deployment in flat AND bear weeks (OOS):**
+
+| regime | n | CASH | RULE (win / wDD / DQ) | B&H | B&H−RULE |
+|---|--:|--:|--:|--:|--:|
+| bull | 5 | 0% | **+22.5%** (80% / 15% / 0) | **+35.7%** | +13.2 |
+| **flat** | 5 | **0%** | **−3.9%** (40% / **35.5%** / **1**) | −1.8% | +2.1 |
+| bear | 1 | 0% | −7.1% (0% / 13% / 0) | −4.5% | +2.6 |
+
+(all-weeks flat n=18: RULE −3.7%, B&H −1.9% — robust on the big bucket). **In flat/chop (64% of weeks) being deployed
+BLEEDS** (selective rule −3.9% with a **DQ at 35.5%**; even passive B&H −1.8%) while **cash holds 0%** — the negative-sum-
+after-cost nature of these tokens. **Deployment only wins in bull (29%)**, where the harvest gap is large.
+
+**Verdict — defensiveness is mostly an EVAL ARTIFACT, with the opposite defect hiding next to it.** The agent's caution costs
+us almost entirely in **bull weeks** (29%, held-out, NOT the forecast deploy regime), so the "plateau" is the eval grading on
+windows the live week likely won't be. The genuine defect is the reverse: in chop the agent is **not defensive ENOUGH** — it
+trades the chop and bleeds when it should sit in cash at 0%. **So the regime signal's highest-value job is "recognize chop →
+go to cash" (helps 71% of weeks, deploy-aligned), NOT "harvest the bull" (rare / held-out / deploy-misaligned) and NOT
+"bear → cash" (bear is 7%).** It lives in the **REWARD**, via the action the agent already has (flat = USDT): the agent
+already SEES the regime (`breadth` obs), but the reward's **regime-blind global `_mu_base` baseline** hides that chop-ignitions
+lose to cost, so it never teaches "skip in chop." A **regime-conditional baseline** (demean each ignition against the typical
+ignition IN THE SAME regime) makes chop-ignitions correctly score as skip. **Retroactively validates the risk-off-to-cash
+lever** ([[Trading Strategies]] §"Perps vs. defensive rotation") from a new angle — cash is not just a bear hedge, it's the
+winning move in 71% of weeks. Caveat: bear n=2 (1 OOS) too thin; the load-bearing bucket is **flat (n=18)**.
+`scripts/probe_regime_split.py`.
+
+## 2026-06-18 — Reward-baseline FORK resolved (don't build it): the global `_mu_base` is ALREADY a cost-floor; breadth is NON-MONOTONIC
+
+`rl-ml-trainer` scoped a **regime-conditional `entry_forward` baseline** (demean each ignition vs the typical ignition in
+its own breadth regime; spec in [[AI Training]]). Before sweeping, a baseline-direction probe (`scripts/probe_baseline_direction.py`)
+checked the reward MATH: reward = `dev·(fwd − mu_base) − γ·dev²` → `dev* = (fwd − mu_base)/2γ`, so skip (dev*<0) needs
+`fwd < mu_base`. Per causal-breadth regime over 4,597 panel ignitions:
+
+| baseline | bear-breadth | chop/mid | bull/high-breadth |
+|---|--:|--:|--:|
+| med fwd return | −1.71% | **+0.61%** | −0.48% |
+| GLOBAL skip-rate (mu=+0.78%) | 68% | 51% | 59% |
+| PER-REGIME skip-rate | 56% | 53% | 63% |
+
+**Resolved: do NOT build the regime-conditional baseline.** Two findings kill it:
+1. **The global `_mu_base` is already a cost-floor** — `mu_global = +0.78% ≈` the ~1% round-trip cost. It already demands an
+   ignition beat ~cost to size up, already skips 68% of bear-breadth / 59% of high-breadth ignitions. The **cost-floor**
+   variant is therefore redundant (global already is one); the **per-regime** variant is *harmful* — it sets `mu_base` to each
+   bucket's own (very negative in bear) mean, so a bear ignition only has to beat −0.93% to get sized UP (backwards).
+2. **Breadth is NON-MONOTONIC for ignition success** — med fwd is best at MID breadth (+0.61%), worst at both extremes
+   (bear −1.71%, high −0.48%), and 61% of ignitions fire in the high-breadth *extended* zone where they revert (the contrarian
+   thesis again). So `breadth` — already in the obs — is not a clean "size up when high" signal, which is plausibly why the
+   agent can't turn it into a harvest rule. The regime conditioning we imagined doesn't exist in the assumed form.
+
+**Framing correction:** the flat-WEEK bleed (per-regime split) is a **cost/churn** problem (round-trip on ~breakeven
+ignitions), NOT a reward-null problem — the chop-*breadth* bucket is actually the GOOD one. **5th lever this session to resolve
+to "the current setup is already roughly right"** (after direction-filter, ignition-edge selection, count-curriculum,
+regime baseline) → the evidence increasingly favors **spend the frozen TEST + deploy ef-s2** over more training levers.
+`scripts/probe_baseline_direction.py`.
+
+## 2026-06-19 — The +51% val vs +25%/6mo discrepancy: RESOLVED (two graders of different things; cold-weekly is the honest one)
+
+A "+51% val" figure clashed with the "+25% over 6 months" cold-weekly number. Root cause: **they grade different objects.**
+- **"+51% val"** was the CONTINUOUS eval — ONE long episode over the validation window, universe picked **once** at val open
+  (which INCLUDED FF), returns **compound** across the window.
+- **"+25%/6mo"** was the **cold-weekly sim** — the causal vol-top-k universe is **re-picked every Monday**, per-week returns
+  start fresh ($10k) and are **summed**, no compounding across weeks.
+
+The split shows up on FF: its Apr 9-10 +100%-plus roundtrip was caught by the continuous eval (FF sat in the once-picked
+basket) but **NOT** by the cold-weekly sim — in the Apr-6 week FF was not in that week's causal top-10 (its trailing vol had
+decayed; it re-entered only the FOLLOWING week, after the pump). **The cold-weekly sim is the deployment-honest grader** (it
+re-picks causally each week, exactly as live would); the continuous eval's once-picked compounding flatters a single basket.
+All deploy/leaderboard grading stays on cold-weekly.
+
+## 2026-06-19 — `vol_mult` PROVENANCE BUG: found + fixed; all 4 ef2 seeds re-published at the correct 2.0
+
+**Bug.** `train_event` never recorded `vol_mult` in the provenance dict, so `simulate.env_kwargs_from_provenance` had no
+value and **defaulted to the constructor's 2.5**. ef2 was TRAINED at `vol_mult` **2.0**, so every PUBLISHED ef2 sim ran the
+policy **off-distribution at 2.5**, depressing its numbers:
+- ef2-s1 cold-weekly was graded **+4.9%/wk at 2.5** vs **+6.0%/wk at the correct 2.0**.
+- the Apr-27 week was **+9.4% at 2.5** vs **+26.0% at 2.0**.
+
+**Fix (commit `2345fd6`).** `train_event` now RECORDS `vol_mult` (and `fixed_universe`) in provenance; `REWARD_KEYS` gains
+`vol_mult` + `fixed_universe`; `env_kwargs_from_provenance` reads `vol_mult` (was silently defaulting). For older runs,
+`simulate_weekly` gains a `--vol-mult` override (commit `6db0674`). **All 4 ef2 seeds were re-published at the correct
+`vol_mult` 2.0.** Lesson: an unrecorded hyperparameter that the loader silently defaults is a leak — every sweepable knob
+must be in `REWARD_KEYS` + provenance or it grades the policy off-distribution. See [[AI Training]].
+
+## 2026-06-19 — FIXED-13 universe experiment (`ppo-event-rdLe4-eff-2345fd6`): loses to causal vol-top-k → CLOSED BRANCH
+
+**Proposal.** Drop the 7 most-BTC-correlated / lowest-vol tokens → a **FIXED 13-token set**, no weekly causal re-pick, so
+high-vol spikes (FF) are never selected out mid-week. Dropped 7: ADA, SFP, XRP, BabyDoge, LINK, LTC, XAUt. Kept 13: ASTER,
+B, BANANAS31, COAI, FF, HUMA, Q, SIREN, SKYAI, TAC, TAG, UB, ZEC. Grounding: the 7 ARE the most BTC-correlated at the
+**daily** horizon (LINK 0.85, XRP 0.81, ADA 0.79, BabyDoge 0.78, LTC 0.77, SFP 0.61; XAUt is the exception at 0.06 — gold,
+dropped for thin liquidity / USDT-redundancy) AND the 7 lowest-vol. Hourly correlation is ~0 for all, so daily is the right
+lens. The causal vol-top-k selector already almost never picks them. Built via `universe_mode="fixed"` + `fixed_universe`
+list (NO causal weekly re-pick; k auto-syncs to the list length; obs width unchanged) — commit `2345fd6`.
+
+**Results (all honest cold-weekly, OOS val+test):**
+- **rung-0 RULE:** fixed-13 (all 13) **+5.9%/wk** vs causal-top-10 **+11.5%/wk** — the RULE halves (dilution). But the rule
+  is the WRONG substrate to judge this on (see the substrate correction below).
+- **RL eval-only screen** (existing ef2-s1 policy, off-distribution, evaluated on fixed-13): fixed-13 **+7.5%** vs causal
+  **+6.0%/wk** — looked promising, which prompted the in-distribution retrain.
+- **IN-DISTRIBUTION RETRAIN** `ppo-event-rdLe4-eff-2345fd6` (`universe_mode=fixed` on the 13, `vol_mult` 2.0, 4 seeds):
+  honest cold-weekly **seed-mean +5.9%/wk** (s0 +6.2, s1 +7.7, s2 +6.3, s3 +3.3), best seed **s1 +7.7%**, DQ-safe
+  (worst-week DD 15-20%).
+- **vs ef2** (prior champion, re-graded at the correct `vol_mult` 2.0): **seed-mean +8.5%/wk** (s0 +10.0 /DD24.7%, s1 +6.0
+  /16%, s2 +9.1/12%, s3 +9.1/8%), best seed **s0 +10.0%**.
+
+**VERDICT — ef2 BEATS fixed-13 on BOTH config seed-mean (8.5 vs 5.9) and best-seed (10.0 vs 7.7). Fixed-13 is a CLOSED
+BRANCH; causal vol-top-k stays the substrate.** The fixed `universe_mode` remains as tooling (sweepable, graded honestly).
+The eval-only screen flattering fixed-13 (+7.5%) was off-distribution noise that the in-distribution retrain corrected — a
+reminder to retrain in-distribution before trusting an eval-only A/B.
+
+## 2026-06-19 — DIRECTION RESET: rung-0 demoted from binding gate to a REFERENCE floor
+
+Following the same demotion Buy&Hold got 2026-06-15, **rung-0 is demoted from the BINDING gate to a REFERENCE floor**
+(commit `8009973`, docs-level; written into the [[Agent Communication Contract]]). The corrected gate: a config earns a
+version iff it **(1) SURVIVES the DQ gate** (worst single-week maxDD < ~30%, still HARD) **AND (2) IMPROVES on the PREVIOUS
+best iteration (the champion)** on the honest cold-weekly metric. rung-0, Buy&Hold and Random are all computed/reported
+**references**, none binding. The loop north-star becomes **margin-vs-prior-champion**; the drift alarm fires on
+**no-improvement-over-champion**. Deploy on the best single seed; select configs on the seed-mean.
+
+**CODE TODO (not yet shipped):** `weekly_gate` / `honest_gate` / `loop_control.decide` / `rl_north_star` still enforce
+`beats_rung0` — the code still encodes the old binding gate; the demotion is so far docs-only. See [[AI Training]].
+
+## 2026-06-19 — LEADERBOARD re-crown: champion = `ef2-s3` (the risk-adjusted best)
+
+The simulated leaderboard re-crowned **`ef2-s3`** (`weekly_score` **+9.05%/wk**, `cumulative_score` **+123% over 28 weeks**,
+worst-week DD **8.4%** — the risk-adjusted best). Top-3: **#1 ef2-s3 (+9.05%) / #2 eff-s1 (+7.67%) / #3 ef-s2 (+5.77%)**;
+**wkw-s3 evicted to orphans.** Background: eff-s1 had been auto-crowned only because ef2 (a sweep-script run) was never
+published to the leaderboard; once ef2 was published at the correct `vol_mult` 2.0, its s3 took #1. The board ranks by
+`weekly_score` = OOS (val+test) per-week mean return = `(val.ret_sum + test.ret_sum)/(val.n + test.n)` from
+`simulate_weekly` `meta.windows`. **Current champion pointer → `ef2-s3`** (supersedes the 2026-06-18 `ef-s2` deploy/champion
+pick above). See [[Dashboard Leaderboard]].
+
+## 2026-06-19 — Simulations frontend crash (empty-candle bundle) — diagnosed + fixed three ways
+
+The `eff-s1` fixed-13 `simulated_trades.json` carried **11 empty-candle assets** — the FIXED universe forced not-yet-listed
+tokens (e.g. ASTER/HUMA/SIREN/ZEC in early weeks) into the basket with no OHLCV, so `candles` was `[]`. The simulations
+frontend (`../alexlouis-site/src/apentic`; `SimulationsClient` defaults to the NEWEST model, which was `eff-s1`) crashed in
+`computeBacktest` at `backtest.ts:261`, `const t0 = candles[0].t` (undefined). **Three fixes:**
+1. **PRODUCER GUARD** (`6db0674`) — `simulate_weekly` now SKIPS any asset with empty candles (a dataless token has no trades
+   and 0 PnL; the per-week recon still balances).
+2. **`scripts/delist_sim_model.py`** (`6db0674`) — rewrites `simulated_models.json` without a given run-id (the S3 publisher
+   can PUT but **not byte-delete**, so this is a **de-list**; the bytes remain, just unlisted — see
+   [[apentic-publisher-no-delete]]) + invalidates CloudFront.
+3. **`eff-s1` re-published clean** (0 empty-candle assets).
+
+The page is healed. Lesson: a fixed universe can inject pre-listing tokens with no OHLCV; the producer must guard empty
+candles, not the consumer.
+
+## 2026-06-19 — EMA-break exit investigation: 4 rule-substrate conditionings REFUTED → the SUBSTRATE CORRECTION (probe the policy, not the rule)
+
+The rung-0 exit uses a **72-bar EMA (~3 days hourly)**, confirmed byte-identical in `rung0` and `event_env`. The EMA-break
+is the rule's weakness-exit (sell when price < ema, cushion < 0), besides the trailing stop. **The FF miss** (eff-s1): it
+sold FF on **Apr 9 12:00, reason EMA_BREAK** — a **−0.1% cushion NOISE break** at the tight EMA during pre-rip
+consolidation. The **48h cooldown** then locked re-entry; FF's real rip-ignition was Apr 10 18:00 (surge 10, the peak bar);
+the agent was flat → **MISSED the +106%/+151% rip entirely.**
+
+**EMA-break conditioned FOUR ways, ALL ON THE RULE — all refuted:**
+1. **P&L gate** = the prior P-EMA-COND (already refuted).
+2. **Consolidation / low-vol suppression** — the consol-and-shallow cell (the FF pattern) was the **WORST** (terminal
+   fwd-48h **−5.4%**, **8% win rate**); FF was the 8% anecdote, most consolidation breaks keep falling.
+3. **Deep-dip INVERSE** (do deep + high-vol breaks bounce?) — refuted: the break-depth forward-return trend is
+   **MONOTONICALLY NEGATIVE** (deeper = worse), the deep-and-high-vol cell is n=4 with ZERO val events, and the earlier
+   +13.9% high-vol reading was a thin **single-dimension artifact** that vanished with proper conditioning + train data.
+4. **EMA-PERIOD sweep** (global and exit-only, spans 50-240) — no net win: a longer EMA gives no robust val gain, worse test
+   return, and MORE DQ weeks (holds losers/givebacks longer). `rung0` gained a separate `exit_ema_span` (additive,
+   default-off) for this (commit `abf089b`).
+
+**SUBSTRATE CORRECTION (the user was right; a methodological flaw).** ALL the probes above used the rung-0 RULE, whose only
+exits are sell-on-weakness (trailing stop / EMA-cross), so it **structurally gives back pumps.** The deployable POLICY has
+the `tp_rungs` profit-take ladder + learned hold/override. `probe_policy_exits` on **ef2-s0** over OOS weeks:
+- exit mix **74% EMA_BREAK / 15% PROFIT_TAKE / 7% ROTATION_OUT / ~5% stops**;
+- the policy's OWN EMA-break sells give back **+3.5% mean fwd-48h (55% recover)** — a real but modest giveback (just over half recover; ~45% kept falling, so the cut was right there);
+- **the P&L ENGINE is the few pumps it HOLDS to the week close** — 4 held-to-end positions made **$6235** (best TAG $5432)
+  vs 66 exited trades making **$4782** combined. TAG (+170% rip) was captured by **HOLDING** (no exit fired, force-closed
+  near the high), NOT by profit-taking.
+
+**LESSON: probe the DEPLOYABLE substrate (the policy), not the rule, for any exit / profit-taking question.** The rule's
+sell-on-weakness exits are not the policy's behavior.
+
+**DQ-week anatomy** (the 2 cold weeks that breach the 30% DD gate, both made WORSE by a longer EMA):
+- **Mar 23** — a pure loser: peaked 1.04x, ended **−25%**.
+- **Apr 13** — caught SIREN's +163% pump to a +23% peak, then **GAVE IT ALL BACK** and ended **−14%** (a giveback that ends
+  NEGATIVE — not a profitable-but-DQ'd false alarm).
+
+## 2026-06-19 — SIDEWAYS EMA-BREAK SUPPRESSION (built `abf089b`, RETRAIN PENDING)
+
+**Mechanism of the leak:** the EMA-break fires on **shallow noise-dips during tight sideways consolidation**, shaking the
+agent out before the pump (the FF Apr-9 case). **Fix:** when a break is **SHALLOW** (cushion > `-shallow_break_max`) **AND**
+the token is **QUIET** (24h realized vol < `consol_vol_max`), do NOT fire the EMA-break. The **loss_floor (−20%)** and the
+**trailing stop** stay fully active, so real breakdowns still cut (bounded downside) while the position survives noise to
+catch the pump — **asymmetric: bounded downside via the floor, large upside via pump capture.** Both knobs `0` ⇒ OFF,
+byte-identical (30 env tests pass). The user chose the **"shallow + quiet"** definition (most surgical — a deep break OR a
+high-vol break still cuts).
+
+Wired through `REWARD_KEYS` (`shallow_break_max`, `consol_vol_max`) + `train_event` flags + provenance + `simulate` loader,
+so it is sweepable via `rl_loop` and graded honestly.
+
+**Mechanical check (the rule, FF fixed-13 week):** OFF sells FF twice (Apr 7 + Apr 9 EMA_BREAK, FF PnL −$115); ON suppresses
+both and holds FF through the chop (then ROTATION_OUT exits ~7h before the peak on the bare rule — the policy retrain is
+where it gets exploited).
+
+**STATUS: committed `abf089b`, NOT yet retrained.** Planned next experiment: retrain ef2 + `shallow_break_max=0.02` +
+`consol_vol_max=0.015` (the FF-validated thresholds), 4 seeds, graded honest cold-weekly **vs ef2** (the prior champion =
+the bar, per the rung-0 demotion). Pending the user's green-light (shared desktop — see
+[[desktop-shared-publish-from-laptop]]).
+
+**OPEN co-factor:** `ROTATION_OUT` can still swap a held-but-flat token out before its pump (a second shakeout mechanism) —
+the next thread if the suppression retrain helps but rotation caps it. Reward/curriculum detail → [[AI Training]].

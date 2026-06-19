@@ -105,6 +105,48 @@ risk-off "cash" leg for the drawdown-defense overlay ([[Market Conditions]]).
   `scripts/select_universe.py` and `scripts/forensics.py` are re-runnable and the downloader
   is resumable, so re-locking near June 22 is cheap.
 
+## The fixed-13 experiment — causal vol-top-k beats a static set (2026-06-19)
+
+Tested whether **freezing the universe** beats the **causal vol-top-k selector** (which
+re-picks the basket every Monday from trailing volatility). Motivation: a weekly causal
+re-pick can select a high-vol name *out* mid-week and miss its pump — the FF case, where FF's
+trailing vol had decayed by the Apr-6 week so it was not in that week's causal top-10, and
+its Apr 9-10 +100%-plus roundtrip went uncaptured by the cold-weekly sim.
+
+**The proposal:** drop the **7 most-BTC-correlated / lowest-vol** tokens — **ADA, SFP, XRP,
+BabyDoge, LINK, LTC, XAUt** — leaving a **FIXED 13-token set** (ASTER, B, BANANAS31, COAI,
+FF, HUMA, Q, SIREN, SKYAI, TAC, TAG, UB, ZEC), no weekly re-pick, so a high-vol spike is
+never selected out mid-week.
+
+**Grounding for the 7 drops:** they are the most BTC-correlated at the **daily** horizon
+(LINK 0.85, XRP 0.81, ADA 0.79, BabyDoge 0.78, LTC 0.77, SFP 0.61) — XAUt is the exception
+at 0.06 (gold), dropped instead for thin liquidity / USDT-redundancy — *and* the 7
+lowest-vol. Hourly correlation is ~0 for all of them, so the **daily horizon is the correct
+lens**. The causal vol-top-k selector already almost never picks them.
+
+**Results (all honest cold-weekly, OOS val+test):**
+
+| Substrate | Config seed-mean | Best seed |
+|---|--:|--:|
+| **ef2** (causal vol-top-k, the prior champion, re-graded at correct vol_mult 2.0) | **+8.5%/wk** | **+10.0%** (s0) |
+| **fixed-13** (in-distribution retrain `ppo-event-rdLe4-eff-2345fd6`, vol_mult 2.0, 4 seeds) | +5.9%/wk | +7.7% (s1) |
+
+The rung-0 RULE on the full fixed-13 was +5.9%/wk vs causal-top-10 +11.5% (the rule halves —
+dilution), but the rule was the wrong substrate for judging this (see [[Simulated Market]] on
+probing the deployable policy, not the rule). An eval-only screen (the off-distribution ef2-s1
+policy run on fixed-13) read +7.5% vs causal +6.0% and *looked* promising — which prompted the
+in-distribution retrain that then lost.
+
+**VERDICT:** ef2 (causal vol-top-k) **beats fixed-13 on both** config seed-mean (8.5 vs 5.9)
+and best-seed (10.0 vs 7.7). **Fixed-13 is a CLOSED BRANCH; the causal vol-top-k selector
+stays the substrate.** A `universe_mode="fixed"` exists in `EventRungEnv` + `train_event`
+(committed 2345fd6) as **tooling**, but it is a closed branch for *selection*.
+
+> Caveat surfaced by the retrain: a FIXED universe forces **not-yet-listed tokens** (e.g.
+> ASTER/HUMA/SIREN/ZEC in early weeks) into the basket with no OHLCV (empty candles), which
+> crashed the simulations frontend; `simulate_weekly` now skips dataless-token assets (commit
+> 6db0674). See [[Simulated Market]].
+
 ## Reproduce
 
 ```

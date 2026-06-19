@@ -182,6 +182,32 @@ schema):** position prices are cost-baked and SNAPPED to the env's exact per-tok
 revealed the agent's continuous-eval results don't survive weekly sessions — see [[Experiment Log]]
 §2026-06-14 and [[AI Training]] §the-fork.
 
+### INVARIANT (2026-06-19) — no empty-candle assets in a published `simulated_trades.json`
+
+**A published asset MUST carry non-empty `candles`.** The frontend's `computeBacktest`
+(`../alexlouis-site/src/apentic`, `backtest.ts` line 261) does `const t0 = candles[0].t` with no
+guard, so an asset with `candles: []` is `undefined.t` → the whole Simulations page crashes (the
+`SimulationsClient` defaults to the NEWEST model, so a single bad bundle takes the page down).
+
+How the empty-candle assets got there: a **fixed / forced universe** (the closed fixed-13 branch,
+`universe_mode="fixed"`) can place a token into the basket in a week BEFORE that token had OHLCV
+(e.g. ASTER/HUMA/SIREN/ZEC in early weeks were not-yet-listed) → `candles` came back `[]`. The
+causal vol-top-k selector never picks a dataless token, so this only surfaced with a forced universe.
+
+**Producer guard (fix 1):** `scripts/simulate_weekly.py` now **skips any asset with empty candles** —
+a dataless token has no trades and 0 PnL, so dropping it leaves the per-week recon balanced (still
+$0). This is the authoritative fix going forward.
+
+**De-list mechanism (fix 2) — `scripts/delist_sim_model.py`:** to pull a bad/old run off the page,
+rewrite the top-level `simulated_models.json` **without** that run-id and invalidate CloudFront.
+Note the no-delete posture (see [[Remote Capabilities]] / [[Apentic Data Contract]]'s `trading/`
+section): the S3 publisher can **PUT but not byte-delete**, so this is a **de-list** — the run's
+`<run-id>/simulated_trades.json` bytes remain in the bucket, just unreferenced by the index.
+
+Incident: the `eff-s1` (fixed-13) bundle shipped with 11 empty-candle assets and crashed the page;
+it was de-listed, then re-published clean (0 empty-candle assets) after the producer guard. See
+[[Experiment Log]] §2026-06-19.
+
 ## Producer side (this repo)
 - Single-asset: `trader.report.export_run` (+ `roundtrips_from_position`).
 - Portfolio: `trader.report.export_portfolio_run`; `scripts/train_rl.py` records per-step
