@@ -147,6 +147,24 @@ def test_offset_now_records_every_fill_once(tmp_path, panels):
     assert got == truth                                    # no drop (the bug), no duplicate
 
 
+def test_restart_does_not_duplicate_fills(tmp_path, panels):
+    """A process restart (fresh runner on the SAME ledger) must NOT re-record the week's fills —
+    the cursor resumes from the ledger, not ws-1 (the duplicate-on-restart bug)."""
+    returns, btc, liq, vol = panels
+    ws, _ek = _week_with_fills(returns, btc, liq, vol)
+    led = tmp_path / "agent.jsonl"
+    now = ws + 150 * 3600
+    EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=led).tick(
+        now, panels=panels, predict_fn=RULE, refresh_data=False)
+    n1 = sum(1 for r in store.read_rows(led) if r["kind"] == "fill")
+    assert n1 >= 1
+    # brand-new runner (a systemd restart) on the same ledger + same now -> no new bars
+    EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=led).tick(
+        now, panels=panels, predict_fn=RULE, refresh_data=False)
+    n2 = sum(1 for r in store.read_rows(led) if r["kind"] == "fill")
+    assert n2 == n1                                        # idempotent — restart re-recorded nothing
+
+
 def test_fill_price_is_real_usd_not_env_index(tmp_path, panels):
     """The fill `price` is the real USD close (≈ market price), with the env's internal
     return-index kept as `price_index`."""
