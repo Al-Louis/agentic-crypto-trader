@@ -95,6 +95,7 @@ class EventRungEnv:
                  high_frac: pd.DataFrame | None = None, wick_reject: float = 0.0,
                  scale_in: bool = False,
                  cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
+                 fixed_universe: list | None = None,
                  record_trace: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
@@ -113,7 +114,16 @@ class EventRungEnv:
                                                             # (drop rung-0's cooled&reclaimed gate -> ~960 vs 39)
         self.action_mode = action_mode                      # "continuous" (Box[-1,1]) | "discrete" (Discrete)
         self.n_action_levels = int(n_action_levels)         # discrete: # of size/keep levels spanning [0,1]
-        self.universe_mode = universe_mode                  # voltopk | broad (vol-stratified) | lowvol (calm)
+        self.universe_mode = universe_mode                  # voltopk | broad (vol-stratified) | lowvol (calm) | fixed
+        self.fixed_universe = list(fixed_universe) if fixed_universe is not None else None
+        if self.universe_mode == "fixed":                   # eval-only: a hand-fixed token set, NO weekly
+            if not self.fixed_universe:                      # causal re-pick (tests the user's 2026-06-19
+                raise ValueError("universe_mode='fixed' requires a non-empty fixed_universe")  # proposal)
+            missing = [t for t in self.fixed_universe if t not in returns.columns]
+            if missing:
+                raise ValueError(f"fixed_universe tokens absent from the returns panel: {missing}")
+            self.k = len(self.fixed_universe)               # the fixed list IS the universe; keep k in sync
+            #   so the obs slot `len(pos)/k` and the breadth feature scale to the real basket size.
         self.vol_target = float(vol_target)                 # >0: per-token weight cap proportional to vol_target/vol
         self.cap_floor = float(cap_floor)                   # risk-parity: min per-token weight cap (keep upside)
         self.harvest_obs = bool(harvest_obs)                # lever-2: append r24/r3d/r7d momentum slots (13->16)
@@ -651,7 +661,10 @@ class EventRungEnv:
         """Causal vol-ranked universe. `universe_mode` is the curriculum's VOLATILITY axis:
         `voltopk` = the k most volatile (current — maximum chaos); `lowvol` = the k calmest
         (S0: learn basics on tractable dynamics); `broad` = a vol-stratified spread across the
-        distribution (calm + volatile together, for risk-parity allocation)."""
+        distribution (calm + volatile together, for risk-parity allocation).
+        `fixed` = a hand-supplied token set, NO causal re-pick (eval-only, the user's fixed-universe test)."""
+        if self.universe_mode == "fixed":
+            return list(self.fixed_universe)                 # caller-fixed basket, identical every reset
         row = np.nan_to_num(self._std[at - 1], nan=-1.0)
         order = np.argsort(row)[::-1]                        # all tokens, high -> low vol
         if self.universe_mode == "lowvol":                   # calmest k (curriculum S0: learn basics)

@@ -51,6 +51,26 @@ def _env(**kw):
     return EventRungEnv(returns, btc, liq, **{**base, **kw})
 
 
+def test_fixed_universe_mode():
+    """universe_mode='fixed' uses the hand-set list verbatim (no causal re-pick), syncs k to its
+    length, keeps obs_dim, and validates the list; voltopk is unchanged."""
+    env = _env(universe_mode="fixed", fixed_universe=["C1", "C2"])
+    o = env.reset(start=40)
+    assert sorted(env.universe) == ["C1", "C2"] and env.k == 2
+    assert len(o) == env.obs_dim                       # obs width is universe-size-independent
+    assert sorted(env._pick_universe(45)) == ["C1", "C2"]    # identical regardless of bar
+    assert sorted(env._pick_universe(200)) == ["C1", "C2"]   # (no causal vol re-pick)
+    # voltopk still re-picks causally (regression guard on the existing path)
+    vt = _env(universe_mode="voltopk", k=2)
+    vt.reset(start=40)
+    assert len(vt.universe) == 2
+    assert "RUN" in vt._pick_universe(100)             # at the runup->crash transition RUN is high-vol -> picked
+    with pytest.raises(ValueError):
+        _env(universe_mode="fixed")                    # missing list
+    with pytest.raises(ValueError):
+        _env(universe_mode="fixed", fixed_universe=["NOPE"])   # token not in panel
+
+
 def _run(env, entry_a=1.0, exit_a=0.0, start=40):
     """Drive an episode with fixed per-event-type actions; record each decision."""
     env.reset(start=start)

@@ -51,6 +51,8 @@ def env_kwargs_from_provenance(prov: dict, returns, build_ohlc_frac_panels) -> d
               fwd_horizon=prov["fwd_horizon"], ungate=prov["ungate"],
               action_mode=prov["action_mode"], n_action_levels=prov["n_action_levels"],
               universe_mode=prov["universe_mode"], vol_target=prov["vol_target"],
+              vol_mult=prov.get("vol_mult", 2.5),                 # provenance lost vol_mult pre-2026-06-19;
+              fixed_universe=prov.get("fixed_universe"),          # 2.5 default kept for old runs (record it now)
               cap_floor=prov["cap_floor"], harvest_obs=prov["harvest_obs"],
               rule_default=prov["rule_default"], basket_default=prov.get("basket_default", False),
               exit_commit=prov["exit_commit"],

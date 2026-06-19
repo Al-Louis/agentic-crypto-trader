@@ -286,8 +286,11 @@ def main() -> None:
     p.add_argument("--action-mode", default="continuous", choices=["continuous", "discrete"],
                    help="discrete = categorical size/keep levels (no continuous-head boundary collapse)")
     p.add_argument("--n-action-levels", type=int, default=4, help="discrete: # of size/keep levels")
-    p.add_argument("--universe-mode", default="voltopk", choices=["voltopk", "broad", "lowvol"],
-                   help="curriculum volatility axis: voltopk (chaos) | broad (stratified) | lowvol (calm)")
+    p.add_argument("--universe-mode", default="voltopk", choices=["voltopk", "broad", "lowvol", "fixed"],
+                   help="universe axis: voltopk (chaos) | broad (stratified) | lowvol (calm) | fixed (a "
+                        "hand-set token list, NO causal re-pick — requires --fixed-universe)")
+    p.add_argument("--fixed-universe", default="", help="comma-separated token set for --universe-mode "
+                   "fixed (e.g. 'FF,HUMA,Q'); identical basket every episode, no causal vol re-pick")
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
@@ -432,7 +435,9 @@ def main() -> None:
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
                       scale_in=args.scale_in,
                       cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback,
-                      no_btc_obs=args.no_btc_obs, **ohlc_kwargs, seed=args.seed)
+                      no_btc_obs=args.no_btc_obs,
+                      fixed_universe=[t.strip() for t in args.fixed_universe.split(",") if t.strip()] or None,
+                      **ohlc_kwargs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -622,6 +627,8 @@ def main() -> None:
                              "res_gamma": args.res_gamma, "fwd_horizon": args.fwd_horizon,
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
+                             "vol_mult": args.vol_mult,                  # was UNRECORDED -> sims defaulted to 2.5
+                             "fixed_universe": [t.strip() for t in args.fixed_universe.split(",") if t.strip()] or None,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k, "universe_lookback": args.universe_lookback,
                              "harvest_obs": args.harvest_obs, "cycle_obs": args.cycle_obs,
                              "rule_default": args.rule_default, "basket_default": args.basket_default,

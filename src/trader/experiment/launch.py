@@ -46,8 +46,10 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     # --- substrate / curriculum / architecture (the rd-era flags, 2026-06-10/11) ---
     "action_mode": ("--action-mode", str),          # continuous | discrete
     "n_action_levels": ("--n-action-levels", int),
-    "universe_mode": ("--universe-mode", str),      # voltopk | broad | lowvol
+    "universe_mode": ("--universe-mode", str),      # voltopk | broad | lowvol | fixed
+    "fixed_universe": ("--fixed-universe", str),    # comma-set for universe_mode=fixed (no causal re-pick)
     "k": ("--k", int),
+    "vol_mult": ("--vol-mult", float),              # ignition surge threshold (ef2 trained 2.0; default 2.5)
     "vol_target": ("--vol-target", float),          # risk-parity per-token caps
     "cap_floor": ("--cap-floor", float),
     "harvest_obs": ("--harvest-obs", bool),         # r24/r3d/r7d momentum slots
