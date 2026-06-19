@@ -30,6 +30,25 @@ MCP train-loop all reference it, and the orchestrator (whoever is driving) is bo
 > post-mortem below is **kept as history** — the *orchestration* lessons (stateless agents, prose
 > gates, narrow frames) stand; only the binding *bar* changed from B&H to the rung-0 RULE.
 
+> **DIRECTION RESET (2026-06-19) — the rung-0 RULE is DEMOTED from the binding gate to a
+> REFERENCE floor; iteration is now graded MODEL-vs-PREVIOUS, not model-vs-rung-0.** rung-0 was
+> the bar to clear *while the agent was learning to trade at all* — it was **never meant to be the
+> end-all finality test**. Treating "`beats_rung0` CI > 0" as a hard pass/fail kept declaring
+> genuine iterations "REFUTED" for not clearing a deliberately-strong hand-coded rule (e.g. the
+> 2026-06-19 fixed-universe run: DQ-safe, FF-capturing, ≈ the prior champion, yet auto-failed on
+> beats_rung0 — and this keeps recurring across sessions). **The corrected gate:** a model/config
+> earns a version iff **(1) it SURVIVES the DQ gate** (worst-week maxDD < ~30% — the competition's
+> real disqualifier, STILL HARD) **AND (2) it IMPROVES on the PREVIOUS best iteration (champion)**
+> on the honest cold-weekly metric (per-week return / `weekly_score`). **rung-0, Buy&Hold, and
+> Random are now ALL computed/reported REFERENCES — none is binding.** The loop's north-star
+> becomes **margin-vs-prior-champion** (progress), and the drift alarm fires on N rounds with no
+> improvement **over the champion**, not over rung-0. (Same demotion B&H got 2026-06-15, now
+> applied to rung-0.) Grade DEPLOYMENT on the **best single seed**; grade CONFIG SELECTION on the
+> **seed-mean** ([[seed-mean-is-iteration-not-deployment]]). **Code TODO (not yet shipped):**
+> `weekly_eval.weekly_gate` (`beats_rung0` check), `train_event.honest_gate`, `loop_control.decide`
+> + the drift alarm, and `rl_north_star` must move the binding test from rung-0 to prior-champion;
+> until then, the loop's auto-`pass`/`refuted` labels on the rung-0 axis are advisory, not truth.
+
 ## Why this exists (the receipts)
 
 exp1→exp5 (see [[Experiment Log]]) spent ~a day and four overnight sweeps optimizing a reward
@@ -73,13 +92,14 @@ with this block, filled in with live values. No bare sub-problems.
 ```
 ## North star
 GOAL: a self-custody RL trading agent that is PROFITABLE and risk-managed on live PnL
-      (June 22–28), under the ~30% max-drawdown DQ gate. rung-0 is the baseline to BEAT,
-      never a destination.
+      (June 22–28), under the ~30% max-drawdown DQ gate. rung-0 is a REFERENCE floor, not
+      the finality bar; progress is graded vs the PREVIOUS champion (DIRECTION RESET 2026-06-19).
 SUCCESS METRIC (non-negotiable): on HELD-OUT data, the policy must (1) SURVIVE the DQ
-      gate (maxDD < ~30%) and (2) BEAT the rung-0 RULE — reported PER REGIME (bull/bear/
-      flat). Buy&Hold and Random are COMPUTED and REPORTED references, NEVER binding
-      (DIRECTION RESET 2026-06-15). This is `honest_gate()` in scripts/train_event.py.
-      A reward proxy is legitimate ONLY with evidence that proxy ⇒ this metric.
+      gate (worst-week maxDD < ~30%) and (2) IMPROVE on the PREVIOUS best iteration
+      (champion) on the honest cold-weekly metric. rung-0, Buy&Hold and Random are ALL
+      COMPUTED and REPORTED references, NEVER binding (rung-0 DEMOTED 2026-06-19; B&H
+      2026-06-15). Deploy on the best seed; select configs on the seed-mean. A reward
+      proxy is legitimate ONLY with evidence that proxy ⇒ this metric.
 LIVE STATE: <current experiment id> | last result: policy <x%> vs B&H <y%> / rung-0 <z%> /
       Random <w%> on <split>, regime <bull/bear/flat> | open blocker: <…>
 THE ASK: <the specific sub-problem>
