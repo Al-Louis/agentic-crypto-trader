@@ -180,6 +180,27 @@ def test_fold_positions_drops_dust_no_corrupt_exit():
     assert abs(recon - (-50.0)) < 1e-6                           # snap still hits the exact ledger PnL
 
 
+def test_fold_positions_marks_held_to_end_at_week_close():
+    """A position held to session end (no closing sell) must be MARKED at the week-end price `end_px`,
+    so the forced end-of-week close shows its real held gain — not exit=entry / $0 (the TAC W24 bug).
+    The held lot is the SMALLER one here so the ledger snap lands on the realized sell, not the held lot."""
+    # qty = usd/price. buy $1000 @ 0.10 = 10000 units; sell $1080 @ 0.12 = 9000 units (the larger
+    # realized round-trip); 1000 units held to week-end (last_t). end_px 0.15.
+    markers = [_mk("buy", 100, 0.10, 1000.0), _mk("sell", 200, 0.12, 1080.0)]
+    # ledger = realized 9000*(.12-.10)=180 + held mark 1000*(.15-.10)=50 = 230
+    out = sw.fold_positions(markers, last_t=300, ledger_pnl=230.0, end_px=0.15)
+    held = next(p for p in out if int(p["exit_t"]) == 300)
+    assert held["exit_price"] == 0.15                                       # marked at week-end close
+    assert abs(held["qty"] * (held["exit_price"] - held["entry_price"]) - 50.0) < 1e-6   # +$50 real gain
+    recon = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
+    assert abs(recon - 230.0) < 1e-6                                        # total still snaps to ledger
+
+    # legacy: end_px=None marks the held lot at entry => $0 (the old behavior; snap lands on the sell)
+    out0 = sw.fold_positions(markers, last_t=300, ledger_pnl=230.0, end_px=None)
+    held0 = next(p for p in out0 if int(p["exit_t"]) == 300)
+    assert abs(held0["exit_price"] - held0["entry_price"]) < 1e-12          # entry-marked => $0 PnL
+
+
 def test_fold_positions_snaps_onto_largest_notional():
     """The ledger snap goes onto the LARGEST-notional position (so the per-unit nudge is tiny), not
     the last one. The small round-trip keeps its natural exit; the large one absorbs the residual."""

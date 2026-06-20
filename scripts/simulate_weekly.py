@@ -59,11 +59,15 @@ def remap_candles(cs: list[dict]) -> list[dict]:
              "c": c["close"], "v": c["volume"]} for c in cs]
 
 
-def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float) -> list[dict]:
+def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float,
+                   end_px: float | None = None) -> list[dict]:
     """FIFO round-trips from the agent's fills (cost baked into the prices) for the trade STRUCTURE,
     then SNAP the token's total PnL to the env's EXACT per-token ledger value -> the dashboard's
-    qty*(exit-entry) equals the sim's realized+open PnL by construction (no inference). Still-open or
-    markerless-closed lots are closed at last_t; the last position absorbs any residual to hit `ledger_pnl`."""
+    qty*(exit-entry) equals the sim's realized+open PnL by construction (no inference). Still-open /
+    held-to-session-end lots are closed at `last_t` and MARKED TO MARKET at `end_px` (the week-end
+    close) so a forced end-of-week sell shows its real held gain instead of $0 — the ledger snap then
+    only absorbs the small reconstruction residual (and lands on the largest-notional position, never
+    a dust crumb). `end_px=None` => legacy behavior (mark held lots at entry / 0 PnL)."""
     lots: list[list] = []          # open buys: [qty_remaining, entry_t, entry_price_eff]
     out: list[dict] = []
     for m in markers:
@@ -85,10 +89,11 @@ def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float) -> list[
                 remaining -= q
                 if lot[0] <= 1e-12:
                     lots.pop(0)
-    for qty_rem, entry_t, entry_eff in lots:                  # still-open / markerless-closed lots
+    for qty_rem, entry_t, entry_eff in lots:                  # still-open / held-to-session-end lots
         if last_t > entry_t:
-            out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,
-                        "exit_price": entry_eff, "qty": qty_rem, "kind": "core"})   # provisional 0 PnL
+            exit_px = end_px if (end_px is not None and end_px > 0) else entry_eff   # MARK-TO-MARKET at
+            out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,  # the week-end px
+                        "exit_price": exit_px, "qty": qty_rem, "kind": "core"})    # (not entry/0 PnL)
     # Drop sub-dust positions (float-cancellation crumbs left by the FIFO unwind, qty ~1e-12) BEFORE
     # the ledger snap: a near-zero qty makes `(ledger_pnl - cur) / qty` explode into an absurd, often
     # NEGATIVE, exit_price (the SIREN Feb-1 -0.124 / -230% bug). Their own PnL is ~$0 so dropping them
@@ -258,7 +263,8 @@ def main() -> None:
                 #   no candles to chart + no trades + 0 PnL. Emitting an empty-candle asset crashes the
                 #   dashboard (computeBacktest reads candles[0].t); the recon check below still balances.
             last_t = cs[-1]["t"] if cs else d1
-            positions = fold_positions(token_trades.get(sym, []), last_t, token_pnl.get(sym, 0.0))
+            end_px = cs[-1]["c"] if cs else None          # week-end close: mark held-to-end lots to market
+            positions = fold_positions(token_trades.get(sym, []), last_t, token_pnl.get(sym, 0.0), end_px=end_px)
             recon_pnl += sum(po["qty"] * (po["exit_price"] - po["entry_price"]) for po in positions)
             assets.append({"symbol": sym, "class": classify(sym), "vol_rank": r + 1,
                            "alloc_usd": round(float(caps.get(sym, 0.0)) * START_CAPITAL, 2),
