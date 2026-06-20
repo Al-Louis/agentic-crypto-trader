@@ -135,6 +135,14 @@ def main(argv: list[str] | None = None) -> int:
                       file=sys.stderr)
             except Exception as e:  # noqa: BLE001
                 print(f"candle publish warning: {e!r}", file=sys.stderr)
+            # publish the decision-tape tally (signals seen/executed/ignored per day); fail-safe.
+            try:
+                from trader.agent.signals import publish_signals_tally  # noqa: PLC0415
+                t = publish_signals_tally(trader, publish_target, now_ts)["totals"]
+                print(f"[signals] seen={t['signals_seen']} exec={t['executed']} "
+                      f"ignored={t['ignored']} -> {publish_target}/signals.json", file=sys.stderr)
+            except Exception as e:  # noqa: BLE001
+                print(f"signals publish warning: {e!r}", file=sys.stderr)
 
     if args.once:
         _tick(int(args.now if args.now is not None else _now()))
