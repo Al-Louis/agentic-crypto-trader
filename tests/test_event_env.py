@@ -9,6 +9,7 @@ import pytest
 
 from trader.train.event_env import (
     BASKET_OPEN,
+    CANDLE_EXIT,
     EMA_BREAK,
     FORCED_REASONS,
     IGNITION,
@@ -573,6 +574,59 @@ def test_rotate_pump_block_off_is_byte_identical():
     t, incoming = _rotate_setup(env, runup=2.0)           # candidate +200% — would be blocked if on
     env._rotate_for(incoming, want=1000.0)
     assert [m for m in env._trades if m[0] == t and m[1] < 0]       # still rotates (brake off)
+
+
+def _candle_env(**kw):
+    """An env with the OHLC frac panels present (flat 1.0 => no real candles) so candle_exit can build;
+    tests then override `_bear_candle` directly to place a bearish candle on a chosen bar."""
+    returns, btc, vol, liq = _panel()
+    ones = pd.DataFrame(1.0, index=returns.index, columns=returns.columns)
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5, vol_spk=4,
+                vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0, loss_floor=0.2,
+                low_frac=ones, high_frac=ones, intrabar_floor=True)
+    return EventRungEnv(returns, btc, liq, **{**base, **kw})
+
+
+def _hold(env, t, j, bar, cost_mult):
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar - 2, "peak_px": env._px[bar, j], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, j] * cost_mult}
+
+
+def test_candle_exit_prompts_when_in_profit():
+    """candle_exit ON: a held IN-PROFIT position on a bearish candle prompts a discretionary CANDLE_EXIT."""
+    env = _candle_env(candle_exit=True)
+    env.reset(start=40)
+    t = env.universe[0]; j = env.col_ix[t]; bar = env.bar
+    env._cush = env._cush.copy(); env._cush[bar, j] = 0.5        # above EMA -> no ema-break
+    env._bear_candle = env._bear_candle.copy(); env._bear_candle[bar, j] = True
+    _hold(env, t, j, bar, cost_mult=0.8)                         # cost 20% below px -> in profit
+    ev = [e for e in env._scan_bar(bar) if e[0] == "exit" and e[1] == t]
+    assert ev and ev[0][2] == CANDLE_EXIT
+    assert CANDLE_EXIT not in FORCED_REASONS                     # discretionary: the agent can still hold
+
+
+def test_candle_exit_skipped_when_underwater():
+    """No CANDLE_EXIT when the position is below its cost basis, even on a bearish candle (in-profit only)."""
+    env = _candle_env(candle_exit=True)
+    env.reset(start=40)
+    t = env.universe[0]; j = env.col_ix[t]; bar = env.bar
+    env._cush = env._cush.copy(); env._cush[bar, j] = 0.5
+    env._bear_candle = env._bear_candle.copy(); env._bear_candle[bar, j] = True
+    _hold(env, t, j, bar, cost_mult=1.2)                         # cost ABOVE px -> underwater
+    ev = [e for e in env._scan_bar(bar) if e[0] == "exit" and e[1] == t and e[2] == CANDLE_EXIT]
+    assert not ev
+
+
+def test_candle_exit_off_is_byte_identical():
+    """Default (candle_exit off): no bearish-candle mask is built and no CANDLE_EXIT is ever prompted."""
+    env = _candle_env()                                         # off by default
+    assert env._bear_candle is None
+    env.reset(start=40)
+    t = env.universe[0]; j = env.col_ix[t]; bar = env.bar
+    env._cush = env._cush.copy(); env._cush[bar, j] = 0.5
+    _hold(env, t, j, bar, cost_mult=0.8)
+    ev = [e for e in env._scan_bar(bar) if e[0] == "exit" and e[2] == CANDLE_EXIT]
+    assert not ev
 
 
 def test_rotation_out_tags_rotation_out_forced():

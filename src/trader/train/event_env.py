@@ -43,6 +43,7 @@ SCALE_IN = "SCALE_IN"          # fresh ignition on an already-held in-profit tok
 BASKET_OPEN = "BASKET_OPEN"    # basket_default overlay open at reset
 # exit triggers
 EMA_BREAK = "EMA_BREAK"        # cush<0 (price below EMA) — discretionary
+CANDLE_EXIT = "CANDLE_EXIT"    # in-profit hold + bearish candle (inverted hammer / doji) — discretionary
 TRAILING_STOP = "TRAILING_STOP"  # px < peak*(1-stop_k) — discretionary
 PROFIT_TAKE = "PROFIT_TAKE"    # unreal >= tp_rungs[tp_i] — discretionary
 LOSS_FLOOR = "LOSS_FLOOR"      # unreal < -loss_floor (disaster floor) — FORCED
@@ -96,6 +97,8 @@ class EventRungEnv:
                  scale_in: bool = False,
                  shallow_break_max: float = 0.0, consol_vol_max: float = 0.0,
                  rotate_pump_block: float = 0.0, rotate_pump_win: int = 24,
+                 candle_exit: bool = False, candle_uw_min: float = 0.5,
+                 candle_lw_max: float = 0.25, candle_doji_max: float = 0.10,
                  cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
                  fixed_universe: list | None = None,
                  record_trace: bool = False, seed: int | None = None):
@@ -186,6 +189,15 @@ class EventRungEnv:
         #   smaller buy or a skip). CASH-funded first-leg entries (ZEC's +23.6% first leg) are untouched —
         #   only the SELL-to-chase is blocked. 0.0 => OFF (byte-identical). Targets the funding side-effect,
         #   NOT the agent's discretion (the agent never chose the ROTATION_OUT sell; it's automatic).
+        self.candle_exit = bool(candle_exit)                # CANDLESTICK EXIT (user idea, 2026-06-20):
+        self.candle_uw_min = float(candle_uw_min)           #   when HOLDING an in-profit position and the
+        self.candle_lw_max = float(candle_lw_max)           #   bar is an INVERTED HAMMER (upper wick >=
+        self.candle_doji_max = float(candle_doji_max)       #   uw_min*range, lower wick <= lw_max*range) or
+        #   a DOJI (body <= doji_max*range, open~=close) — both short-term bearish — PROMPT an exit (the
+        #   agent can still override/hold; rule-default sells). Precedence below the trailing stop + EMA-
+        #   break. OFF (candle_exit=False) => byte-identical. Needs high_frac + low_frac for the bar shape.
+        if self.candle_exit and (high_frac is None or low_frac is None):
+            raise ValueError("candle_exit needs high_frac AND low_frac data (bar high/low for the shape)")
         self.record_trace = bool(record_trace)              # eval-only: per-bar equity curve + markers
         self.no_btc_obs = bool(no_btc_obs)                  # neutralize the btc_trend obs slot to a
         #   constant 0: the universe was selected for LOW BTC correlation, so a BTC-anchored regime
@@ -233,6 +245,22 @@ class EventRungEnv:
         # short-window (24h) realized vol for the sideways-chop EMA-break suppression ("quiet" test)
         self._svol = (self.returns.rolling(24, min_periods=8).std().to_numpy()
                       if shallow_break_max > 0.0 and consol_vol_max > 0.0 else None)
+        # bearish-candle exit mask [bar x token]: inverted hammer (long upper wick, small lower) OR doji
+        # (open~=close). open ~ prior close; high = close/_highf; low = close*_lowf. CANDLE_EXIT only.
+        self._bear_candle = None
+        if self.candle_exit:
+            pxn = self._px
+            with np.errstate(invalid="ignore", divide="ignore"):
+                hi = pxn / np.where(self._highf > 0.0, self._highf, np.nan)    # _highf = close/high
+                lo = pxn * self._lowf                                          # _lowf  = low/close
+                op = np.empty_like(pxn); op[0] = pxn[0]; op[1:] = pxn[:-1]     # bar open ~ prior close
+                rng = np.maximum(hi - lo, 1e-12)
+                upper = hi - np.maximum(op, pxn)
+                lower = np.minimum(op, pxn) - lo
+                body = np.abs(pxn - op)
+                inv_hammer = (upper / rng >= self.candle_uw_min) & (lower / rng <= self.candle_lw_max)
+                doji = body / rng <= self.candle_doji_max
+            self._bear_candle = (inv_hammer | doji)               # nan comparisons -> False (no signal)
         # causal universe-selection volatility: trailing `universe_lookback` bars (0 = the historical
         # default, warmup=168h/7d). The lookback is an UNTESTED axis (user simulator design,
         # 2026-06-12): 24=1d, 168=1wk, 720=1mo, 2160=3mo, 4320=6mo (data permitting).
@@ -472,8 +500,10 @@ class EventRungEnv:
                     and self._cush[bar, j] > -self.shallow_break_max     # break (price barely below EMA) in a
                     and self._svol[bar, j] < self.consol_vol_max):       # QUIET token is a noise dip -> HOLD
                 ema_hit = False                                     # (loss_floor + trailing stop still bind)
-            if stop_hit or ema_hit:
-                reason = TRAILING_STOP if stop_hit else EMA_BREAK   # precedence: stop > ema
+            candle_hit = (self._bear_candle is not None and self._bear_candle[bar, j]   # bearish candle
+                          and self._px[bar, j] > p["cost_px"])      # ONLY when in profit (above cost basis)
+            if stop_hit or ema_hit or candle_hit:
+                reason = (TRAILING_STOP if stop_hit else EMA_BREAK if ema_hit else CANDLE_EXIT)  # stop>ema>candle
                 ev.append(("exit", t, reason, bool(stop_hit and ema_hit)))   # both co-fired? (forensics)
         if self.tp_rungs:                                        # profit prompts: a position crossed its
             for t, p in self.pos.items():                        # next unrealized-gain rung (sell-into-

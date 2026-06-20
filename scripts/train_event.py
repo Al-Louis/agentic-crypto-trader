@@ -301,6 +301,13 @@ def main() -> None:
                    "(don't SELL a holding to chase an already-pumped token). 0 = off")
     p.add_argument("--rotate-pump-win", type=int, default=24, help="lookback bars for --rotate-pump-block "
                    "run-up (default 24h)")
+    p.add_argument("--candle-exit", action="store_true", help="EXIT a held IN-PROFIT position when the bar "
+                   "is a bearish reversal candle: an INVERTED HAMMER (upper wick >= uw-min*range, lower "
+                   "wick <= lw-max*range) or a DOJI (body <= doji-max*range). A discretionary prompt "
+                   "(agent can hold); rule-default sells. Needs OHLC frac panels. Off = byte-identical")
+    p.add_argument("--candle-uw-min", type=float, default=0.5, help="inverted-hammer min upper-wick fraction")
+    p.add_argument("--candle-lw-max", type=float, default=0.25, help="inverted-hammer max lower-wick fraction")
+    p.add_argument("--candle-doji-max", type=float, default=0.10, help="doji max body fraction (open~=close)")
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
@@ -425,12 +432,12 @@ def main() -> None:
         print(f"[crash] injected {len(placed)} training crashes at bars {placed}")
     vol = build_volume_panel(list(returns.columns), returns.index)
     ohlc_kwargs = {}
-    if args.intrabar_floor or args.wick_reject > 0:
+    if args.intrabar_floor or args.wick_reject > 0 or args.candle_exit:
         from train_rl import build_ohlc_frac_panels
         lowf, highf = build_ohlc_frac_panels(list(returns.columns), returns.index)
-        ohlc_kwargs = {"low_frac": lowf if args.intrabar_floor else None,
-                       "intrabar_floor": args.intrabar_floor,
-                       "high_frac": highf if args.wick_reject > 0 else None,
+        ohlc_kwargs = {"low_frac": lowf if (args.intrabar_floor or args.candle_exit) else None,
+                       "intrabar_floor": args.intrabar_floor,    # candle_exit needs BOTH frac panels for
+                       "high_frac": highf if (args.wick_reject > 0 or args.candle_exit) else None,  # bar shape
                        "wick_reject": args.wick_reject}
     env_kwargs = dict(k=args.k, vol_mult=args.vol_mult, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
@@ -446,6 +453,8 @@ def main() -> None:
                       scale_in=args.scale_in,
                       shallow_break_max=args.shallow_break_max, consol_vol_max=args.consol_vol_max,
                       rotate_pump_block=args.rotate_pump_block, rotate_pump_win=args.rotate_pump_win,
+                      candle_exit=args.candle_exit, candle_uw_min=args.candle_uw_min,
+                      candle_lw_max=args.candle_lw_max, candle_doji_max=args.candle_doji_max,
                       cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback,
                       no_btc_obs=args.no_btc_obs,
                       fixed_universe=[t.strip() for t in args.fixed_universe.split(",") if t.strip()] or None,
@@ -651,6 +660,8 @@ def main() -> None:
                              "scale_in": args.scale_in,
                              "shallow_break_max": args.shallow_break_max, "consol_vol_max": args.consol_vol_max,
                              "rotate_pump_block": args.rotate_pump_block, "rotate_pump_win": args.rotate_pump_win,
+                             "candle_exit": args.candle_exit, "candle_uw_min": args.candle_uw_min,
+                             "candle_lw_max": args.candle_lw_max, "candle_doji_max": args.candle_doji_max,
                              "det_blacklist": args.det_blacklist, "recurrent": args.recurrent,
                              "lstm_size": args.lstm_size if args.recurrent else None,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,
