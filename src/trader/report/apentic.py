@@ -52,6 +52,28 @@ def candles_from_ohlcv(df: pd.DataFrame, episode: int = 0, time_col: str = "time
              "episode": episode} for _, r in df.iterrows()]
 
 
+def densify_candles(candles: list[dict], interval_s: int = 3600) -> list[dict]:
+    """Fill INTERNAL gaps in a time-ascending `CandleData[]` with flat, zero-volume bars so the series
+    is contiguous (one bar per `interval_s`). Thin/low-liquidity tokens have missing OHLCV hours; the
+    dashboard positions trade markers by ARRAY INDEX assuming a dense series, so a gap drifts every
+    later marker (a buy at hour N lands on the (N − gaps)-th slot — the SIREN buy that rendered ~14h
+    late). A synthetic bar carries ``o=h=l=c=prev_close`` and ``v=0`` so it draws as a flat tick and
+    changes no price, volume, or PnL. Pure; returns a new list. A gap-free input is returned unchanged
+    (so dense tokens stay byte-identical)."""
+    if len(candles) < 2:
+        return list(candles)
+    out = [candles[0]]
+    for cur in candles[1:]:
+        prev = out[-1]
+        n_missing = (int(cur["time"]) - int(prev["time"])) // interval_s - 1
+        c = float(prev["close"])
+        for k in range(1, n_missing + 1):
+            out.append({"time": int(prev["time"]) + k * interval_s, "open": c, "high": c, "low": c,
+                        "close": c, "volume": 0.0, "episode": prev.get("episode", 0)})
+        out.append(cur)
+    return out
+
+
 def metrics_to_frontend(m: MetricsReport, *, episodes_evaluated: int = 1,
                         episodes_profitable: int | None = None,
                         avg_episode_return: float | None = None) -> dict:

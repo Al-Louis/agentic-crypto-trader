@@ -155,7 +155,10 @@ def build_portfolio_artifacts(records, universe, t0, t1):
             token_candles[t], token_trades[t] = [], []
             continue
         win = ohlcv[(ohlcv["timestamp"] >= t0) & (ohlcv["timestamp"] <= t1)]
-        token_candles[t] = ap.candles_from_ohlcv(win)
+        # densify: a thin token's OHLCV has missing hours, and the dashboard places markers by ARRAY
+        # INDEX assuming a dense series — gaps drift later markers off their candle. Flat zero-vol fill
+        # makes the array contiguous (idx == hour-offset) so markers land on the right bar.
+        token_candles[t] = ap.densify_candles(ap.candles_from_ohlcv(win))
         # markers sit at the REAL candle close of each fill's bar so they land ON the candles. PnL comes
         # from token_pnl.json (the env's exact ledger), NOT reconstructed from these prices: the env
         # executes on a returns-index `_px` that can drift from the OHLCV, and the old code recorded

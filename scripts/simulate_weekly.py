@@ -43,6 +43,8 @@ HOUR = 3600
 START_CAPITAL = 10_000.0
 DD_LIMIT = -0.30
 RECON_TOL_USD = 10.0           # |sim equity - reconstructed close| above this is flagged, not hidden
+POSITION_DUST_USD = 0.01       # FIFO-unwind crumbs (qty ~1e-12) below this notional are dropped before
+#                                the ledger snap — else `residual / dust_qty` explodes the exit_price
 
 PEG = {"XAUT", "XAUt", "PAXG"}
 MAJOR = {"BTC", "ETH", "BNB", "XRP", "SOL", "LTC", "DOGE", "ADA", "TRX", "LINK", "XLM", "BCH"}
@@ -87,10 +89,15 @@ def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float) -> list[
         if last_t > entry_t:
             out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,
                         "exit_price": entry_eff, "qty": qty_rem, "kind": "core"})   # provisional 0 PnL
+    # Drop sub-dust positions (float-cancellation crumbs left by the FIFO unwind, qty ~1e-12) BEFORE
+    # the ledger snap: a near-zero qty makes `(ledger_pnl - cur) / qty` explode into an absurd, often
+    # NEGATIVE, exit_price (the SIREN Feb-1 -0.124 / -230% bug). Their own PnL is ~$0 so dropping them
+    # is PnL-neutral, and the snap below still hits the exact ledger value.
+    out = [p for p in out if p["qty"] * p["entry_price"] > POSITION_DUST_USD]
     if out:                                                   # snap token total to the EXACT ledger PnL
         cur = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
-        if out[-1]["qty"]:
-            out[-1]["exit_price"] += (ledger_pnl - cur) / out[-1]["qty"]
+        tgt = max(out, key=lambda p: p["qty"] * p["entry_price"])   # snap onto the LARGEST notional so
+        tgt["exit_price"] += (ledger_pnl - cur) / tgt["qty"]        # the per-unit nudge stays tiny
     return out
 
 

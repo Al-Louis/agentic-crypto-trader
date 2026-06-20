@@ -181,3 +181,36 @@ def test_upsert_manifest_replaces_same_id(tmp_path):
     items = ap.upsert_manifest(mpath, {"id": "a", "model_name": "v2"})  # replace a
     ids = {e["id"]: e["model_name"] for e in items}
     assert ids == {"a": "v2", "b": "v1"} and len(items) == 2
+
+
+# --- densify_candles: gappy-array marker-drift fix ------------------------------------------------
+def _c(t, close, vol=1.0):
+    return {"time": t, "open": close, "high": close, "low": close, "close": close,
+            "volume": vol, "episode": 0}
+
+
+def test_densify_candles_fills_internal_gaps_flat():
+    """A thin token's candle array has missing hours; densify fills them with FLAT, zero-volume bars so
+    the series is contiguous and the dashboard's index-based marker placement lands on the right bar."""
+    cs = [_c(0, 2.0, vol=5.0), _c(3 * 3600, 3.0, vol=7.0)]        # 2-hour internal gap
+    out = ap.densify_candles(cs, interval_s=3600)
+    assert [c["time"] for c in out] == [0, 3600, 7200, 3 * 3600]  # contiguous, one bar per hour
+    for c in out[1:3]:                                            # the two synthetic bars
+        assert c["open"] == c["high"] == c["low"] == c["close"] == 2.0   # flat at prev close
+        assert c["volume"] == 0.0                                 # zero volume (a flat tick)
+    real = out[0]["time"], out[-1]["time"]                        # real bars unchanged
+    assert real == (0, 3 * 3600) and out[-1]["close"] == 3.0
+    # the index math the frontend uses is now exact: time -> contiguous slot
+    t0, iv = out[0]["time"], out[1]["time"] - out[0]["time"]
+    assert round((7200 - t0) / iv) == 2 and out[2]["time"] == 7200
+
+
+def test_densify_candles_dense_input_unchanged():
+    cs = [_c(t * 3600, 1.0) for t in range(4)]                    # already contiguous
+    assert ap.densify_candles(cs) == cs                           # byte-identical (no gaps)
+
+
+def test_densify_candles_short_input_is_safe():
+    assert ap.densify_candles([]) == []
+    one = [_c(0, 1.0)]
+    assert ap.densify_candles(one) == one
