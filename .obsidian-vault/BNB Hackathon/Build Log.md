@@ -171,7 +171,7 @@ CloudFront** over its own internet (no tailnet haul-back). Verified at
   **path-MTU black hole** on the haul-back (≤512 B returns OK, ≥4 KB stall and the ssh session
   dies) no longer matters: nothing large crosses the tailnet.
 - **Debug trail that got here:** Tailscale on the laptop; MagicDNS didn't resolve inside the ssh
-  *subprocess* → use the tailnet IP `100.97.195.65`; tar-stream haul-back hit the PMTU wall →
+  *subprocess* → use the tailnet IP `<TRAINER_TAILNET_IP>`; tar-stream haul-back hit the PMTU wall →
   self-publish; the desktop `/root` clone tracked a **stale P: drive mirror, not GitHub** →
   fast-forwarded it; first publish needed **`s3:ListBucket`** (missing key returns 403 not 404
   without it).
@@ -286,7 +286,7 @@ backstop throughout — held conclusions, wide search.
   **`act-trainer`** (Ubuntu 24.04, root, systemd), not native Windows — `SSHExecutor` is POSIX
   and Windows-side Python 3.14 has no torch wheel; WSL gives systemd + Python 3.12 + rsync +
   tailscaled. Machine: **8c/16t, 32 GB**. CPU-only torch venv (**122 tests pass**); **Tailscale
-  SSH** at `100.97.195.65` / `act-trainer.tail7214b2.ts.net`; data scp'd in (102 MB); the
+  SSH** at `<TRAINER_TAILNET_IP>` / `act-trainer.<TAILNET>.ts.net`; data scp'd in (102 MB); the
   dispatch entrypoint runs on the trainer and emits the full bundle. `dispatch_demo.py` now
   defaults to SSH dispatch (`--local` to opt out) and `SSHExecutor` streams artifacts back as a
   **tar over ssh** (Windows has no rsync). Gotchas (WSL idle-shutdown → keep-alive task, tailnet

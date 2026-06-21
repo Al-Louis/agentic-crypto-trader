@@ -28,7 +28,8 @@ REPO = Path(__file__).resolve().parents[1]
 LOCAL_DASHBOARD = REPO.parent / "alexlouis-site" / "public" / "apentic" / "data"
 DATA_CDN = "https://data.alexlouis.dev"
 
-REMOTE_HOST = "root@100.97.195.65"
+# Set TRAINER_SSH_HOST in your local .env (gitignored); the placeholder default is non-routable.
+REMOTE_HOST = os.environ.get("TRAINER_SSH_HOST", "root@<TRAINER_TAILNET_IP>")
 REMOTE_WORKDIR = "/root/agentic-crypto-trader"
 REMOTE_PYTHON = "/root/agentic-crypto-trader/.venv/bin/python"
 

@@ -18,12 +18,14 @@ data. Host/workdir/python/CDN live here (previously duplicated in scripts/train_
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
-# The keyless training desktop (act-trainer; vault "Remote Capabilities").
-HOST = "root@100.97.195.65"
+# The keyless training desktop (act-trainer; vault "Remote Capabilities"). Set TRAINER_SSH_HOST in
+# your local .env (gitignored) to your own host; the placeholder default is intentionally non-routable.
+HOST = os.environ.get("TRAINER_SSH_HOST", "root@<TRAINER_TAILNET_IP>")
 REMOTE_WORKDIR = "/root/agentic-crypto-trader"
 REMOTE_PYTHON = "/root/agentic-crypto-trader/.venv/bin/python"
 # Results are read over normal internet from the CDN, never hauled back over the tailnet.

@@ -30,7 +30,8 @@ DEFAULT_LOCAL_TARGET = REPO.parent / "alexlouis-site" / "public" / "apentic" / "
 # Training desktop (CPU-parallel host, no keys). Reachable via Tailscale; key-based SSH.
 # Use the Tailscale IP, not the MagicDNS name `act-trainer`: the name didn't resolve inside
 # the ssh *subprocess* (works interactively). The 100.x tailnet IP is stable per device.
-REMOTE_HOST = "root@100.97.195.65"   # act-trainer (Tailscale IP)
+# Set TRAINER_SSH_HOST in your local .env (gitignored); the placeholder default is non-routable.
+REMOTE_HOST = os.environ.get("TRAINER_SSH_HOST", "root@<TRAINER_TAILNET_IP>")   # act-trainer
 REMOTE_WORKDIR = "/root/agentic-crypto-trader"
 REMOTE_PYTHON = "/root/agentic-crypto-trader/.venv/bin/python"
 

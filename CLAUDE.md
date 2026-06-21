@@ -94,13 +94,13 @@ safety tiers, and build phasing); it is built incrementally from Phase 2 onward.
 
 Full runbook: **[[Remote Capabilities]] §"Remote training — deploy runbook"**. This process took
 a full day to nail down and was once lost to context compression — **do not improvise it.** The
-training desktop is **`root@100.97.195.65`** (WSL2 `act-trainer`, FQDN
-`act-trainer.tail7214b2.ts.net`, 8c/16t, 32 GB; keyless, no mainnet; jobs self-publish to
+training desktop is **`root@<TRAINER_TAILNET_IP>`** (WSL2 `act-trainer`, FQDN
+`act-trainer.<TAILNET>.ts.net`, 8c/16t, 32 GB; keyless, no mainnet; jobs self-publish to
 `data.alexlouis.dev`). The five rules that, if forgotten, break things:
 
 1. **SSH only via the PowerShell tool (Windows OpenSSH), never the Bash tool's ssh.** The
    Bash/MSYS ssh can't route to the tailnet and hangs forever. From PowerShell:
-   `ssh root@100.97.195.65 '<cmd>'` (pass multi-line remote cmds via a single-quoted here-string).
+   `ssh root@<TRAINER_TAILNET_IP> '<cmd>'` (pass multi-line remote cmds via a single-quoted here-string).
 2. **Keep every SSH response tiny (< ~512 B).** The tailnet has a **path-MTU black hole** — replies
    ≥ ~4 KB stall and kill the session. Status checks return *counts*, never full `ps` / `pgrep -fa`.
 3. **Launch the sweep ONCE, then WAIT 60–90 s before verifying.** Torch import + the volume-panel

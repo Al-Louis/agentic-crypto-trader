@@ -213,7 +213,7 @@ runs unmodified and CPU-only torch installs cleanly.
   orchestrator can be plain Windows). The classic `sshd` + key-auth path would additionally
   have to solve WSL2 inbound forwarding.
 - Dispatch: `scripts/dispatch_demo.py` now **defaults to SSH** dispatch to the desktop
-  (Tailscale IP `root@100.97.195.65`, `/root/agentic-crypto-trader`); pass `--local` to run on
+  (Tailscale IP `root@<TRAINER_TAILNET_IP>`, `/root/agentic-crypto-trader`); pass `--local` to run on
   the laptop. The job self-publishes; remaining step is the **AWS data bucket + CloudFront
   behavior + IAM user** (publishing revision above) and the desktop `.env`.
 
@@ -227,7 +227,7 @@ full dashboard bundle against real data.
 
 ### Operational gotchas — learned standing it up (2026-06-08)
 
-The host is `100.97.195.65` / `act-trainer.tail7214b2.ts.net` (tailnet `al-louis.github`),
+The host is `<TRAINER_TAILNET_IP>` / `act-trainer.<TAILNET>.ts.net` (tailnet `<TAILNET_ORG>`),
 user `root`, repo `/root/agentic-crypto-trader`. Five things bit us; record them so they don't again:
 
 - **WSL idles the distro out → tailscaled dies → node drops off the tailnet.** A distro that
@@ -237,13 +237,13 @@ user `root`, repo `/root/agentic-crypto-trader`. Five things bit us; record them
   across reboots. Host sleep still pauses it (acceptable for a burst training box).
 - **Tailnet name doesn't resolve from the Windows laptop.** Even with MagicDNS on, Windows
   skips the tailnet search domain, so bare `act-trainer` fails (`could not resolve hostname`).
-  Use the **IP `100.97.195.65`** or the **FQDN** `act-trainer.tail7214b2.ts.net`.
+  Use the **IP `<TRAINER_TAILNET_IP>`** or the **FQDN** `act-trainer.<TAILNET>.ts.net`.
 - **The repo is private + the headless distro has no GitHub creds** → an HTTPS `git clone`
   hangs forever on a credential prompt. Cloned instead from the **local Windows working copy
   at `/mnt/p/...`** (origin points there; auth-free). `GIT_TERMINAL_PROMPT=0` set so git fails
   fast instead of hanging. Update path: `git pull` the Windows clone, then pull on the trainer.
 - **Market data is gitignored** (the repo is ~1 MB) and lives only on the laptop, so it must be
-  copied over: `scp -r data root@100.97.195.65:/root/agentic-crypto-trader/` (102 MB; the job
+  copied over: `scp -r data root@<TRAINER_TAILNET_IP>:/root/agentic-crypto-trader/` (102 MB; the job
   hard-requires hourly OHLCV under `data/ohlcv/hour_1/`).
 - **WSL2 clock skew was the root cause of Tailscale login not holding** ("appears in the admin
   console but `tailscale status` says Logged out"). `systemd-timesyncd` (enabled via
@@ -253,8 +253,8 @@ user `root`, repo `/root/agentic-crypto-trader`. Five things bit us; record them
 
 The end-to-end procedure for launching a training sweep on the desktop, with the failure modes
 that cost a full day (and a forced reboot) to learn. **CLAUDE.md carries the five-rule short form;
-this is the complete version.** Host facts: `root@100.97.195.65`
-(`act-trainer.tail7214b2.ts.net`), repo `/root/agentic-crypto-trader`, `.venv/bin/python`,
+this is the complete version.** Host facts: `root@<TRAINER_TAILNET_IP>`
+(`act-trainer.<TAILNET>.ts.net`), repo `/root/agentic-crypto-trader`, `.venv/bin/python`,
 self-publishes to `data.alexlouis.dev` (`APENTIC_PUBLISH_TARGET=s3://alexlouis-apentic-data` +
 `APENTIC_CLOUDFRONT_DIST_ID=E14F268NIY6WLZ` in the desktop `.env`). 8 physical / 16 logical cores →
 `--n-envs 8`, runs **sequential**.
@@ -285,7 +285,7 @@ self-publishes to `data.alexlouis.dev` (`APENTIC_PUBLISH_TARGET=s3://alexlouis-a
 
 - **The Bash-tool `ssh` can't reach the tailnet — it hangs, never times out cleanly.** Windows
   OpenSSH (the PowerShell tool) uses the Windows network stack, which routes. *Always drive SSH from
-  PowerShell.* Diagnose reachability with `Test-NetConnection -ComputerName 100.97.195.65 -Port 22`
+  PowerShell.* Diagnose reachability with `Test-NetConnection -ComputerName <TRAINER_TAILNET_IP> -Port 22`
   (`TcpTestSucceeded:True` = up; `PingSucceeded:False` is just ICMP being firewalled — ignore it).
 - **Path-MTU black hole on the tailnet:** replies ≥ ~4 KB stall and the session dies (same root
   cause as why artifacts aren't hauled back). Keep every status command's *output* tiny — counts and

@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # ---- config ----------------------------------------------------------------
 $Region      = 'us-east-1'
-$Account     = '706259162670'
+# $Account is resolved at runtime from STS just below (never hardcoded — this script is public).
 $Bucket      = 'alexlouis-apentic-data'
 $Domain      = 'data.alexlouis.dev'
 $Apex        = 'alexlouis.dev'
@@ -43,6 +43,10 @@ function Write-JsonFile([object]$Obj, [string]$Name) {
     $Obj | ConvertTo-Json -Depth 16 | Set-Content -Path $path -Encoding utf8
     return "file://$($path -replace '\\','/')"   # forward slashes: most portable for aws file://
 }
+
+# Resolve the AWS account ID from the caller's identity (was hardcoded; kept out of source so
+# this script is safe to publish). Uses the same profile/credentials as the rest of the run.
+$Account = (Invoke-Aws sts get-caller-identity --query Account --output text).Trim()
 
 # ---- 1. private S3 bucket --------------------------------------------------
 Write-Host "==> S3 bucket $Bucket"

@@ -2,6 +2,7 @@
 .env
 .env.*
 !/.env.example
+trader.env
 *.key
 *.pem
 *.keystore
@@ -43,6 +44,12 @@ experiments/*
 !experiments/ledger.jsonl
 !experiments/champion.json
 models/
+# RL model weights = core IP — never commit, regardless of path. SB3 saves policy.zip +
+# vecnormalize.pkl; the remote-training runbook stages them into runs-rl/<run-id>/ before
+# the private-S3 upload, so guard the binaries directly (not just the models/ dir).
+*.pkl
+policy.zip
+runs-rl/**/*.zip
 *.log
 logs/
 
