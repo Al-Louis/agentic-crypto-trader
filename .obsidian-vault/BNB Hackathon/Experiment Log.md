@@ -28,7 +28,9 @@ A run is judged on three axes, in order — never on raw return alone:
 
 1. **Survives the DQ gate** — max drawdown **< ~30%**. Breaching this is disqualification *before
    live PnL is even counted*. This is the hard constraint.
-2. **Beats the baseline** — the validated vol-tilt(trend50) overlay on the *same* window.
+2. **Beats the bar** — out-of-sample on the cold-weekly eval. The bar evolved: the vol-tilt(trend50)
+   overlay → the rung-0 RULE → now **beat the PREVIOUS champion**, with rung-0 demoted to a REFERENCE
+   floor (reported like B&H / Random, not binding).
 3. **Return** — maximize, given 1 and 2.
 
 Judge on the **seed mean** (single-seed RL is unstable), and always read the **worst seed's
@@ -36,10 +38,17 @@ drawdown** — a mean under the gate with a worst seed over it is *not* yet comp
 
 ## Current champion
 
-**None.** No config has passed frozen-test OOS (the rule: split=test, beats its test baseline, AND
-worst-seed maxDD under the gate). The val champions (`ppo2-real` +83%, `ppo2-real-give` +156%) both
-**collapsed out-of-sample** — see the OOS verdict below. `champion.json` records `null`, honestly.
-The val numbers were regime/era overfitting, confirmed by the held-out test.
+**`sbq-s1`** (`ppo-event-rdLe4-sbq-3c84b4a-s1`) — the first config to PASS frozen-test OOS, and the
+deployed pick. Held-out TEST (5 cold weeks, fresh $10k each): **+58.6% sum / +11.7%/wk mean / 5-of-5
+winning weeks / 8.8% worst-week DD / DQ-safe**; held up vs validation (no OOS collapse). Selected on
+VALIDATION (the loop gates on val), so the TEST split was genuinely held out — and the one-shot test
+is now **CONSUMED** (no further tuning to the sbq config; meta-overfit guard). See the 2026-06-21
+certification entry below; deploy → [[Live Forward-Run Harness]].
+
+> Earlier (pre-cert) this section read "None": the val champions `ppo2-real` (+83%) and
+> `ppo2-real-give` (+156%) both COLLAPSED out-of-sample (regime/era overfitting, confirmed by the
+> held-out test), so `champion.json` honestly recorded `null`. That history is *why* the frozen-test
+> rule exists — and why sbq-s1 was crowned only AFTER spending it.
 
 ## Standings — Reward-Shaping Sweep #1
 

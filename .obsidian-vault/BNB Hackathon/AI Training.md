@@ -1,13 +1,26 @@
 # AI Training
 
-The learned-policy candidate for the decision core — an RL pipeline ported from [[TradeSim]]
-that trains a trading agent against the [[Simulated Market]], with reward and evaluation tied
-to the competition's risk gate. **RL is one option, not a mandate** — weighed here against
-simpler robust strategies ([[Trading Strategies]]) for a single, high-variance live week.
-Owned by `rl-ml-trainer`. Regime/scenario context: [[Market Conditions]]; training-host
-question: [[Remote Capabilities]].
+The learned-policy decision core — an RL pipeline ported from [[TradeSim]] that trains a
+trading agent against the [[Simulated Market]], with reward and evaluation tied to the
+competition's risk gate. **RL is the committed decision core** (champion `sbq-s1`); it was
+weighed against simpler robust strategies ([[Trading Strategies]]) and won out-of-sample on the
+cold-weekly gate. Owned by `rl-ml-trainer`. Regime/scenario context: [[Market Conditions]];
+training-host question: [[Remote Capabilities]].
 
-> ## ⚠ CURRENT DIRECTION (2026-06-16) — read before acting on any "as-built" section below
+> ## ⚠ CURRENT DIRECTION (2026-06-21) — RESOLVED: RL committed, champion certified + deployed
+>
+> The exploration below RESOLVED. The selective event-driven ignition substrate (rd/rdL lineage)
+> matured through the `ef` → `sbq` sweeps into the deployed champion **`sbq-s1`**
+> (`ppo-event-rdLe4-sbq-3c84b4a-s1`): `universe_mode=voltopk` k=10, `vol_mult=2.0`, sideways
+> EMA-break suppression, `entry_forward` reward, RecurrentPPO LSTM-256. Selected on VALIDATION;
+> the one-shot **frozen TEST is now SPENT = PASS** (5 cold weeks, fresh $10k each: **+58.6% sum /
+> +11.7%/wk / 5-of-5 winning / 8.8% worst-week DD / DQ-safe**), held up vs val (no overfit
+> collapse). Deployed to the EC2 paper harness; #1 on the leaderboard. Per the meta-overfit guard,
+> **no further tuning to the sbq config** (test consumed). rung-0 is now a REFERENCE floor, not the
+> finality gate — grade new iterations vs the PREVIOUS champion on the honest cold-weekly metric,
+> DQ survival stays hard. Full trail → [[Experiment Log]]; deploy → [[Live Forward-Run Harness]].
+>
+> ## ⚠ PRIOR DIRECTION (2026-06-16) — how the arc got here (historical; superseded by the above)
 > The substrate is the **SELECTIVE event-driven ignition** model (the rd/rdL lineage): the agent
 > enters ONLY on real volume-ignition setups, the trap guards (`det_blacklist`, loss-floor) are
 > active, and RL learns the *discretion* (sizing, exit timing) on top. **The bar is: beat the
