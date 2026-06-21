@@ -11,8 +11,9 @@ Checkpoint layout (matches scripts/simulate_weekly): `<run-dir>/policy.zip`,
 `<run-dir>/vecnormalize.pkl`, and `<run-dir>/<run-id>/metrics.json` (the provenance). `--run-id`
 defaults to the run-dir basename.
 
-PAPER ONLY for now: the event harness has no TWAK signing path yet (the runner records paper
-fills + the guardrail audit; live routing is future work), so live mode REFUSES loudly rather
+PAPER ONLY by design: this entry point records paper fills + the guardrail audit and never
+signs. The gated live-signing path is a SEPARATE entry point, `trader.agent.live_event_agent`
+(real TWAK signing behind a triple env gate). So `TRADER_MODE=live` here REFUSES loudly rather
 than silently doing nothing — the same fail-loud posture as `trader.agent.__main__`.
 """
 
@@ -30,7 +31,7 @@ from pathlib import Path
 from trader import config
 
 HOUR = 3600
-MODE_ENV = "TRADER_MODE"            # paper | live (live refused here — no signing path yet)
+MODE_ENV = "TRADER_MODE"            # paper | live (live refused here — signing is live_event_agent)
 LIVE_OPT_IN_ENV = "AGENT_ALLOW_LIVE"
 DEFAULT_TICK_OFFSET = 180           # seconds after the hour to tick (let the bar's data settle)
 
@@ -83,14 +84,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _resolve_mode() -> str:
     """Paper unless explicitly live; an invalid value fails loud (systemd restart-loops -> the
-    dead-man fires). Live is refused outright — no signing path for the event harness yet."""
+    dead-man fires). Live is refused outright here — signing is the separate
+    `trader.agent.live_event_agent` entry point, not this paper driver."""
     mode = config.get(MODE_ENV) or "paper"
     if mode not in ("paper", "live"):
         print(f"refusing: {MODE_ENV}={mode!r} is not 'paper' or 'live'.", file=sys.stderr)
         raise SystemExit(2)
     if mode == "live":
-        print("refusing live mode: the event harness has no TWAK signing path yet "
-              "(paper only). Unset TRADER_MODE or set it to 'paper'.", file=sys.stderr)
+        print("refusing live mode: this is the paper entry point. Use "
+              "'python -m trader.agent.live_event_agent' for the gated live-signing path, "
+              "or set TRADER_MODE=paper here.", file=sys.stderr)
         raise SystemExit(2)
     return mode
 
