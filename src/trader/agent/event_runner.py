@@ -78,9 +78,10 @@ def live_forward_policy(universe: list[str], bankroll_usd: float, *, asset_ids=N
     $10k env book). A single scaled entry maxes at ~`max_entry_frac`*bankroll, so per-trade is set a
     little above that; daily allows several round-trips; the lifetime ceiling is a generous backstop
     (the 30% drawdown stop + allowlist are the binding limits). `asset_ids` adds the token CONTRACTS
-    to the allowlist (the intent-phase check sees the assetId the swap is keyed off; the quote-phase
-    re-check sees the realized SYMBOL, already covered by `universe`). The env-parity check still uses
-    the $10k-scale `forward_run_policy`."""
+    to the allowlist: BOTH the intent-phase and quote-phase checks allowlist on the INTENT's assets
+    (the assetId the swap is keyed off — a contract can't route to a different token), while the
+    realized USD + slippage are re-derived from the quote (`execute.py`). The `universe` SYMBOLS cover
+    the cash legs. The env-parity check still uses the $10k-scale `forward_run_policy`."""
     from trader.agent.compliance import COMPLIANCE_TOKEN
     allow = {str(t).upper() for t in universe} | {cash_leg.upper(), COMPLIANCE_TOKEN.upper()}
     if asset_ids:
