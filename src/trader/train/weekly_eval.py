@@ -119,12 +119,15 @@ def week_regime(win, universe, warmup=WARMUP):
     return ("bull" if ew > 0.10 else "bear" if ew < -0.10 else "flat"), ew
 
 
-def grade_week_baselines(ws, win, liq, vol, k=8, vol_target=0.005, cap_floor=0.02, warmup=WARMUP):
+def grade_week_baselines(ws, win, liq, vol, k=8, vol_target=0.005, cap_floor=0.02, warmup=WARMUP,
+                         vol_mult=2.5):
     """Grade the rung-0 RULE + risk-parity Buy&Hold over one cold week. Torch-free (no policy), so the
-    deployment BAR is laptop-measurable. Returns a WeekResult (regime/split filled by the caller)."""
+    deployment BAR is laptop-measurable. Returns a WeekResult (regime/split filled by the caller).
+    `vol_mult` must match the agent's ignition threshold so the gate compares RL skill on the SAME
+    substrate, not a substrate change vs the old rule."""
     from trader.strategy.rung0 import build_rung0, run_rung0
     uni = causal_voltop_universe(win, k=k, warmup=warmup)
-    sig = build_rung0(win, tokens=uni, volume=vol)
+    sig = build_rung0(win, tokens=uni, volume=vol, vol_mult=vol_mult)
     eq, records, _fees = run_rung0(win, sig, liq, warmup=warmup)
     eq = eq.iloc[warmup:]                                       # the COLD week only (drop the prepad)
     ret = float(eq.iloc[-1] / eq.iloc[0] - 1.0)

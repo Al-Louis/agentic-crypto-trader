@@ -9,6 +9,7 @@ import pytest
 
 from trader.train.event_env import (
     BASKET_OPEN,
+    CANDLE_EXIT,
     EMA_BREAK,
     FORCED_REASONS,
     IGNITION,
@@ -49,6 +50,48 @@ def _env(**kw):
     base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5,
                 vol_spk=4, vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0)
     return EventRungEnv(returns, btc, liq, **{**base, **kw})
+
+
+def test_fixed_universe_mode():
+    """universe_mode='fixed' uses the hand-set list verbatim (no causal re-pick), syncs k to its
+    length, keeps obs_dim, and validates the list; voltopk is unchanged."""
+    env = _env(universe_mode="fixed", fixed_universe=["C1", "C2"])
+    o = env.reset(start=40)
+    assert sorted(env.universe) == ["C1", "C2"] and env.k == 2
+    assert len(o) == env.obs_dim                       # obs width is universe-size-independent
+    assert sorted(env._pick_universe(45)) == ["C1", "C2"]    # identical regardless of bar
+    assert sorted(env._pick_universe(200)) == ["C1", "C2"]   # (no causal vol re-pick)
+    # voltopk still re-picks causally (regression guard on the existing path)
+    vt = _env(universe_mode="voltopk", k=2)
+    vt.reset(start=40)
+    assert len(vt.universe) == 2
+    assert "RUN" in vt._pick_universe(100)             # at the runup->crash transition RUN is high-vol -> picked
+    with pytest.raises(ValueError):
+        _env(universe_mode="fixed")                    # missing list
+    with pytest.raises(ValueError):
+        _env(universe_mode="fixed", fixed_universe=["NOPE"])   # token not in panel
+
+
+def test_sideways_ema_break_suppression():
+    """shallow+quiet EMA-break suppression: OFF builds no svol (byte-identical); ON builds it and yields
+    no MORE EMA_BREAK exits than OFF over the same driven episode (loss_floor/trailing untouched)."""
+    def ema_breaks(**kw):
+        env = _env(**kw)
+        assert (env._svol is not None) == (kw.get("shallow_break_max", 0) > 0 and kw.get("consol_vol_max", 0) > 0)
+        env.reset(start=40)
+        n = 0
+        for _ in range(800):
+            et, _tok = env._pending
+            if et == "none":
+                break
+            _o, _r, done, info = env.step([1.0 if et == "entry" else 0.0])
+            n += sum(1 for tr in info.get("trades", []) if len(tr) > 5 and tr[5] == EMA_BREAK)
+            if done:
+                break
+        return n
+    off = ema_breaks()
+    on = ema_breaks(shallow_break_max=0.05, consol_vol_max=0.05)
+    assert on <= off                                      # suppression can only REMOVE shallow-quiet breaks
 
 
 def _run(env, entry_a=1.0, exit_a=0.0, start=40):
@@ -487,6 +530,103 @@ def test_intrabar_stop_tags_intrabar_stop_forced():
     sells = [m for m in env._trades if m[0] == t and m[1] < 0]
     assert sells and sells[0][5] == INTRABAR_STOP
     assert sells[0][5] in FORCED_REASONS
+
+
+def _rotate_setup(env, runup):
+    """Stage a rotation: a weak laggard held, a stronger candidate, cash=0, and the candidate's
+    px run-up over rotate_pump_win bars set to `runup`. Returns (laggard, candidate)."""
+    env.reset(start=40)
+    env._cush = env._cush.copy()
+    env._px = env._px.copy()
+    t = env.universe[0]; jt = env.col_ix[t]
+    incoming = env.universe[1]; ji = env.col_ix[incoming]
+    bar = env.bar
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar, "peak_px": env._px[bar, jt], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, jt]}
+    env._cush[bar, jt] = -0.5                         # laggard = weakest cushion
+    env._cush[bar, ji] = 0.5                          # candidate stronger -> rotation would proceed
+    b0 = bar - env.rotate_pump_win
+    env._px[bar, ji] = env._px[b0, ji] * (1.0 + runup)   # candidate's recent run-up
+    env.cash = 0.0
+    env._trades = []
+    return t, incoming
+
+
+def test_rotate_pump_block_skips_chase():
+    """With the anti-chase brake on, _rotate_for refuses to liquidate a holding to fund an entry into
+    a candidate that ALREADY ran up past the threshold — but still rotates for a non-pumped candidate."""
+    env = _env(rotate_pump_block=0.20, rotate_pump_win=4)
+    t, incoming = _rotate_setup(env, runup=0.50)          # candidate +50% over the window (> 20% block)
+    env._rotate_for(incoming, want=1000.0)
+    assert not [m for m in env._trades if m[0] == t and m[1] < 0]   # NO sell-to-chase
+    assert env.pos.get(t) is not None                     # laggard still held
+
+    env2 = _env(rotate_pump_block=0.20, rotate_pump_win=4)
+    t2, inc2 = _rotate_setup(env2, runup=0.05)            # candidate only +5% (< 20%): not a chase
+    env2._rotate_for(inc2, want=1000.0)
+    assert [m for m in env2._trades if m[0] == t2 and m[1] < 0]     # rotation proceeds as before
+
+
+def test_rotate_pump_block_off_is_byte_identical():
+    """Default (rotate_pump_block=0.0) rotates regardless of the candidate's run-up — unchanged."""
+    env = _env()                                          # knob off by default
+    assert env.rotate_pump_block == 0.0
+    t, incoming = _rotate_setup(env, runup=2.0)           # candidate +200% — would be blocked if on
+    env._rotate_for(incoming, want=1000.0)
+    assert [m for m in env._trades if m[0] == t and m[1] < 0]       # still rotates (brake off)
+
+
+def _candle_env(**kw):
+    """An env with the OHLC frac panels present (flat 1.0 => no real candles) so candle_exit can build;
+    tests then override `_bear_candle` directly to place a bearish candle on a chosen bar."""
+    returns, btc, vol, liq = _panel()
+    ones = pd.DataFrame(1.0, index=returns.index, columns=returns.columns)
+    base = dict(volume=vol, k=3, ema_span=10, warmup=30, episode_bars=200, vol_mult=2.5, vol_spk=4,
+                vol_base=20, vol_fast=4, stop_k=0.1, cooldown=8, seed=0, loss_floor=0.2,
+                low_frac=ones, high_frac=ones, intrabar_floor=True)
+    return EventRungEnv(returns, btc, liq, **{**base, **kw})
+
+
+def _hold(env, t, j, bar, cost_mult):
+    env.pos[t] = {"usd": 100.0, "entry_bar": bar - 2, "peak_px": env._px[bar, j], "origin": 1.0,
+                  "tp_i": 0, "cost_px": env._px[bar, j] * cost_mult}
+
+
+def test_candle_exit_prompts_when_in_profit():
+    """candle_exit ON: a held IN-PROFIT position on a bearish candle prompts a discretionary CANDLE_EXIT."""
+    env = _candle_env(candle_exit=True)
+    env.reset(start=40)
+    t = env.universe[0]; j = env.col_ix[t]; bar = env.bar
+    env._cush = env._cush.copy(); env._cush[bar, j] = 0.5        # above EMA -> no ema-break
+    env._bear_candle = env._bear_candle.copy(); env._bear_candle[bar, j] = True
+    _hold(env, t, j, bar, cost_mult=0.8)                         # cost 20% below px -> in profit
+    ev = [e for e in env._scan_bar(bar) if e[0] == "exit" and e[1] == t]
+    assert ev and ev[0][2] == CANDLE_EXIT
+    assert CANDLE_EXIT not in FORCED_REASONS                     # discretionary: the agent can still hold
+
+
+def test_candle_exit_skipped_when_underwater():
+    """No CANDLE_EXIT when the position is below its cost basis, even on a bearish candle (in-profit only)."""
+    env = _candle_env(candle_exit=True)
+    env.reset(start=40)
+    t = env.universe[0]; j = env.col_ix[t]; bar = env.bar
+    env._cush = env._cush.copy(); env._cush[bar, j] = 0.5
+    env._bear_candle = env._bear_candle.copy(); env._bear_candle[bar, j] = True
+    _hold(env, t, j, bar, cost_mult=1.2)                         # cost ABOVE px -> underwater
+    ev = [e for e in env._scan_bar(bar) if e[0] == "exit" and e[1] == t and e[2] == CANDLE_EXIT]
+    assert not ev
+
+
+def test_candle_exit_off_is_byte_identical():
+    """Default (candle_exit off): no bearish-candle mask is built and no CANDLE_EXIT is ever prompted."""
+    env = _candle_env()                                         # off by default
+    assert env._bear_candle is None
+    env.reset(start=40)
+    t = env.universe[0]; j = env.col_ix[t]; bar = env.bar
+    env._cush = env._cush.copy(); env._cush[bar, j] = 0.5
+    _hold(env, t, j, bar, cost_mult=0.8)
+    ev = [e for e in env._scan_bar(bar) if e[0] == "exit" and e[2] == CANDLE_EXIT]
+    assert not ev
 
 
 def test_rotation_out_tags_rotation_out_forced():

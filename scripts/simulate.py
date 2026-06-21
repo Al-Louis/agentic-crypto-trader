@@ -51,19 +51,30 @@ def env_kwargs_from_provenance(prov: dict, returns, build_ohlc_frac_panels) -> d
               fwd_horizon=prov["fwd_horizon"], ungate=prov["ungate"],
               action_mode=prov["action_mode"], n_action_levels=prov["n_action_levels"],
               universe_mode=prov["universe_mode"], vol_target=prov["vol_target"],
+              vol_mult=prov.get("vol_mult", 2.5),                 # provenance lost vol_mult pre-2026-06-19;
+              fixed_universe=prov.get("fixed_universe"),          # 2.5 default kept for old runs (record it now)
               cap_floor=prov["cap_floor"], harvest_obs=prov["harvest_obs"],
               rule_default=prov["rule_default"], basket_default=prov.get("basket_default", False),
               exit_commit=prov["exit_commit"],
               dust_usd=prov["dust_usd"], tp_rungs=[float(x) for x in tp.split(",") if x],
               loss_floor=prov["loss_floor"], det_blacklist=prov["det_blacklist"],
               scale_in=prov.get("scale_in", False),
+              shallow_break_max=prov.get("shallow_break_max", 0.0),
+              consol_vol_max=prov.get("consol_vol_max", 0.0),
+              rotate_pump_block=prov.get("rotate_pump_block", 0.0),
+              rotate_pump_win=prov.get("rotate_pump_win", 24),
+              candle_exit=prov.get("candle_exit", False),
+              candle_uw_min=prov.get("candle_uw_min", 0.5),
+              candle_lw_max=prov.get("candle_lw_max", 0.25),
+              candle_doji_max=prov.get("candle_doji_max", 0.10),
               cycle_obs=prov.get("cycle_obs", False), no_btc_obs=prov.get("no_btc_obs", False),
               universe_lookback=prov.get("universe_lookback", 0), seed=prov.get("seed", 0))
-    if prov.get("intrabar_floor") or (prov.get("wick_reject") or 0) > 0:
+    _candle = bool(prov.get("candle_exit"))                   # candle_exit needs BOTH frac panels
+    if prov.get("intrabar_floor") or (prov.get("wick_reject") or 0) > 0 or _candle:
         lowf, highf = build_ohlc_frac_panels(list(returns.columns), returns.index)
-        kw.update(low_frac=lowf if prov["intrabar_floor"] else None,
-                  intrabar_floor=prov["intrabar_floor"],
-                  high_frac=highf if (prov.get("wick_reject") or 0) > 0 else None,
+        kw.update(low_frac=lowf if (prov.get("intrabar_floor") or _candle) else None,
+                  intrabar_floor=prov.get("intrabar_floor", False),
+                  high_frac=highf if ((prov.get("wick_reject") or 0) > 0 or _candle) else None,
                   wick_reject=prov.get("wick_reject", 0.0))
     return kw
 

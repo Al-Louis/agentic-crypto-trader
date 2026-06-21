@@ -54,3 +54,23 @@ In the `rl_loop` **verdict** phase (driver, laptop-side): after a sweep grades, 
 - **Orphan storage** (no byte-delete) — the live dashboard is bounded to 3, but S3 accumulates evicted files; needs a periodic manual purge if storage cost matters.
 - **Single-seed display** — the dashboard shows individual seeds (you visualize one policy's trades); `config_seed_mean` + `dq_pass` are the guard against reading a lucky seed as a config-level edge. NOTE the current `weekly_score` rank IS seed-level, so a lucky seed (ef-s2) can sit at #1 with a weak `config_seed_mean` beside it — by design (rank = observed random-week performance; the guard supplies the robustness context). If a config-robust rank is ever wanted instead, sort by `config_seed_mean`.
 - **Two audiences, two scores** — `weekly_score` answers the hackathon ("best in a random week"); `cumulative_score` answers long-run deployment. They can disagree on the winner (ef-s2 vs wsi-s3) — that disagreement is informative, not a bug.
+
+## 2026-06-19 — re-crown ef2-s3; vol_mult provenance bug; empty-candle crash + producer guard
+
+**Champion re-crowned: ef2-s3.** `weekly_score` **+9.05%/wk**, `cumulative_score` **+123%** over the 28 weeks, worst-week DD **8.4%** — the risk-adjusted best. `simulated_champion.json` now tracks it.
+
+**New simulated leaderboard top-3** (ranked by `weekly_score` = OOS val+test per-week mean):
+- **#1 ef2-s3 — +9.05%/wk**
+- **#2 eff-s1 — +7.67%/wk**
+- **#3 ef-s2 — +5.77%/wk**
+
+**wkw-s3 evicted to orphans** (de-listed; bytes remain per [[apentic-publisher-no-delete]]).
+
+**Why the order changed — the vol_mult provenance bug.** `train_event` never recorded `vol_mult`, so `env_kwargs_from_provenance` had none and defaulted the constructor to `2.5`. ef2 was TRAINED at `vol_mult 2.0`, so every PUBLISHED ef2 sim had run the policy OFF-DISTRIBUTION at 2.5, depressing its numbers (e.g. ef2-s1 cold-weekly was +4.9%/wk graded at 2.5 vs **+6.0%** at the correct 2.0; the Apr-27 week was +9.4% at 2.5 vs **+26.0%** at 2.0). Until this was caught, ef2 (a sweep-script run) had never been published to the leaderboard at all, so **eff-s1 had been auto-crowned #1 by default**. Fix: `vol_mult` (and `fixed_universe`) are now RECORDED in provenance going forward, and `simulate_weekly` gained a `--vol-mult` override to re-grade older runs (commits 2345fd6 / 6db0674). All 4 ef2 seeds were re-published at the correct 2.0 — and ef2-s3 took #1.
+
+**Empty-candle bundle crash + producer guard.** The eff-s1 fixed-13 `simulated_trades.json` contained 11 empty-candle assets: the FIXED universe forced not-yet-listed tokens (e.g. ASTER / HUMA / SIREN / ZEC in early weeks) into the basket with no OHLCV, so `candles` was `[]`. The simulations frontend (`../alexlouis-site/src/apentic`; `SimulationsClient` defaults to the NEWEST model, which was eff-s1) crashed in `computeBacktest` at `backtest.ts:261`, `const t0 = candles[0].t` (undefined). Three fixes:
+1. **Producer guard** — `simulate_weekly` now SKIPS any asset with empty candles (a dataless token has no trades and 0 PnL; the per-week reconciliation still balances).
+2. **`scripts/delist_sim_model.py`** (NEW, commit 6db0674) — rewrites `simulated_models.json` *without* a given run-id and invalidates CloudFront. The S3 publisher can PUT but not byte-delete ([[apentic-publisher-no-delete]]), so this is a **de-list** (the bytes stay, just unlisted) — the same eviction posture as the leaderboard de-list above.
+3. eff-s1 was **re-published clean** (0 empty-candle assets). The page is healed.
+
+> Reminder: `weekly_score` = OOS val+test per-week mean return = `(val.ret_sum + test.ret_sum) / (val.n_weeks + test.n_weeks)` from `simulate_weekly`'s `meta.windows` — see §"Locked decisions". The fixed-universe experiment that produced eff-s1 is a CLOSED branch (causal vol-top-k beats it); its sim bundles remain on the board only as the prior #1 lineage.

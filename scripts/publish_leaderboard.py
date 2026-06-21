@@ -62,7 +62,7 @@ CDN_BASE = "https://data.alexlouis.dev"   # read-only confirmation fetches (Phas
 
 def update_leaderboard(current: list[dict], new_entry: dict, k: int = DEFAULT_K
                        ) -> tuple[list[dict], list[str]]:
-    """Insert/replace `new_entry`, keep the top-`k` by `weekly_score`, reassign ranks.
+    """Insert/replace `new_entry`, keep the top-`k` by `cumulative_score` (6-mo return), reassign ranks.
 
     PURE — no torch, no network, no disk — so the eviction maths is unit-testable. Returns
     `(new_list, evicted_run_ids)` where `evicted_run_ids` are the run-ids that WERE listed in
@@ -73,9 +73,9 @@ def update_leaderboard(current: list[dict], new_entry: dict, k: int = DEFAULT_K
 
     Semantics:
       * UPSERT — an entry with the same `run_id` as `new_entry` is REPLACED, never duplicated.
-      * SORT — descending `weekly_score` (the hackathon "random week" ranker). Ties are broken
+      * SORT — descending `cumulative_score` (the 6-month total-return ranker). Ties are broken
         DETERMINISTICALLY by `run_id` (ascending), so the order is stable regardless of input
-        order. A `weekly_score` of None sorts last (treated as -inf) — an entry that couldn't
+        order. A `cumulative_score` of None sorts last (treated as -inf) — an entry that couldn't
         resolve a score never out-ranks a real one.
       * TRUNCATE to `k`, then reassign `rank` = 1..k on the survivors (1 = best).
       * EVICTION = set difference on run-ids over the TRUNCATED top-k: any run-id that was in
@@ -93,8 +93,8 @@ def update_leaderboard(current: list[dict], new_entry: dict, k: int = DEFAULT_K
 
     # -inf for a missing score so it never out-ranks a real one; run_id asc as the stable tiebreak.
     def sort_key(e: dict):
-        s = e.get("weekly_score")
-        return (-(float("-inf") if s is None else float(s)), str(e.get("run_id")))
+        s = e.get("cumulative_score")        # rank by 6-MONTH CUMULATIVE return (user, 2026-06-21);
+        return (-(float("-inf") if s is None else float(s)), str(e.get("run_id")))  # weekly_score still shown
 
     merged.sort(key=sort_key)
     top = merged[:k]

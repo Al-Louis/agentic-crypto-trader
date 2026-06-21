@@ -110,8 +110,9 @@ rate-limit-resilient and ~1 of 20 pools is effectively dead.
 Each hourly tick fetches all 20 tokens (~20 gentle calls/tick with 3s pacing + backoff) to append
 the 1 new bar. Self-healing (a one-bar-behind token catches up next tick). If 429s persist in
 steady state, the clean fix is a GeckoTerminal API key (higher limits) — surface it rather than let
-data silently drift. Also watch the **≥1-trade/day floor**: ef-s2's published gate shows several
-low-activity weeks (a real DQ risk for the live window — `daily_floor_ok` in `status.json`).
+data silently drift. The **≥1-trade/day floor** — ef-s2's published gate shows several low-activity
+weeks (`daily_floor_ok` in `status.json`) — was a real DQ risk; it is now **ADDRESSED** by the
+compliance overlay (see §below). The runner already *tracked* the floor; the overlay *satisfies* it.
 
 ## Daily market scan (`market_metrics.json`)
 
@@ -124,6 +125,68 @@ set transparently and does **not** drive the model (a daily re-pick would be OOD
 model — the explicit design decision). Torch-free. Publishes top-level via the instance role (a
 scoped `market_metrics.json` PutObject grant — the role is otherwise `trading/*`-only). Inspect the
 live pick on-box with `deploy/inspect_universe.py`. Schema → [[Apentic Data Contract]] §market_metrics.json.
+
+## 2026-06-19 — the ≥1-trade/day compliance overlay (forced daily BNB↔USDT rebalance)
+
+Rule-1 of the competition requires **≥1 trade EVERY day** (a hard DQ axis). The runner already
+*tracked* this (`daily_floor_ok` in `status.json`) but nothing *satisfied* it — the event champion
+is **selective** (idle between ignitions), so several cold weeks miss the floor. The fix is a deploy
+**guardrail, not a strategy signal**: a forced daily rebalance that clears Rule-1, kept out of the
+decision core (in [[AI Training]] terms the activity floor was always meant to be a deploy
+guardrail, never a strategy discriminator — this is that guardrail, implemented).
+
+**The design (user, 2026-06-19):** each UTC day **BUY 3% of equity into BNB at 01:00** and **SELL
+it back to USDT at 23:00** — two recorded trades/day, flat overnight. BNB↔USDT is the deep,
+already-allowlisted pair (the Phase-2 spike-trade policy), so it is the cheap, liquid choice and the
+ideal first live trade.
+
+**`compliance.py` (`src/trader/agent/`, pure):**
+- `compliance_action(now_ts)` → `'buy'` at 01:00 UTC / `'sell'` at 23:00 UTC / `None` (by UTC hour).
+- `compliance_cost(usd)` → AMM cost via the same broker (deep BNB liquidity ≈ LP fee + gas, a few
+  $/day).
+- `compliance_positions(week_start, week_end, px_at, frac, capital)` → the per-week daily round-trips
+  for the sim (cost baked into the prices, like `simulate_weekly.fold_positions`).
+- constants: `COMPLIANCE_TOKEN=BNB`, `BUY_HOUR=1`, `SELL_HOUR=23`, `DEFAULT_FRAC=0.03`.
+
+**Live runner overlay (`event_runner.py`, commit `d936101`):** `_run_compliance` runs on each hourly
+tick and records the buy/sell as `'fill'` ledger rows, so they **count toward `trades_today` / the
+daily floor**, routed through the **same `trader.risk` guardrails** (BNB added to the
+`forward_run_policy` allowlist). It is kept **OFF the `EventRungEnv` book** — the env must stay at
+exactly **$10k** for fill/obs-parity, so the 3% is a **SEPARATE SLEEVE** whose realized PnL is
+tracked separately (`compliance_pnl_usd`, in the equity ledger row). **Idempotent off the ledger by
+BAR-day** (`bar_ts`, not the wall-clock `ts` the store stamps) so a restart / re-tick never
+double-trades (holds under simulated-time replay AND live). BNB price comes from the **BNB anchor
+parquet** (`data/anchor/BNB_USDT/1h.parquet`, the source the harness already keeps fresh). Sized by
+`compliance_frac` (`0` disables it). `TickResult` gained `compliance_trades`. Tested (14 runner
+tests, 6 compliance-specific: schedule, the floor-satisfying round-trip + 3% sizing + allowlisted, same-day idempotency,
+sleeve PnL, `frac=0` disable, BNB in the policy).
+
+**`simulate_weekly.py` (commit `b43d0e2`):** replays the **same** overlay into each simulated week so
+the dashboard shows the floor-satisfying trades the live runner makes. It appends a **FLAGGED asset**
+(`compliance:true`) carrying BNB candles (from the BNB anchor) + the daily round-trip positions.
+Still a **SEPARATE SLEEVE**: it is **NOT** added to `recon_pnl` / `eq` / the `weekly_score` — the env
+stays $10k for parity, so the **leaderboard rank is UNCHANGED** (no silent re-grade). Each week now
+carries a `compliance_pnl` field. Skips cleanly (with a WARNING) if no BNB anchor; the per-week recon
+check is unaffected.
+
+**New bundle / dashboard schema fields:** `assets[].compliance` (bool — true ONLY on the BNB
+compliance asset) and `weeks[].compliance_pnl` (float — the sleeve's realized PnL for that week,
+separate from `weeks[].return` / `weeks[].dd`, which stay the strategy env book). The compliance
+asset uses the same candles/positions shape as a strategy asset (so the page derives its trades), but
+its PnL is the separate sleeve, not in the week return / DD / `weekly_score`.
+
+**CAVEAT — directional drag (do not omit):** the 01:00→23:00 hold is a **22-hour daily long-BNB
+exposure**, so it is **DIRECTIONAL** — it **drags in a down/bear week** (a sample week realized
+−$74 = −0.74% of the $10k book) and **gains in an up week**. Given the bearish live-week thesis
+([[Market Conditions]] §live-week-read) it will tend to drag. It is the price of Rule-1; tunable via
+`BUY_HOUR` / `SELL_HOUR` / `DEFAULT_FRAC` in `compliance.py` (a shorter hold = less directional risk).
+
+**Status (precise):** this is **PAPER/sim logic**, committed + pushed (`d936101` + `b43d0e2` on
+`feat/live-event-harness`). **LIVE execution of these trades on June 22 still needs the TWAK signing
+path** (separate, not built — this fixed BNB↔USDT swap is the ideal first live trade). Live-window
+start assumed 2026-06-22 00:00 UTC (an assumption to verify vs the rules). The **end-to-end dashboard
+render** of the compliance asset is **NOT yet verified** on the desktop (pending a `simulate_weekly`
+re-run after the sbq sweep).
 
 ## What's NOT built yet
 - **Live TWAK signing path** for the event harness (paper-only today; live mode refuses). Separate

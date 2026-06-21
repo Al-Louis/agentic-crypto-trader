@@ -182,6 +182,64 @@ schema):** position prices are cost-baked and SNAPPED to the env's exact per-tok
 revealed the agent's continuous-eval results don't survive weekly sessions — see [[Experiment Log]]
 §2026-06-14 and [[AI Training]] §the-fork.
 
+### INVARIANT (2026-06-19) — no empty-candle assets in a published `simulated_trades.json`
+
+**A published asset MUST carry non-empty `candles`.** The frontend's `computeBacktest`
+(`../alexlouis-site/src/apentic`, `backtest.ts` line 261) does `const t0 = candles[0].t` with no
+guard, so an asset with `candles: []` is `undefined.t` → the whole Simulations page crashes (the
+`SimulationsClient` defaults to the NEWEST model, so a single bad bundle takes the page down).
+
+How the empty-candle assets got there: a **fixed / forced universe** (the closed fixed-13 branch,
+`universe_mode="fixed"`) can place a token into the basket in a week BEFORE that token had OHLCV
+(e.g. ASTER/HUMA/SIREN/ZEC in early weeks were not-yet-listed) → `candles` came back `[]`. The
+causal vol-top-k selector never picks a dataless token, so this only surfaced with a forced universe.
+
+**Producer guard (fix 1):** `scripts/simulate_weekly.py` now **skips any asset with empty candles** —
+a dataless token has no trades and 0 PnL, so dropping it leaves the per-week recon balanced (still
+$0). This is the authoritative fix going forward.
+
+**De-list mechanism (fix 2) — `scripts/delist_sim_model.py`:** to pull a bad/old run off the page,
+rewrite the top-level `simulated_models.json` **without** that run-id and invalidate CloudFront.
+Note the no-delete posture (see [[Remote Capabilities]] / [[Apentic Data Contract]]'s `trading/`
+section): the S3 publisher can **PUT but not byte-delete**, so this is a **de-list** — the run's
+`<run-id>/simulated_trades.json` bytes remain in the bucket, just unreferenced by the index.
+
+Incident: the `eff-s1` (fixed-13) bundle shipped with 11 empty-candle assets and crashed the page;
+it was de-listed, then re-published clean (0 empty-candle assets) after the producer guard. See
+[[Experiment Log]] §2026-06-19.
+
+### 2026-06-19 — compliance overlay schema fields (`assets[].compliance`, `weeks[].compliance_pnl`)
+
+The `simulate_weekly.py` bundle gains two fields so the dashboard can show the **≥1-trade/day
+compliance overlay** (the forced daily BNB↔USDT rebalance that satisfies Rule-1 — a deploy
+guardrail, not a strategy signal; see [[Live Forward-Run Harness]] and [[AI Training]]). Both are
+**additive** and leave the existing weekly-simulation shape above unchanged.
+
+```jsonc
+"assets": [ { …, "compliance": true } ],   // bool — true ONLY on the BNB compliance asset
+"weeks":  [ { …, "compliance_pnl": -74.0 } ]   // float — the sleeve's realized PnL for the week
+```
+
+- **`assets[].compliance`** (bool) is `true` **only** on the single BNB compliance asset appended
+  to each week; it is absent/false on every strategy (vol-top-8) asset.
+- The compliance asset carries the **same `candles` + `positions` shape as a strategy asset** —
+  BNB hourly OHLCV (from the BNB anchor parquet) plus the daily 01:00-UTC-buy → 23:00-UTC-sell
+  round-trips (cost baked into the prices, the `simulate_weekly.fold_positions` convention). So the
+  page **derives its trades itself** the same way it does for any asset, and — because it always
+  has non-empty candles — it never trips the empty-candle crash (the INVARIANT above holds).
+- **Its PnL is a SEPARATE SLEEVE, not in the env book.** The compliance asset is **NOT** added to
+  `recon_pnl` / `eq` / `weeks[].return` / `weeks[].dd` / the `weekly_score`. The strategy env stays
+  at exactly **$10k for fill/obs-parity**, so the leaderboard rank is **unchanged** (no silent
+  re-grade). The sleeve's realized PnL is reported separately as **`weeks[].compliance_pnl`**.
+- **`weeks[].compliance_pnl`** (float) is the compliance sleeve's realized PnL for that week,
+  distinct from `weeks[].return`/`weeks[].dd` (which remain the strategy book). It is **directional
+  drag/gain** — a 22-hour daily long-BNB exposure (a sample week realized **−$74 = −0.74%** of the
+  $10k book), so it tends to drag in a bear week. Producer: `scripts/simulate_weekly.py` (commit
+  `b43d0e2`); the live counterpart records the same round-trips as `fill` rows + a separate
+  `compliance_pnl_usd` in the equity ledger row (`trader.agent.event_runner`, commit `d936101`).
+- **Not yet verified end-to-end on the desktop** — the dashboard render of the compliance asset is
+  pending a `simulate_weekly` re-run after the sbq sweep.
+
 ## Producer side (this repo)
 - Single-asset: `trader.report.export_run` (+ `roundtrips_from_position`).
 - Portfolio: `trader.report.export_portfolio_run`; `scripts/train_rl.py` records per-step

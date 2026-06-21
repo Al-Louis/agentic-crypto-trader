@@ -46,8 +46,10 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     # --- substrate / curriculum / architecture (the rd-era flags, 2026-06-10/11) ---
     "action_mode": ("--action-mode", str),          # continuous | discrete
     "n_action_levels": ("--n-action-levels", int),
-    "universe_mode": ("--universe-mode", str),      # voltopk | broad | lowvol
+    "universe_mode": ("--universe-mode", str),      # voltopk | broad | lowvol | fixed
+    "fixed_universe": ("--fixed-universe", str),    # comma-set for universe_mode=fixed (no causal re-pick)
     "k": ("--k", int),
+    "vol_mult": ("--vol-mult", float),              # ignition surge threshold (ef2 trained 2.0; default 2.5)
     "vol_target": ("--vol-target", float),          # risk-parity per-token caps
     "cap_floor": ("--cap-floor", float),
     "harvest_obs": ("--harvest-obs", bool),         # r24/r3d/r7d momentum slots
@@ -73,6 +75,14 @@ REWARD_KEYS: dict[str, tuple[str, type]] = {
     "intrabar_floor": ("--intrabar-floor", bool),   # the floor as a RESTING STOP (intra-bar fill)
     "wick_reject": ("--wick-reject", float),        # extreme-rejection wick guard on ignitions
     "scale_in": ("--scale-in", bool),               # ADD to a held winner on a fresh ignition (fenced)
+    "shallow_break_max": ("--shallow-break-max", float),  # suppress a SHALLOW EMA-break (cushion>-x) ...
+    "consol_vol_max": ("--consol-vol-max", float),        # ... in a QUIET token (24h vol<y): sideways noise
+    "rotate_pump_block": ("--rotate-pump-block", float),  # anti-chase: don't sell a holding to fund an ...
+    "rotate_pump_win": ("--rotate-pump-win", int),        # ... entry into a token that ran up > x over y bars
+    "candle_exit": ("--candle-exit", bool),               # exit a held in-profit pos on a bearish candle ...
+    "candle_uw_min": ("--candle-uw-min", float),          # ... inverted hammer (upper-wick frac) ...
+    "candle_lw_max": ("--candle-lw-max", float),          # ... (lower-wick frac) ...
+    "candle_doji_max": ("--candle-doji-max", float),      # ... or doji (body frac, open~=close)
     "cycle_obs": ("--cycle-obs", bool),             # SPENT-MOVE obs (ret/bars since prior ignition)
     "n_epochs": ("--n-epochs", int),                # PPO update conservatism (semi-MDP: few decisions)
     "target_kl": ("--target-kl", float),            # PPO early-stop KL per update

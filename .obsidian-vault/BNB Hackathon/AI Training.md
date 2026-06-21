@@ -47,6 +47,194 @@ question: [[Remote Capabilities]].
 > detour the "beat B&H" gate drove us into; see §"DRIFT POST-MORTEM". The horizon + universe curricula
 > stay parked (both refuted, flags default-OFF). Full record: [[Experiment Log]] §2026-06-16.
 
+## 2026-06-18 — Regime-conditional entry_forward baseline (design)
+
+**Status: BUILD-READY SPEC, not launched.** Design + cheap preflight/probe plan only. No desktop
+training in this session. Owner `rl-ml-trainer`.
+
+### The bar (restate — this is what we're held to)
+RL trading agent for the BNB hackathon, **scored on live PnL over one held-out week (June 22–28),
+hard 30% max-drawdown DQ gate, ≥1 trade/day**. The deploy week is **forecast flat/bear**. The honest
+gate (`src/trader/train/weekly_eval.py`) over **val+test COLD weeks** (fresh $10k Mon-00:00, universe
+re-picked causally): (1) worst single-week maxDD < 30%, (2) **beats the rung-0 RULE** on the paired
+edge (bootstrap CI lower bound > 0). Judge on the **seed mean**; always read the **worst seed's DD**.
+B&H + Random are reported, never binding. Substrate ceiling today = `wkw` (rdLe4 + wick_reject 0.25),
++5.1pts vs rung-0; deploy pick = `ef-s2`.
+
+### Why this lever (the motivating finding — [[Experiment Log]] §2026-06-18)
+The `_ignite` trigger is **regime-conditional**: on the bear/chop-heavy TRAIN era, ignitions are
+**negative-EV on 19/20 tokens** (dead-cat bounces); the positive payoffs live only in the val/test
+bull windows. Per-regime cold-week split (`scripts/probe_regime_split.py`): the real OOS axis is
+**flat/chop 64% · bull 29% · bear 7%**; **CASH (0%) beats deployment in 71% of weeks** — in flat/chop
+the rule bleeds −3.9% (DQ once at 35.5%), B&H −1.8%, cash 0%. Deployment only wins in the rare bull.
+The highest-value regime job is **"recognize chop → sit in cash"** (USDT = the env's existing flat
+state), NOT harvest-the-bull (rare, held-out, deploy-misaligned). The agent already SEES the regime
+(`breadth` obs) — so this is **NOT an obs gap, it is a REWARD gap.**
+
+### The exact defect in the current reward
+`entry_forward` (env `event_reward.py:entry_forward_reward`, matured by `_mature_entries`) credits
+`dev·(fwd − mu_base) − γ·dev²`, where `mu_base = _ignition_base_rate()` is a **single panel-wide
+scalar** = mean forward-`fwd_horizon` return over **ALL** ignitions in the panel (regime-blind). The
+chop-ignitions are the 64% majority and lose to cost, but because the null is one global number, a
+chop-ignition's `fwd − mu_base ≈ 0` → it scores "near average / size me at the rule" instead of
+"skip me." The reward never tells the policy that a chop-regime ignition is a SKIP. A
+**regime-conditional baseline** — demean each ignition against the typical ignition **in the same
+regime** — lifts chop-ignitions' demeaned outcome NEGATIVE (so `dev*<0` → skip → stay in cash) while
+preserving the size-up signal where bull-regime ignitions beat their own bucket's mean.
+
+### Mechanism (single-variable, byte-identical when OFF)
+New flag `regime_base: int = 0` (default 0 = OFF = today's behavior exactly, scalar `_mu_base`).
+When `regime_base = R > 0` (R = number of breadth buckets, e.g. 3), `_mu_base` becomes a **lookup**
+`mu_base_by_regime[r]`, and each ignition is demeaned against the bucket its own (causal) breadth
+falls into. The interior optimum `dev* = (fwd − mu_base[r]) / 2γ` then becomes regime-correct:
+negative in chop (→ skip → cash), positive in bull (→ size up).
+
+**1. Regime label at an ignition bar (CAUSAL — past data only).** Use **`breadth`** = fraction of
+the *episode universe* above its EMA at the ignition bar, the obs slot the env already computes:
+`breadth = mean(self._cush[bar, self._uni_ix] > 0)`. `_cush = px/ema − 1` uses only `ewm(adjust=False)`
+of past closes — strictly causal, no future bar. Bucket by **fixed breadth thresholds** (not
+per-episode quantiles, which would leak the episode's distribution): default 3 buckets
+`chop/mid/bull` at breadth `< 0.33 / 0.33–0.66 / ≥ 0.66` (chop = few names above EMA = the bleed
+regime). Thresholds are constants, identical train/val/test/deploy → no leakage, no per-episode
+fitting. (Rationale for breadth over BTC-trend: the universe is selected for LOW BTC correlation —
+`no_btc_obs` already neutralizes the BTC slot; breadth is the alts' own regime, the documented signal
+that "earns its keep.")
+
+**2. The per-bucket baseline statistic.** A **fixed panel lookup**, same "panel-statistic null" role
+as today's scalar `_mu_base` (NOT episode-causal — it's a constant of the panel, computed once in
+`__init__`, mirrored verbatim in the preflight). New private method `_ignition_base_rate_by_regime()`:
+for every panel ignition `(bar, j)` with `_px[bar,j] > 0` and `bar + H < n_bars`, compute its
+**universe-EW breadth label at `bar`** over the SAME causal panel-wide breadth proxy used in the
+preflight (see leakage note), bucket it, and accumulate its forward return `fwd = _px[bar+H,j]/_px[bar,j] − 1`
+into that bucket. Return `mu[r] = mean(bucket r)`; **empty/thin buckets (n < `regime_base_floor`,
+default 200 ignitions) FALL BACK to the global scalar** `_ignition_base_rate()` so a sparse bucket
+can never produce a degenerate (one-sample) null. Store `self._mu_base_vec` (length R) alongside the
+scalar `self._mu_base` (kept for the fallback + OFF path).
+
+> **Subtlety to resolve in code:** `_ignition_base_rate()` ranges over the **whole panel** (all
+> tokens, not the episode's k), but `breadth` in `_obs` is over the **episode `_uni_ix`** (the k
+> picked tokens). For the *panel statistic* there is no episode yet. Spec the panel-breadth proxy as
+> **the fraction of ALL panel tokens above their EMA at `bar`** (`mean(_cush[bar, :] > 0)`), a single
+> causal panel array `self._breadth_panel = (self._cush > 0).mean(axis=1)`. At *maturation time* in
+> `_mature_entries`, label the entry by **the same panel-breadth proxy at the ENTRY bar `eb`**
+> (`self._breadth_panel[eb]`), NOT the episode breadth — so the bucket used to credit an entry is the
+> SAME function the panel statistic was built from (objective == null, the exp3 lesson). The episode
+> `breadth` obs is what the POLICY sees; the panel-breadth proxy is what the REWARD nulls against.
+> They need only be consistent within the reward, which this makes them.
+
+**3. `_mature_entries` selection.** Change the credit line from
+`entry_forward_reward(dev, fwd, self._mu_base, ...)` to look up the entry's bucket:
+`r = self._regime_bucket(self._breadth_panel[eb]); mu = self._mu_base_vec[r]` then
+`entry_forward_reward(dev, fwd, mu, self.res_gamma)`. `eb` is already stored in `_pending_entries`.
+When `regime_base == 0`, `_mu_base_vec` is unset and the line uses `self._mu_base` (identical bytes
+to today).
+
+### Leakage audit (state it explicitly)
+- **The regime LABEL at bar `b` is causal**: `_breadth_panel[b] = mean(_cush[b,:] > 0)`, and `_cush`
+  is `px/ema − 1` with `ema = px.ewm(span, adjust=False)` — an exponential mean of closes **at or
+  before b**. No `b+1` term enters the label. Thresholds are fixed constants. So no future bar can
+  flip a bucket.
+- **The per-bucket baseline is a fixed PANEL statistic**, exactly the same epistemic status as
+  today's `_mu_base` (which already ranges over `bar + H` forward returns of every panel ignition).
+  It is a constant of the dataset, not episode-conditional; the env has always demeaned against a
+  panel-forward statistic and the preflight mirrors it. We are not adding lookahead — we are slicing
+  the SAME panel statistic by a causal label.
+- **Distinct from `week_regime` (`weekly_eval.py:114`)** which is open→close (forward) and therefore
+  NON-causal — that one is descriptive/grading-only and must NOT be used for the in-env label. The
+  in-env label is breadth-at-bar, past-only.
+
+### Preflight mirror (REQUIRED — or the in-env gate is meaningless)
+`scripts/preflight_selector.py` builds its scoring world from the SAME env (`EventRungEnv` with
+`reward_mode="entry_forward"`). Because the baseline now lives entirely inside the env
+(`_ignition_base_rate_by_regime` + `_mature_entries` lookup), the preflight inherits it for free **as
+long as it constructs the env with the same `regime_base`/`regime_base_floor` kwargs**. Touch-points:
+- Add `--regime-base` / `--regime-base-floor` args to `preflight_selector.py`, thread into the `kw`
+  dict (line ~41). The scripted agents already run THROUGH the env, so the reward they sum is the
+  regime-conditional one automatically — no separate statistic to recompute. This is the whole point
+  of the "one definition" design (`event_reward.py` docstring): keep the baseline inside the env and
+  the preflight cannot drift from training.
+- **Do NOT** recompute `mu` in the preflight's `predict()`/lstsq block — that block fits a *selector*
+  (cush/surge/btcT → fwd), orthogonal to the baseline; leave it untouched.
+
+### Probe-before-build gate (CHEAP, panel-only, no sweep) — `scripts/probe_regime_base.py`
+The reward-bound finding is `corr(deviation, fwd-return) ≈ 0` overall, and specifically the chop
+bucket is where over-sizing is mis-rewarded. The probe must show the regime-conditional baseline
+**makes the chop bucket's demeaned signal correctly negative** while keeping bull positive — i.e. it
+fixes the discriminator the global baseline smears. Panel-only (no PPO, runs on the laptop):
+1. Build the env on `train_r` with `reward_mode="entry_forward"`, `ungate=True` (as the preflight),
+   `regime_base=3`. Pull `_breadth_panel`, the ignition set, each ignition's `fwd = _px[b+H,j]/_px[b,j]−1`,
+   and its bucket.
+2. Report, per bucket: `n`, `mean(fwd)` (= the bucket baseline), and **`mean(fwd) − global_mu_base`**
+   (how far the bucket sits from today's single null).
+3. **The discriminator test.** Under the GLOBAL null, the "demeaned outcome" of a typical chop
+   ignition is `mean(fwd_chop) − global_mu`. Under the REGIME null it is `0` by construction — but
+   the relevant quantity is the **sign the reward assigns to sizing a chop ignition at the rule**:
+   with global null a chop ignition that returns `mean(fwd_chop)` scores `dev·(mean(fwd_chop) − global_mu)`
+   — and because `mean(fwd_chop) − global_mu` is NEAR ZERO (the smear), the reward gives chop sizing
+   no clear skip pressure. Compute and PASS if:
+   - **(a) Separation**: `mean(fwd_chop) < mean(fwd_bull)` with a non-trivial gap
+     **`mean(fwd_bull) − mean(fwd_chop) ≥ 0.01`** (1pt of forward-H return), AND
+   - **(b) Chop is a skip under the regime null relative to global**: `mean(fwd_chop) − global_mu < −0.003`
+     (the chop bucket sits clearly BELOW the global null, so regime-demeaning pushes chop dev
+     negative where global-demeaning left it ~0), AND
+   - **(c) Bucket health**: every bucket used (not falling back) has `n ≥ regime_base_floor`.
+   If (a)–(c) hold, the regime baseline measurably sharpens the chop=skip / bull=size signal the
+   global null blurs → BUILD the sweep. **If the chop bucket's `mean(fwd)` is NOT meaningfully below
+   global (gap < 0.003), the finding does not translate into a reward fix and we DO NOT sweep** —
+   the bleed is then a selection/exit problem, not a baseline problem, and this lever is refuted
+   cheaply. (Stretch, if quick: re-run with the OOS selector and confirm `corr(predicted_dev, fwd)`
+   computed WITHIN the chop bucket is ≥ 0 under the regime null vs ≈0 under global — the direct
+   "discriminator improves" read; gate on the panel separation above if the in-env corr is noisy at
+   chop's n.)
+
+### Sweep config + pre-registered kill criterion (only if the probe PASSes)
+- **Single variable**: `regime_base=3` ON, everything else = the named control. **Control = `ef`**
+  (the `entry_forward` config, `regime_base=0`) — the cleanest 1-var comparison (same reward family,
+  same `res_gamma`, only the baseline changes). Run the SAME seed set as `ef` (≥4 seeds; single-seed
+  RL is noise). Pattern: `scripts/run_reward_sweep.sh` style, one config, sequenced seeds.
+- **Success** = seed-MEAN beats `ef`'s cold-weekly edge vs the rung-0 rule (bootstrap CI lower bound
+  > the control's), **measured with the chop/flat + bear weeks weighted as they'll appear live** (do
+  NOT let a bull-week outlier crown it — read the per-regime breakdown), at a **worst-seed maxDD
+  survivably under 30%** (target ≤ the control's worst-seed DD; the whole thesis is *less* bleed, so
+  DD should improve or hold, never worsen).
+- **KILL** (pre-registered, any one triggers): (i) seed-mean cold-weekly edge vs rung-0 ≤ `ef`'s
+  (bootstrap CI lower bound not strictly above the control) → no improvement, refute; (ii) worst-seed
+  maxDD > `ef`'s worst-seed DD by ≥ 2pts → it traded MORE risk, not less, opposite the thesis;
+  (iii) the chop/flat-week mean return does NOT improve vs `ef` (the bleed regime is the target — if
+  flat weeks don't get better, the lever missed its own thesis even if bull weeks flatter the mean).
+  On any kill: park the flag default-OFF, log to [[Experiment Log]], move on. Do NOT re-tune buckets
+  to rescue a bull number (see eval caveat).
+
+### Eval caveat (do NOT design past it)
+Train is bear/chop-heavy; val/test catch the bull; **deploy is flat/bear**. The win condition is
+**"stop the chop bleed / sit in cash,"** measured on the flat+bear regimes the live week will
+actually be — NOT harvesting the held-out bull. **Over-fit risk to watch:** because val/test contain
+the only bull weeks, the seed-mean can be inflated by bull performance while flat/bear (what we
+deploy into) is unchanged or worse. Mitigation baked into the kill criterion (iii): the flat-week
+mean must improve, independently of the bull. If a candidate's edge comes ENTIRELY from bull weeks,
+treat it as a fail for our purpose even if the overall mean rises.
+
+### Desktop handoff (clean, when/if the probe passes)
+1. Implement `regime_base` + `regime_base_floor` + `_breadth_panel` + `_ignition_base_rate_by_regime`
+   + `_regime_bucket` + the `_mature_entries` lookup in `event_env.py`; default-OFF, **byte-identical
+   when off** (add a test asserting `regime_base=0` reward stream == pre-change). Mirror the kwargs in
+   `preflight_selector.py`. Land + push; record the sha.
+2. Run `scripts/probe_regime_base.py` on the laptop (panel-only) → PASS/FAIL per the thresholds above.
+   Only on PASS proceed.
+3. On the desktop, follow the [[Remote Capabilities]] runbook EXACTLY (PowerShell-ssh, tiny output,
+   launch-once-wait-60–90s, `mkdir -p runs-rl`, sync+preflight to the pushed sha). Sweep `ef` vs
+   `ef+regime_base=3`, same seeds, **sequenced never parallel**. Aggregate via `compare_seeds.py`.
+4. Apply the kill criterion on the seed-mean + per-regime breakdown + worst-seed DD. Do NOT spend the
+   **frozen TEST** unless the val gate + DD pass; test is the human's one-shot OOS certification.
+
+### Code touch-points (summary)
+- `src/trader/train/event_env.py`: `__init__` (new kwargs + `_breadth_panel` + `_mu_base_vec`),
+  `_ignition_base_rate_by_regime()`, `_regime_bucket()`, `_mature_entries()` (bucket lookup).
+- `scripts/preflight_selector.py`: thread `--regime-base`/`--regime-base-floor` into `kw`.
+- `src/trader/train/event_reward.py`: **UNCHANGED** (the baseline is an env input, not a new reward
+  shape — keep the one definition).
+- New: `scripts/probe_regime_base.py` (the cheap gate).
+
 ## Where RL sits
 
 The decision core is a **pure module behind a clean interface** ([[Trading Strategies]]). A
@@ -596,6 +784,32 @@ decision-core interface lets us decide this late.
   RAM (this workload is env-stepping-bound; torch CPU-only). Parallelize via vectorized envs
   (`n_envs ≈ physical cores`), not GPU → [[Remote Capabilities]].
 
+## Participation/lateness lever closure (2026-06-17, rl-ml-trainer)
+
+The "~89% non-participation" is mostly the ENV NOT PROMPTING, not the agent refusing: cooldown(48)
++ reclaim + held-skip cut prompts ~960→~39/episode. On the ~39 it sees, the agent acts on a high
+fraction (rule_default idx0 = execute-rule, warm-started by `rule_prior 2.0`). So loosening prompts
+funds the UNFUNDED stream — which P-CAPACITY showed is −EV and pure beta.
+
+Levers, all closed bar one:
+- **cooldown / reclaim / entry_frac** — P-CAPACITY swept {48,24,12,0}/{on,off}/{0.20,0.125,0.10} on
+  the real cold-weekly DQ object → NULL (rotation-rejected=0; loosening funds worse ignitions; sizing
+  down = pure beta give-up; rung-0 itself breaches 35.5% DQ uncapped). REFUTED.
+- **scale_in** — REFUTED (wsi val −2.75%, −2.17pts vs rung-0, DD 12.2%). Do not re-propose.
+- **ungate** — the exp5 drift; funds the full −EV stream. REFUTED.
+- **rule_prior toward more action** — rdLp1 (prior 2.0→1.0) collapsed val +13.6→+1.8 (prior is
+  load-bearing; DRIFT ALARM). Raising it pushes blanket rule-execution → the buy-everything basin
+  ([[benchmark-driven-drift]]). REFUTED both directions.
+- **exit_commit 48→? ** — the ONE untested single-variable lever. Held fixed at 12 across all 10
+  rule_default configs. It is a LATENESS-ON-RE-ENTRY knob (trimmed positions lock capital + go
+  off-prompt for N bars), NOT a participation-count knob → alpha (timing on the existing selective
+  book), not beta (no new concurrent −EV positions). Recommended next: `exit_commit 12→4` vs wkw.
+
+DRIFT FLAG (per contract): wkw val +4.53% still LOSES Buy&Hold (+17.07%) by ~12.5pts. wkw beats
+rung-0/Random and is DQ-protective (7.84% worst-week, fixes rung-0's own 35.5% breach), which is the
+agreed config-selection gate — but no participation lever recovers the B&H gap; that gap is the
+substrate ceiling, not a knob.
+
 ## As-built (2026-06-12) — the autonomous loop arc + the knowledge-expansion era
 
 **The loop ran the lab.** Six autonomous iterations in ~24h (driver: [[MCP Server]] 4B/4C):
@@ -933,3 +1147,134 @@ the piece these opportunity-set probes don't cover.
 
 Findings from the session's probes (run-up profile, "entries fine / exit is the alpha", the refuted levers):
 [[Experiment Log]] §"PROBE SESSION".
+
+## 2026-06-19 — rung-0 demoted to a reference floor; the substrate-error lesson; the EMA-break leak + sideways suppression (the new open lever)
+
+The session that reset the gate's DIRECTION and located a real exit leak by probing the **policy**, not
+the rule. Restate the bar first: an RL trading agent scored on live PnL over one held-out week (June
+22–28), HARD ~30% max-drawdown DQ gate, ≥1 trade/day; the deploy week is forecast flat/bear. The honest
+grader is the **cold-weekly** sim (fresh $10k Mon-00:00, causal vol-top-k re-picked each Monday, no
+cross-week holds) over val+test weeks.
+
+### The gate's DIRECTION RESET — rung-0 demoted to a reference floor (commit `8009973`)
+
+The same demotion Buy&Hold got 2026-06-15 (see §DRIFT POST-MORTEM) now applies to **rung-0**: it is
+demoted from the BINDING gate to a **REFERENCE floor**. The corrected gate: a config earns a version iff
+it (1) **survives the DQ gate** (worst single-week maxDD < ~30%, still HARD) AND (2) **improves on the
+PREVIOUS best iteration (the champion)** on the honest cold-weekly metric. rung-0, Buy&Hold and Random
+are all computed and reported references — **none binding.** The loop north-star becomes
+**margin-vs-prior-champion**; the drift alarm fires on **no-improvement-over-champion**. Deploy on the
+best single seed; select configs on the seed-mean (see [[seed-mean-is-iteration-not-deployment]]).
+
+This is already written into the [[Agent Communication Contract]]. **CODE TODO (not yet shipped):**
+`weekly_gate` / `honest_gate` / `loop_control.decide` / `rl_north_star` still enforce `beats_rung0` —
+the code still binds on the rule and must be migrated to the margin-vs-champion gate.
+
+### The substrate-error lesson — probe the POLICY, not the rule, for any exit / profit-taking question
+
+A methodological flaw corrected (the user was right). Earlier EMA-break probes all ran on the **rung-0
+RULE**, whose only exits are sell-on-weakness (trailing stop / EMA-cross), so it structurally gives back
+pumps — a rule-substrate probe can never reveal how a POLICY (which has the `tp_rungs` profit-take ladder
++ learned hold/override) actually behaves. `scripts/probe_policy_exits.py` on `ef2-s0` over OOS weeks:
+exits are **74% EMA_BREAK / 15% PROFIT_TAKE / 7% ROTATION_OUT / ~5% stops.** LESSON: **probe the
+deployable substrate (the policy), not the rule, for any exit / profit-taking question.**
+
+### How the policy actually captures pumps — it HOLDS clean rips to the close
+
+The P&L engine is **not** profit-taking — it is the few pumps the policy **HOLDS** to the week close. In
+the `probe_policy_exits` decomposition: **4 held-to-end positions made $6235** (best TAG $5432) vs **66
+exited trades making $4782 combined.** TAG (+170% rip) was captured by HOLDING (no exit fired,
+force-closed near the high), not by profit-taking. The policy's OWN EMA-break sells **give back +3.5%
+mean fwd-48h** (55% recover) — i.e. the EMA-break exiting small dips in sideways is a real leak, while
+the upside comes from holding clean rips through to the close plus the 15% of exits that profit-take.
+
+### The EMA-break leak — sideways shake-out before the pump (the FF case)
+
+The exit uses a 72-bar EMA (~3 days hourly), confirmed identical in rung0 and event_env; the EMA-break
+is the weakness-exit (sell when price < ema). It **fires on shallow noise-dips during tight sideways
+consolidation**, shaking the agent out before the pump. The anecdote: in the eff-s1 sim, FF was sold
+Apr 9 12:00 with reason **EMA_BREAK** on a −0.1% cushion NOISE break at the tight EMA during the
+pre-rip consolidation; the 48h cooldown then locked re-entry, and FF's real rip-ignition (Apr 10 18:00,
+surge 10 = the peak bar) was missed flat — the agent gave up the +106%/+151% rip entirely.
+
+EMA-break was conditioned FOUR ways, ALL ON THE RULE (the flawed substrate above), and all refuted:
+(1) P&L gate (the prior P-EMA-COND); (2) consolidation/low-vol suppression — the consol-and-shallow cell
+(the FF pattern) was the WORST (terminal fwd-48h −5.4%, 8% win rate; FF was the 8% anecdote, most
+consolidation breaks keep falling); (3) deep-dip INVERSE — refuted, the break-depth forward-return trend
+is MONOTONICALLY NEGATIVE (deeper = worse), and the earlier +13.9% high-vol reading was a thin
+single-dimension artifact that vanished with proper conditioning; (4) EMA-PERIOD sweep (50–240, global
+and exit-only) — no net win, a longer EMA gives no robust val gain, worse test return, and MORE DQ weeks
+(it holds losers/givebacks longer). The 2 cold weeks that breach the 30% DD gate are Mar 23 (a pure
+loser: peaked 1.04x, ended −25%) and Apr 13 (caught SIREN's +163% pump to a +23% peak, then GAVE IT ALL
+BACK and ended −14%); a longer EMA makes both worse.
+
+### THE NEW OPEN LEVER — sideways EMA-break suppression (BUILT `abf089b`, RETRAIN PENDING)
+
+The fix the policy-substrate finding demanded: when a break is **SHALLOW** (cushion > −`shallow_break_max`)
+AND the token is **QUIET** (24h realized vol < `consol_vol_max`), **do NOT fire the EMA-break.** The
+loss_floor (−20%) and the trailing stop stay fully active, so real breakdowns still cut (bounded
+downside) while the position survives the noise to catch the pump — **asymmetric** (bounded downside via
+the floor, large upside via pump capture). The user chose the "shallow + quiet" definition as the most
+surgical (a deep break or a high-vol break still cuts). Both knobs 0 ⇒ OFF, byte-identical (30 env tests
+pass). Wired through `REWARD_KEYS` (`shallow_break_max`, `consol_vol_max`) + `train_event` flags +
+provenance + the `simulate` loader, so it is sweepable via `rl_loop` and graded honestly.
+
+Mechanical check on the rule (the FF fixed-13 week): OFF sells FF twice (Apr 7 + Apr 9 EMA_BREAK, FF PnL
+−$115); ON suppresses both and holds FF through the chop. **STATUS: committed `abf089b`, NOT yet
+retrained.** Planned next experiment: retrain `ef2` + `shallow_break_max=0.02` + `consol_vol_max=0.015`
+(the FF-validated thresholds), 4 seeds, graded honest cold-weekly vs `ef2`, pending the user's
+green-light (shared desktop — [[Remote Capabilities]] runbook applies). **Open co-factor:** ROTATION_OUT
+can still swap a held-but-flat token out before its pump (a second shake-out mechanism) — the next thread
+if suppression helps but rotation caps it.
+
+### Fixed-13 universe — a CLOSED BRANCH (loses to causal vol-top-k)
+
+The proposal (drop the 7 most-BTC-correlated / lowest-vol tokens — ADA, SFP, XRP, BabyDoge, LINK, LTC,
+XAUt — to a FIXED 13-token set so high-vol spikes like FF are never selected out mid-week) was retrained
+in-distribution (`ppo-event-rdLe4-eff-2345fd6`, `universe_mode=fixed` on the 13, vol_mult 2.0, 4 seeds):
+honest cold-weekly seed-mean **+5.9%/wk** (best seed s1 +7.7%, DQ-safe). vs `ef2` re-graded at the
+correct vol_mult 2.0: seed-mean **+8.5%/wk** (best seed s0 +10.0%). **ef2 BEATS fixed-13 on BOTH config
+seed-mean (8.5 vs 5.9) and best-seed (10.0 vs 7.7) → fixed-13 is a CLOSED BRANCH; causal vol-top-k stays
+the substrate.** The `universe_mode="fixed"` mechanism remains as tooling. (The +51% val vs 25%/6mo
+discrepancy that opened the session was a grader mismatch — continuous eval picks the universe ONCE at
+val open and compounds; the cold-weekly sim re-picks causally every Monday and is the deployment-honest
+grader. A `vol_mult` provenance bug — never recorded, so the sim defaulted to 2.5 while ef2 trained at
+2.0 — was found and fixed; all 4 ef2 seeds were re-published at the correct 2.0. Detail: [[Experiment Log]]
+§2026-06-19, [[Simulated Market]].)
+
+## 2026-06-19 — the ≥1-trade/day floor is a DEPLOY GUARDRAIL, now implemented (does NOT touch the honest gate)
+
+The competition's **≥1-trade/day rule (Rule-1, a hard DQ axis)** has always been treated here as a
+**deploy guardrail — a forced daily rebalance — NOT a strategy discriminator** (see the §2026-06-18
+note: "In AI Training terms, the activity floor was always meant to be a deploy guardrail ... not a
+strategy discriminator"). The event champion is **selective** (idle between ignitions), so several cold
+weeks legitimately miss the floor; that is correct policy behavior, not a training failure to chase.
+
+It is now **implemented as the BNB↔USDT compliance overlay** (a separate sleeve), so the floor is
+satisfied without re-shaping the policy or the reward:
+
+- **The overlay is OFF the honest grader.** It runs as a **separate sleeve** in both the live runner
+  (`src/trader/agent/event_runner.py`, `d936101`) and the sim replay (`scripts/simulate_weekly.py`,
+  `b43d0e2`): each UTC day BUY 3% of equity into BNB at 01:00 and SELL back to USDT at 23:00 (two
+  recorded trades/day, flat overnight). It is **NOT** added to `recon_pnl` / the week return / DD / the
+  cold-weekly `weekly_score` — the strategy env stays at exactly $10k for fill/obs-parity, so **the
+  leaderboard rank is UNCHANGED (no silent re-grade)**. The sleeve's realized PnL is tracked separately
+  (`compliance_pnl_usd` in the equity ledger row; `weeks[].compliance_pnl` in the bundle).
+- **It is a guardrail, not a signal.** Pure module `src/trader/agent/compliance.py`
+  (`COMPLIANCE_TOKEN=BNB`, `BUY_HOUR=1`, `SELL_HOUR=23`, `DEFAULT_FRAC=0.03`); routed through the same
+  trader.risk guardrails; idempotent by **bar-day** so a restart/re-tick never double-trades. It is
+  **not** part of the decision core and must never be confused with a learned entry — the selective
+  thesis (sit in cash through chop) is intact.
+- **Honest caveat (training-relevant):** the 01:00→23:00 hold is a **22-hour daily long-BNB exposure**,
+  so it is **directional** — it DRAGS in a down/bear week (a sample week realized −$74 = −0.74% of the
+  $10k book) and gains in an up week. Given the bearish live-week thesis it will tend to drag; that drag
+  is the price of Rule-1 and is tunable (BUY_HOUR / SELL_HOUR / DEFAULT_FRAC). It sits in the **separate
+  sleeve**, so it does NOT bias the policy's honest cold-weekly evaluation.
+
+**STATUS:** paper/sim logic only, committed + pushed (`d936101` + `b43d0e2` on
+`feat/live-event-harness`). LIVE on-chain execution of these trades on June 22 still needs the **TWAK
+signing path** (separate, not built — this fixed BNB↔USDT swap is the ideal first live trade). The
+end-to-end dashboard render of the compliance asset is NOT yet verified on the desktop (pending a
+`simulate_weekly` re-run after the sbq sweep). Execution detail (runner overlay, schedule, sleeve
+PnL, dashboard schema fields) lives in the Live Forward-Run Harness note + [[Simulated Market]] — this
+note owns training, not execution.

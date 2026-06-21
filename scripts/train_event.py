@@ -189,7 +189,7 @@ def evaluate_and_gate(name, eval_r, btc, liq, vol, env_kwargs, predict_fn, seed)
 
 
 def evaluate_weekly_gate(returns, btc, liq, vol, env_kwargs, make_predict, val_start, test_start,
-                         seed, k, vol_target, cap_floor):
+                         seed, k, vol_target, cap_floor, vol_mult=2.5):
     """Grade the policy the way it DEPLOYS: independent COLD weekly sessions (fresh $10k, no cross-week
     holds) over the OOS weeks (val+test), vs rung-0 + Buy&Hold graded the same way, then apply the
     random-week distribution gate ([[AI Training]] §the-fork). A fresh predictor per week = a cold LSTM
@@ -200,7 +200,8 @@ def evaluate_weekly_gate(returns, btc, liq, vol, env_kwargs, make_predict, val_s
         split = we.split_label(ws, val_start, test_start)
         if split == "train":
             continue                                           # gate on OOS weeks only (val+test)
-        base = we.grade_week_baselines(ws, win, liq, vol, k=k, vol_target=vol_target, cap_floor=cap_floor)
+        base = we.grade_week_baselines(ws, win, liq, vol, k=k, vol_target=vol_target, cap_floor=cap_floor,
+                                       vol_mult=vol_mult)
         eq, recs, *_ = evaluate_event_policy(make_predict(), win, btc, liq, vol, env_kwargs)
         # return from the $10k DEPOSIT (capital), NOT eq[0]: a basket_default policy's eq[0] is already
         # post-entry-cost, so dividing by it would manufacture a spurious edge over B&H (which measures
@@ -285,8 +286,28 @@ def main() -> None:
     p.add_argument("--action-mode", default="continuous", choices=["continuous", "discrete"],
                    help="discrete = categorical size/keep levels (no continuous-head boundary collapse)")
     p.add_argument("--n-action-levels", type=int, default=4, help="discrete: # of size/keep levels")
-    p.add_argument("--universe-mode", default="voltopk", choices=["voltopk", "broad", "lowvol"],
-                   help="curriculum volatility axis: voltopk (chaos) | broad (stratified) | lowvol (calm)")
+    p.add_argument("--universe-mode", default="voltopk", choices=["voltopk", "broad", "lowvol", "fixed"],
+                   help="universe axis: voltopk (chaos) | broad (stratified) | lowvol (calm) | fixed (a "
+                        "hand-set token list, NO causal re-pick — requires --fixed-universe)")
+    p.add_argument("--fixed-universe", default="", help="comma-separated token set for --universe-mode "
+                   "fixed (e.g. 'FF,HUMA,Q'); identical basket every episode, no causal vol re-pick")
+    p.add_argument("--shallow-break-max", type=float, default=0.0, help="suppress the EMA-break exit when "
+                   "the break is SHALLOW (cushion > -this) AND the token is QUIET (--consol-vol-max): a "
+                   "sideways noise-dip that shakes the agent out before a pump. 0 = off. loss_floor/trail stay")
+    p.add_argument("--consol-vol-max", type=float, default=0.0, help="the QUIET threshold (24h realized vol "
+                   "< this) for --shallow-break-max sideways EMA-break suppression. 0 = off")
+    p.add_argument("--rotate-pump-block", type=float, default=0.0, help="ANTI-CHASE rotation brake: skip "
+                   "loser-funded rotation when the candidate has run up > this over --rotate-pump-win bars "
+                   "(don't SELL a holding to chase an already-pumped token). 0 = off")
+    p.add_argument("--rotate-pump-win", type=int, default=24, help="lookback bars for --rotate-pump-block "
+                   "run-up (default 24h)")
+    p.add_argument("--candle-exit", action="store_true", help="EXIT a held IN-PROFIT position when the bar "
+                   "is a bearish reversal candle: an INVERTED HAMMER (upper wick >= uw-min*range, lower "
+                   "wick <= lw-max*range) or a DOJI (body <= doji-max*range). A discretionary prompt "
+                   "(agent can hold); rule-default sells. Needs OHLC frac panels. Off = byte-identical")
+    p.add_argument("--candle-uw-min", type=float, default=0.5, help="inverted-hammer min upper-wick fraction")
+    p.add_argument("--candle-lw-max", type=float, default=0.25, help="inverted-hammer max lower-wick fraction")
+    p.add_argument("--candle-doji-max", type=float, default=0.10, help="doji max body fraction (open~=close)")
     p.add_argument("--vol-target", type=float, default=0.0, help="risk-parity: >0 caps each token's "
                    "weight at vol_target/trailing_vol (clip [cap-floor, max-entry-frac]); 0 = flat cap")
     p.add_argument("--cap-floor", type=float, default=0.02, help="risk-parity: min per-token weight cap")
@@ -338,6 +359,9 @@ def main() -> None:
                    "where full history always exists behind the current bar")
     p.add_argument("--k", type=int, default=8, help="universe size (# tokens the agent trades); broaden "
                    "beyond rung-0's 8 to diversify the risk-parity drawdown (the alts are ~uncorrelated)")
+    p.add_argument("--vol-mult", type=float, default=2.5, help="ignition volume-surge threshold "
+                   "(4h-avg vol / prior-164h-avg >= this). Lower (e.g. 2.0) fires earlier + lets the "
+                   "policy LEARN the cutoff from the surge obs instead of hard-coding 2.5")
     p.add_argument("--crash-train", type=int, default=0, help="inject N synthetic alt-crashes into the "
                    "TRAINING data so the agent sees crashes and learns to de-risk into low breadth")
     p.add_argument("--crash-eval", action="store_true", help="add a held-out CRASH regime (a crash spliced "
@@ -408,14 +432,14 @@ def main() -> None:
         print(f"[crash] injected {len(placed)} training crashes at bars {placed}")
     vol = build_volume_panel(list(returns.columns), returns.index)
     ohlc_kwargs = {}
-    if args.intrabar_floor or args.wick_reject > 0:
+    if args.intrabar_floor or args.wick_reject > 0 or args.candle_exit:
         from train_rl import build_ohlc_frac_panels
         lowf, highf = build_ohlc_frac_panels(list(returns.columns), returns.index)
-        ohlc_kwargs = {"low_frac": lowf if args.intrabar_floor else None,
-                       "intrabar_floor": args.intrabar_floor,
-                       "high_frac": highf if args.wick_reject > 0 else None,
+        ohlc_kwargs = {"low_frac": lowf if (args.intrabar_floor or args.candle_exit) else None,
+                       "intrabar_floor": args.intrabar_floor,    # candle_exit needs BOTH frac panels for
+                       "high_frac": highf if (args.wick_reject > 0 or args.candle_exit) else None,  # bar shape
                        "wick_reject": args.wick_reject}
-    env_kwargs = dict(k=args.k, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
+    env_kwargs = dict(k=args.k, vol_mult=args.vol_mult, warmup=WARMUP, max_entry_frac=args.max_entry_frac, stop_k=args.stop_k,
                       cooldown=args.cooldown, dd_lambda=args.dd_lambda, dd_soft=args.dd_soft,
                       reward_mode=args.reward_mode, r4_beta=args.r4_beta, res_gamma=args.res_gamma,
                       fwd_horizon=args.fwd_horizon, ungate=args.ungate,
@@ -427,8 +451,14 @@ def main() -> None:
                       tp_rungs=[float(x) for x in args.tp_rungs.split(",") if x],
                       loss_floor=args.loss_floor, det_blacklist=args.det_blacklist,
                       scale_in=args.scale_in,
+                      shallow_break_max=args.shallow_break_max, consol_vol_max=args.consol_vol_max,
+                      rotate_pump_block=args.rotate_pump_block, rotate_pump_win=args.rotate_pump_win,
+                      candle_exit=args.candle_exit, candle_uw_min=args.candle_uw_min,
+                      candle_lw_max=args.candle_lw_max, candle_doji_max=args.candle_doji_max,
                       cycle_obs=args.cycle_obs, universe_lookback=args.universe_lookback,
-                      no_btc_obs=args.no_btc_obs, **ohlc_kwargs, seed=args.seed)
+                      no_btc_obs=args.no_btc_obs,
+                      fixed_universe=[t.strip() for t in args.fixed_universe.split(",") if t.strip()] or None,
+                      **ohlc_kwargs, seed=args.seed)
 
     write_progress(out, state="running", phase="setup", run_id=args.run_id, timesteps=0,
                    total=args.timesteps)
@@ -557,7 +587,7 @@ def main() -> None:
     if args.eval_mode == "weekly":                         # the DEPLOYMENT-structure gate (2026-06-14 fork)
         weekly_verdict, weekly_rows = evaluate_weekly_gate(
             returns, btc, liq, vol, env_kwargs, make_predict, int(val_r.index[0]), int(test_r.index[0]),
-            args.seed, args.k, args.vol_target, args.cap_floor)
+            args.seed, args.k, args.vol_target, args.cap_floor, args.vol_mult)
         print_weekly_verdict(weekly_verdict, weekly_rows)
         overall_gate = weekly_verdict["pass"]
         pr = evaluate_and_gate(args.eval_split, held[args.eval_split], btc, liq, vol, env_kwargs,
@@ -618,6 +648,8 @@ def main() -> None:
                              "res_gamma": args.res_gamma, "fwd_horizon": args.fwd_horizon,
                              "ungate": args.ungate, "action_mode": args.action_mode,
                              "n_action_levels": args.n_action_levels, "universe_mode": args.universe_mode,
+                             "vol_mult": args.vol_mult,                  # was UNRECORDED -> sims defaulted to 2.5
+                             "fixed_universe": [t.strip() for t in args.fixed_universe.split(",") if t.strip()] or None,
                              "vol_target": args.vol_target, "cap_floor": args.cap_floor, "k": args.k, "universe_lookback": args.universe_lookback,
                              "harvest_obs": args.harvest_obs, "cycle_obs": args.cycle_obs,
                              "rule_default": args.rule_default, "basket_default": args.basket_default,
@@ -626,6 +658,10 @@ def main() -> None:
                              "eval_prepad": args.eval_prepad, "loss_floor": args.loss_floor,
                              "intrabar_floor": args.intrabar_floor, "wick_reject": args.wick_reject,
                              "scale_in": args.scale_in,
+                             "shallow_break_max": args.shallow_break_max, "consol_vol_max": args.consol_vol_max,
+                             "rotate_pump_block": args.rotate_pump_block, "rotate_pump_win": args.rotate_pump_win,
+                             "candle_exit": args.candle_exit, "candle_uw_min": args.candle_uw_min,
+                             "candle_lw_max": args.candle_lw_max, "candle_doji_max": args.candle_doji_max,
                              "det_blacklist": args.det_blacklist, "recurrent": args.recurrent,
                              "lstm_size": args.lstm_size if args.recurrent else None,
                              "crash_train": args.crash_train, "crash_eval": args.crash_eval,

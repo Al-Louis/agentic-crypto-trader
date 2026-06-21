@@ -157,3 +157,59 @@ def test_week_return_dd_uses_full_eq_not_a_dropped_slice():
 def test_week_return_dd_empty_is_zeroed():
     import pandas as pd
     assert sw.week_return_dd(pd.Series([], dtype=float)) == (0.0, 0.0)
+
+
+# --- fold_positions: dust crumb / negative-exit_price regression --------------------------------
+def _mk(side, t, price, usd, fee=0.0):
+    return {"side": side, "time": t, "price": price, "usd": usd, "fee": fee}
+
+
+def test_fold_positions_drops_dust_no_corrupt_exit():
+    """Regression for the SIREN exit_price=-0.124 / -230% bug: a FIFO-unwind float crumb (qty ~1e-5)
+    must be DROPPED, not emitted and then snapped (which divided the ledger residual by the dust qty
+    and blew exit_price negative). The real round-trip survives with a sane, positive exit."""
+    buy_qty = 1000.0 / 0.10                                       # 10000.0
+    markers = [_mk("buy", 100, 0.10, 1000.0),
+               _mk("sell", 200, 0.09, 0.09 * (buy_qty - 1e-5))]  # consumes all but a ~1e-5 crumb lot
+    out = sw.fold_positions(markers, last_t=300, ledger_pnl=-50.0)
+    assert out, "the real round-trip must be emitted"
+    assert all(p["qty"] * p["entry_price"] > sw.POSITION_DUST_USD for p in out)   # dust dropped
+    assert all(p["exit_price"] > 0 for p in out)                                  # never negative
+    assert all(abs(p["exit_price"] / p["entry_price"] - 1.0) < 1.5 for p in out)  # never absurd
+    recon = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
+    assert abs(recon - (-50.0)) < 1e-6                           # snap still hits the exact ledger PnL
+
+
+def test_fold_positions_marks_held_to_end_at_week_close():
+    """A position held to session end (no closing sell) must be MARKED at the week-end price `end_px`,
+    so the forced end-of-week close shows its real held gain — not exit=entry / $0 (the TAC W24 bug).
+    The held lot is the SMALLER one here so the ledger snap lands on the realized sell, not the held lot."""
+    # qty = usd/price. buy $1000 @ 0.10 = 10000 units; sell $1080 @ 0.12 = 9000 units (the larger
+    # realized round-trip); 1000 units held to week-end (last_t). end_px 0.15.
+    markers = [_mk("buy", 100, 0.10, 1000.0), _mk("sell", 200, 0.12, 1080.0)]
+    # ledger = realized 9000*(.12-.10)=180 + held mark 1000*(.15-.10)=50 = 230
+    out = sw.fold_positions(markers, last_t=300, ledger_pnl=230.0, end_px=0.15)
+    held = next(p for p in out if int(p["exit_t"]) == 300)
+    assert held["exit_price"] == 0.15                                       # marked at week-end close
+    assert abs(held["qty"] * (held["exit_price"] - held["entry_price"]) - 50.0) < 1e-6   # +$50 real gain
+    recon = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
+    assert abs(recon - 230.0) < 1e-6                                        # total still snaps to ledger
+
+    # legacy: end_px=None marks the held lot at entry => $0 (the old behavior; snap lands on the sell)
+    out0 = sw.fold_positions(markers, last_t=300, ledger_pnl=230.0, end_px=None)
+    held0 = next(p for p in out0 if int(p["exit_t"]) == 300)
+    assert abs(held0["exit_price"] - held0["entry_price"]) < 1e-12          # entry-marked => $0 PnL
+
+
+def test_fold_positions_snaps_onto_largest_notional():
+    """The ledger snap goes onto the LARGEST-notional position (so the per-unit nudge is tiny), not
+    the last one. The small round-trip keeps its natural exit; the large one absorbs the residual."""
+    markers = [_mk("buy", 100, 0.10, 500.0), _mk("sell", 150, 0.11, 0.11 * 5000.0),     # small qty 5000
+               _mk("buy", 200, 0.10, 2000.0), _mk("sell", 250, 0.12, 0.12 * 20000.0)]   # large qty 20000
+    out = sw.fold_positions(markers, last_t=300, ledger_pnl=1234.5)
+    assert len(out) == 2
+    small = min(out, key=lambda p: p["qty"]); large = max(out, key=lambda p: p["qty"])
+    assert abs(small["exit_price"] - 0.11) < 1e-9                # small untouched (natural sell price)
+    assert large["exit_price"] > 0.12                           # large absorbed the +residual
+    recon = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
+    assert abs(recon - 1234.5) < 1e-6                           # exact ledger recon preserved

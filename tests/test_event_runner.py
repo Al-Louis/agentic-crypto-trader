@@ -202,6 +202,25 @@ def test_compliance_action_schedule():
     assert compliance_action(at(0)) is None and compliance_action(at(12)) is None
 
 
+def test_compliance_positions_pure():
+    """The simulate_weekly overlay builder: one BNB round-trip per UTC day, hours [1,23], rising
+    intraday -> profit, flat -> loss (cost only), frac=0 -> nothing."""
+    import datetime as dt
+
+    from trader.agent.compliance import DEFAULT_FRAC, compliance_positions
+    WEEK = 7 * 24 * 3600
+    ws = (1_700_000_000 // WEEK) * WEEK + 345600           # a Monday 00:00 UTC
+    rising = lambda ts: 600.0 + (int(ts) % 86400) / 86400 * 60.0   # higher later in the day
+    pos, pnl = compliance_positions(ws, ws + WEEK, rising, frac=DEFAULT_FRAC, capital=10_000.0)
+    assert len(pos) == 7 and all(p["kind"] == "compliance" for p in pos)
+    assert all(dt.datetime.fromtimestamp(p["entry_t"], dt.timezone.utc).hour == 1 for p in pos)
+    assert all(dt.datetime.fromtimestamp(p["exit_t"], dt.timezone.utc).hour == 23 for p in pos)
+    assert pnl > 0                                          # bought low (01:00), sold high (23:00)
+    _, pnl_flat = compliance_positions(ws, ws + WEEK, lambda ts: 600.0, capital=10_000.0)
+    assert pnl_flat < 0                                     # flat price -> only the AMM cost
+    assert compliance_positions(ws, ws + WEEK, lambda ts: 600.0, frac=0.0)[0] == []
+
+
 def test_compliance_round_trip_records_floor_fills(tmp_path, panels):
     """BUY 3% BNB at 01:00, SELL it back at 23:00 — two recorded fills (the >=1-trade/day floor),
     allowlisted, off the env book, sized at 3% of equity."""

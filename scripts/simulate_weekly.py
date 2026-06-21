@@ -26,6 +26,8 @@ import pickle
 import sys
 from datetime import datetime, timezone
 
+import pandas as pd  # noqa: E402 — for the BNB anchor read (compliance overlay)
+
 sys.path.insert(0, "scripts")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -41,6 +43,8 @@ HOUR = 3600
 START_CAPITAL = 10_000.0
 DD_LIMIT = -0.30
 RECON_TOL_USD = 10.0           # |sim equity - reconstructed close| above this is flagged, not hidden
+POSITION_DUST_USD = 0.01       # FIFO-unwind crumbs (qty ~1e-12) below this notional are dropped before
+#                                the ledger snap — else `residual / dust_qty` explodes the exit_price
 
 PEG = {"XAUT", "XAUt", "PAXG"}
 MAJOR = {"BTC", "ETH", "BNB", "XRP", "SOL", "LTC", "DOGE", "ADA", "TRX", "LINK", "XLM", "BCH"}
@@ -55,11 +59,15 @@ def remap_candles(cs: list[dict]) -> list[dict]:
              "c": c["close"], "v": c["volume"]} for c in cs]
 
 
-def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float) -> list[dict]:
+def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float,
+                   end_px: float | None = None) -> list[dict]:
     """FIFO round-trips from the agent's fills (cost baked into the prices) for the trade STRUCTURE,
     then SNAP the token's total PnL to the env's EXACT per-token ledger value -> the dashboard's
-    qty*(exit-entry) equals the sim's realized+open PnL by construction (no inference). Still-open or
-    markerless-closed lots are closed at last_t; the last position absorbs any residual to hit `ledger_pnl`."""
+    qty*(exit-entry) equals the sim's realized+open PnL by construction (no inference). Still-open /
+    held-to-session-end lots are closed at `last_t` and MARKED TO MARKET at `end_px` (the week-end
+    close) so a forced end-of-week sell shows its real held gain instead of $0 — the ledger snap then
+    only absorbs the small reconstruction residual (and lands on the largest-notional position, never
+    a dust crumb). `end_px=None` => legacy behavior (mark held lots at entry / 0 PnL)."""
     lots: list[list] = []          # open buys: [qty_remaining, entry_t, entry_price_eff]
     out: list[dict] = []
     for m in markers:
@@ -81,14 +89,20 @@ def fold_positions(markers: list[dict], last_t: int, ledger_pnl: float) -> list[
                 remaining -= q
                 if lot[0] <= 1e-12:
                     lots.pop(0)
-    for qty_rem, entry_t, entry_eff in lots:                  # still-open / markerless-closed lots
+    for qty_rem, entry_t, entry_eff in lots:                  # still-open / held-to-session-end lots
         if last_t > entry_t:
-            out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,
-                        "exit_price": entry_eff, "qty": qty_rem, "kind": "core"})   # provisional 0 PnL
+            exit_px = end_px if (end_px is not None and end_px > 0) else entry_eff   # MARK-TO-MARKET at
+            out.append({"entry_t": entry_t, "entry_price": entry_eff, "exit_t": last_t,  # the week-end px
+                        "exit_price": exit_px, "qty": qty_rem, "kind": "core"})    # (not entry/0 PnL)
+    # Drop sub-dust positions (float-cancellation crumbs left by the FIFO unwind, qty ~1e-12) BEFORE
+    # the ledger snap: a near-zero qty makes `(ledger_pnl - cur) / qty` explode into an absurd, often
+    # NEGATIVE, exit_price (the SIREN Feb-1 -0.124 / -230% bug). Their own PnL is ~$0 so dropping them
+    # is PnL-neutral, and the snap below still hits the exact ledger value.
+    out = [p for p in out if p["qty"] * p["entry_price"] > POSITION_DUST_USD]
     if out:                                                   # snap token total to the EXACT ledger PnL
         cur = sum(p["qty"] * (p["exit_price"] - p["entry_price"]) for p in out)
-        if out[-1]["qty"]:
-            out[-1]["exit_price"] += (ledger_pnl - cur) / out[-1]["qty"]
+        tgt = max(out, key=lambda p: p["qty"] * p["entry_price"])   # snap onto the LARGEST notional so
+        tgt["exit_price"] += (ledger_pnl - cur) / tgt["qty"]        # the per-unit nudge stays tiny
     return out
 
 
@@ -159,6 +173,9 @@ def main() -> None:
     p.add_argument("--run-id", required=True)
     p.add_argument("--no-publish", action="store_true")
     p.add_argument("--max-weeks", type=int, default=0, help="cap for a quick run (0 = all)")
+    p.add_argument("--vol-mult", type=float, default=None, help="override the ignition surge threshold "
+                   "(for runs trained pre-2026-06-19 whose provenance never recorded vol_mult, so it "
+                   "would otherwise default to 2.5 — e.g. ef2 trained at 2.0; pass --vol-mult 2.0)")
     args = p.parse_args()
     config.load_dotenv()
 
@@ -178,6 +195,29 @@ def main() -> None:
     returns, btc, _anchor, liq = load_data()
     vol = build_volume_panel(list(returns.columns), returns.index)
     env_kwargs = env_kwargs_from_provenance(prov, returns, build_ohlc_frac_panels)
+    if args.vol_mult is not None:                              # recover the trained vol_mult that an old
+        env_kwargs["vol_mult"] = args.vol_mult                 # provenance never recorded (else 2.5 default)
+        print(f"[sim-weekly] vol_mult override -> {args.vol_mult} (provenance had {prov.get('vol_mult')})")
+
+    # BNB anchor for the daily >=1-trade/day COMPLIANCE overlay (Rule-1) — replayed into the sim so the
+    # dashboard shows the same floor-satisfying trades the live runner makes. A SEPARATE sleeve: NOT in
+    # the env book / recon / weekly_score (the env stays $10k for fill-parity); its realized PnL is
+    # reported per week as `compliance_pnl`. None -> overlay skipped (sim still valid).
+    bnb_close = bnb_ohlc = None
+    try:
+        _b = pd.read_parquet(os.path.join("data", "anchor", "BNB_USDT", "1h.parquet"))
+        _b = _b.set_index("timestamp").sort_index()
+        if _b.index.max() > 1e12:                              # ms -> s (match the BTC anchor in load_data)
+            _b.index = (_b.index // 1000).astype("int64")
+        bnb_close, bnb_ohlc = _b["close"], _b
+    except Exception as e:  # noqa: BLE001 — no BNB anchor on this box -> skip the overlay, don't fail
+        print(f"[sim-weekly] WARNING: no BNB anchor for the compliance overlay ({e}); skipping it")
+
+    def _bnb_px(ts, _s=bnb_close):
+        if _s is None:
+            return None
+        prior = _s.index[_s.index <= int(ts)]
+        return float(_s.loc[prior[-1]]) if len(prior) else None
 
     # Split boundaries from the SAME train_rl.time_split the gate uses (don't hardcode timestamps).
     train_r, val_r, _test_r = time_split(returns)
@@ -218,8 +258,13 @@ def main() -> None:
         assets, recon_pnl = [], 0.0
         for r, sym in enumerate(ranked):
             cs = remap_candles(token_candles.get(sym, []))
+            if not cs:                                        # token with NO data this week (a fixed/forced
+                continue                                      # universe can include a not-yet-listed token):
+                #   no candles to chart + no trades + 0 PnL. Emitting an empty-candle asset crashes the
+                #   dashboard (computeBacktest reads candles[0].t); the recon check below still balances.
             last_t = cs[-1]["t"] if cs else d1
-            positions = fold_positions(token_trades.get(sym, []), last_t, token_pnl.get(sym, 0.0))
+            end_px = cs[-1]["c"] if cs else None          # week-end close: mark held-to-end lots to market
+            positions = fold_positions(token_trades.get(sym, []), last_t, token_pnl.get(sym, 0.0), end_px=end_px)
             recon_pnl += sum(po["qty"] * (po["exit_price"] - po["entry_price"]) for po in positions)
             assets.append({"symbol": sym, "class": classify(sym), "vol_rank": r + 1,
                            "alloc_usd": round(float(caps.get(sym, 0.0)) * START_CAPITAL, 2),
@@ -232,9 +277,29 @@ def main() -> None:
         # equity trace is seeded at reset(start=WARMUP), so do NOT drop another WARMUP (that zeroed
         # every DD). See week_return_dd.
         wk_return, dd = week_return_dd(eq)
+
+        # >=1-trade/day compliance overlay (Rule-1): the daily BNB<->USDT round-trip, appended as a
+        # FLAGGED asset WITH BNB candles (so the page never hits the empty-candle crash). NOT added to
+        # recon_pnl/eq above -> the strategy weekly_score / DD stay parity-clean; its realized PnL is
+        # reported separately as `compliance_pnl` (mirrors the live runner's separate sleeve).
+        compliance_pnl = 0.0
+        if bnb_close is not None:
+            from trader.agent.compliance import (COMPLIANCE_TOKEN, DEFAULT_FRAC,  # noqa: PLC0415
+                                                 compliance_positions)
+            cpos, compliance_pnl = compliance_positions(ws, we, _bnb_px, frac=DEFAULT_FRAC,
+                                                        capital=START_CAPITAL)
+            ccs = [{"t": int(t), "o": float(rw.open), "h": float(rw.high), "l": float(rw.low),
+                    "c": float(rw.close), "v": float(rw.volume)}
+                   for t, rw in bnb_ohlc[(bnb_ohlc.index >= ws) & (bnb_ohlc.index < we)].iterrows()]
+            if cpos and ccs:
+                assets.append({"symbol": COMPLIANCE_TOKEN, "class": "major", "compliance": True,
+                               "vol_rank": len(assets) + 1,
+                               "alloc_usd": round(DEFAULT_FRAC * START_CAPITAL, 2),
+                               "candles": ccs, "positions": cpos})
+
         weeks.append({"index": len(weeks), "label": f"W{len(weeks) + 1:02d}", "start": ws, "end": we,
                       "split": label_week_split(ws, train_end, val_end),
-                      "return": wk_return, "dd": dd,
+                      "return": wk_return, "dd": dd, "compliance_pnl": round(compliance_pnl, 2),
                       "portfolio_start": START_CAPITAL, "assets": assets})
         flag = "  <-- RECON GAP" if recon_err > RECON_TOL_USD else ""
         print(f"[wk] {datetime.fromtimestamp(ws, timezone.utc).date()} "
