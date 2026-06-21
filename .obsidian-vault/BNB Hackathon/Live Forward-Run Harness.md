@@ -340,15 +340,36 @@ caught + fixed two real criticals: the `live_policy=None` fallback to $10k caps 
 bankroll / refuses to arm unconfigured), and the `_live_scale` div-by-zero / falsy-`0.0` bugs. Suite
 **531 passed**.
 
+## 2026-06-21 — M4 exact-qty compliance unwind + the live launcher (both built)
+
+**M4 (DONE — the funding-safety blocker).** The compliance SELL now unwinds the **EXACT BNB the BUY
+acquired** (amount-in), not a USD notional that could over/under-shoot a USDT-only wallet and sell its
+gas buffer. New **amount-in execution** capability: `twak_cli.quote_amount/swap_amount` (the
+`swap <amount> <from> <to>` form) + `execute.execute_swap_amount` (a fully guardrailed amount-in swap —
+caps re-checked on the realized quote USD) + `execute_trade` now surfaces `out_amount/out_symbol` (the
+realized leg). The compliance BUY captures the realized BNB qty (`bnb_qty` persisted on the fill row →
+**restart-safe**); the SELL signs amount-in of that exact qty. **Adversarial 4-lens review** (3 sound,
+1 must_fix): caught + fixed a real live bug — a SELL with **no captured qty** (refused/failed BUY) fell
+back to a USD-sized swap that would **sell the gas buffer**; now the SELL signs ONLY via amount-in of a
+captured qty and records a `skipped: no_bought_qty` otherwise.
+
+**FUNDING REQUIREMENT (consequence of M4):** the live wallet must hold a **small BNB gas buffer beyond
+the compliance position** — every tx fee is paid in BNB, and the SELL sells the exact BNB it bought, so
+without a standing buffer the SELL has no BNB to pay its own gas. The [[EC2 Trading Host Runbook]] funds
+~$10 BNB; that is the buffer (keep it topped up). After a mid-week restart holding token positions, pass
+an explicit `--bankroll-usd` (the startup USDT read under-counts when capital is parked in tokens).
+
+**The live launcher (DONE).** `src/trader/agent/live_event_agent.py` — a **separate** entry point from
+the paper `event_agent` (which stays paper-only, so the EC2 paper service can never arm the signer).
+**Triple gate to sign:** `TRADER_MODE=live` + `AGENT_ALLOW_LIVE=1` + `AGENT_LIVE_CONFIRM=1`; `--dry-run`
+needs only the first two (routes the quote-only pre-flight, zero signing). Reads the bankroll from the
+wallet's USDT at startup (or `--bankroll-usd`), wires `execute_fn` + `execute_amount_fn` + scaling +
+`min_notional`. Suite **540 passed**.
+
 ## What's NOT built yet
-- **M4 — compliance SELL must unwind the BUY's EXACT BNB qty (HARD BLOCKER before funding live).** The
-  SELL currently sizes by USD-value-at-anchor-price, which only *approximates* the bought quantity; on a
-  dedicated **USDT-only** live wallet a BNB move 01:00→23:00 can over/under-shoot the held BNB (dust or
-  insufficient-balance failure). Fine for paper + the dev wallet (ample spare BNB). Fix = capture the
-  real BNB qty from the BUY exec result and sell amount-in. Flagged in-code at `_run_compliance`.
-- **The live launcher + EC2 flip.** `event_agent._resolve_mode` on the box still REFUSES live
-  (deliberate — the box stays paper; competition-wallet flip is Phase G/H, [[EC2 Trading Host Runbook]]).
-  A launcher that reads the bankroll, wires `execute_fn=execute_trade` + `live_forward_policy`, and drives
-  the runner in live mode is the remaining glue (plus M4).
+- **Live deployment (EC2 flip + funding).** The capability is complete; deploying it = (1) fund a wallet
+  with ~$100 USDT + a BNB gas buffer; (2) a **live dry-run** (`--dry-run`, only quote-only) to validate
+  end-to-end on real data; (3) the competition-wallet flip + registration (Phase G/H,
+  [[EC2 Trading Host Runbook]]). The box's `event_agent` stays paper — live runs via the new launcher.
 - Richer portfolio / per-trade-reasoning telemetry surface (the fills already carry the trigger +
   obs; [[Trade Reasoning Capture]] is the eventual home).
