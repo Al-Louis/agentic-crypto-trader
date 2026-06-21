@@ -282,8 +282,41 @@ Safe-now option: a serve-time **WARNING** when a *selected* token's frozen-pool 
 is below floor (pure telemetry, no behavior change, catches the ZEC case). Tools:
 `scripts/audit_pair_freshness.py`, `scripts/probe_ub_pair_timing.py`.
 
+## 2026-06-21 — live TWAK signing path wired into the harness (proven on the dev wallet)
+
+The harness's #1 "not built yet" — the live signing path — is now **built, tested, and proven on
+real funds** (the dev spike wallet, NOT the competition wallet). The hard part (`execute_trade`:
+check → quote → re-check → ledger → sign → confirm) already existed from the [[TWAK Spike Runbook]];
+this wired it into the event-driven runner.
+
+**Design — additive, gated, paper byte-identical (the EC2 service is untouched):**
+- `execution/execute.py` gained **`dry_run`**: the full two-phase guardrail check + a REAL quote,
+  then stops before the ledger attempt and the swap (writes nothing on a pass). The safe pre-flight.
+- `agent/event_runner.py` gained a gated sleeve **`_sign_live`** that routes guardrail-PASSED
+  **strategy fills AND the compliance BNB↔USDT trade** through `execute_fn` (= `execute_trade`).
+  It fires ONLY when `mode=="live"` **and** an `execute_fn` is wired. Knobs: `live_policy` (the tight
+  real-money caps, separate from the loose env-parity `self.policy`), `live_compliance_usd` (the env
+  equity is the **$10k cold-weekly book, not the real bankroll**, so `frac*equity` would oversize the
+  real swap — this overrides it), `live_dry_run`. Default `execute_fn=None` ⇒ paper unchanged
+  (`_exec_summary` adds `tx_hash`/`exec_status` only when signing happened).
+- `scripts/live_exec_smoke.py` — the local driver: DRY-RUN by default, `--execute` to sign, tight
+  test caps **$0.50/$1.50/$3**, an isolated ledger (`data/risk_ledger_localtest.jsonl`).
+- Tests +6 (3 `dry_run`, 3 live-wiring with a mock executor); **full suite 524 passed**.
+
+**Proof (dev wallet `0x2C19…D32E`):** a real BNB↔USDT round-trip, both confirmed on BSC, guardrails
+enforced (negative proof: $1.00 > $0.50 → refused at the intent phase, no network):
+- SELL BNB→USDT $0.40 — tx `0xac75ff719de08e81fcfad6f838931b372613ac1137c4db6a64094da84a83f380`
+- BUY USDT→BNB $0.40 — tx `0xf4b5dc29dd191298622a7a0daa6942a3493e213b0b8f380bca9846cb6b3d4501`
+
+The wallet returned ~flat (few-cent AMM + slippage cost); slippage held at 1.0%, impact 0%.
+
 ## What's NOT built yet
-- **Live TWAK signing path** for the event harness (paper-only today; live mode refuses). Separate
-  from the Phase-G on-chain registration ([[EC2 Trading Host Runbook]]).
+- **EC2 live flip + real strategy-fill execution.** The signing path is wired at the runner level and
+  proven locally, but: (1) `event_agent._resolve_mode` on the box still REFUSES live (deliberate — the
+  box stays paper; the competition-wallet flip is Phase G/H, [[EC2 Trading Host Runbook]]); (2)
+  **strategy-fill REAL sizing/routing is Stage 3** — env fills are `frac*$10k` (~$hundreds) and the
+  runner hardcodes `CASH_LEG="USDT"`, but most tokens are WBNB/BTCB-quoted ([[Token Universe]]
+  §pair-freshness); at a small real bankroll these *safely refuse* on the per-trade cap (fail-safe),
+  but proper live needs scale-to-real-bankroll + per-token deepest-pool routing.
 - Richer portfolio / per-trade-reasoning telemetry surface (the fills already carry the trigger +
   obs; [[Trade Reasoning Capture]] is the eventual home).
