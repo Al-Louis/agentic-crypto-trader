@@ -110,8 +110,12 @@ def execute_trade(intent: TradeIntent, policy: Policy = SPIKE_POLICY, *,
     if parsed["usd_value"] is None:
         return _unavailable("quote cannot be valued in USD (no price line, no stable leg)",
                             "quote", intent, ledger_path)
+    # The asset IDENTITY for the allowlist is the INTENT's (what we actually swap): a contract-pinned
+    # assetId can't route to a different token, and its on-chain symbol LABEL may differ from the
+    # universe symbol (e.g. BANANAS31's contract reports "BANANA"). Only the realized USD value +
+    # slippage are re-derived from the quote — those are the load-bearing two-phase truth.
     quote_intent = TradeIntent(
-        from_asset=parsed["in_symbol"], to_asset=parsed["out_symbol"],
+        from_asset=intent.from_asset, to_asset=intent.to_asset,
         usd=parsed["usd_value"], chain=intent.chain,
         slippage_pct=max(parsed["implied_slippage_pct"], parsed["price_impact_pct"]))
     verdict = check_trade(policy, quote_intent, state)
@@ -222,9 +226,10 @@ def execute_swap_amount(from_asset: str, to_asset: str, amount: float, policy: P
     if parsed["usd_value"] is None:
         return _unavailable("amount quote cannot be valued in USD (no stable leg)", "quote",
                             rec, ledger_path)
-    quote_intent = TradeIntent(
-        from_asset=parsed["in_symbol"], to_asset=parsed["out_symbol"], usd=parsed["usd_value"],
-        chain=chain, slippage_pct=max(parsed["implied_slippage_pct"], parsed["price_impact_pct"]))
+    quote_intent = TradeIntent(                              # allowlist on the assets WE swap (the
+        from_asset=from_asset, to_asset=to_asset,            # contract); realized USD + slippage are
+        usd=parsed["usd_value"], chain=chain,               # the re-checked truth (see execute_trade)
+        slippage_pct=max(parsed["implied_slippage_pct"], parsed["price_impact_pct"]))
     verdict = check_trade(policy, quote_intent, ledger.state_from_ledger(ledger_path))
     if not verdict.allowed:
         return _refusal(verdict, "quote", quote_intent, ledger_path)

@@ -115,10 +115,19 @@ def test_quote_recheck_uses_realized_usd_not_the_wish(tmp_path):
     assert "swap" not in cli.calls
 
 
-def test_quote_recheck_route_allowlist(tmp_path):
-    res, cli = run(intent(), tmp_path, cli=FakeCli(quote_out=quote_text(out_sym="CAKE")))
-    assert res["refused"] == ["NOT_ALLOWLISTED"] and res["phase"] == "quote"
-    assert "swap" not in cli.calls
+def test_realized_symbol_label_may_differ_from_intent_asset(tmp_path):
+    # A contract-pinned swap's realized symbol can differ from the universe label (BANANAS31's
+    # contract reports "BANANA"). The allowlist is checked on the INTENT's assets (USDT/BNB here),
+    # so a differing realized OUT label still signs — the realized USD/slippage remain the truth.
+    res, cli = run(intent(), tmp_path, cli=FakeCli(quote_out=quote_text(out_sym="BANANA")))
+    assert res["tx_hash"] == TX and "swap" in cli.calls
+
+
+def test_out_of_allowlist_intent_asset_refused_at_intent(tmp_path):
+    # the allowlist is still enforced — on the INTENT's assets, before any network call.
+    res, cli = run(intent(to_asset="CAKE"), tmp_path)
+    assert res["refused"] == ["NOT_ALLOWLISTED"] and res["phase"] == "intent"
+    assert cli.calls == []
 
 
 def test_quote_failure_fails_closed(tmp_path):
