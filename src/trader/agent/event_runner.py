@@ -41,9 +41,12 @@ def _exec_summary(res: dict | None) -> dict:
     BYTE-IDENTICAL to before this sleeve existed."""
     if res is None:
         return {}
-    status = ("dry_run" if res.get("dry_run") else "refused" if res.get("refused")
-              else "error" if res.get("error") else res.get("status") or "unknown")
+    status = ("dry_run" if res.get("dry_run") else "skipped" if res.get("skipped")
+              else "refused" if res.get("refused") else "error" if res.get("error")
+              else res.get("status") or "unknown")
     out = {"exec_status": status, "tx_hash": res.get("tx_hash")}
+    if res.get("skipped"):
+        out["exec_skipped"] = res["skipped"]
     if res.get("refused"):
         out["exec_refused"] = res["refused"]
     if res.get("error"):
@@ -62,6 +65,35 @@ def forward_run_policy(universe: list[str], capital: float = 10_000.0, *,
     return Policy(allowlist=allow, per_trade_usd=capital, daily_usd=capital * 10.0,
                   max_slippage_pct=max_slippage_pct, drawdown_stop_pct=dd_stop_pct,
                   lifetime_usd_ceiling=capital * 1_000.0, chain="bsc")
+
+
+def live_forward_policy(universe: list[str], bankroll_usd: float, *, cash_leg: str = CASH_LEG,
+                        dd_stop_pct: float = DD_STOP_PCT, max_slippage_pct: float = 1.0,
+                        max_entry_frac: float = 0.34) -> Policy:
+    """The REAL-money guardrail policy for live signing — caps sized to the actual bankroll (NOT the
+    $10k env book). A single scaled entry maxes at ~`max_entry_frac`*bankroll, so per-trade is set a
+    little above that; daily allows several round-trips; the lifetime ceiling is a generous backstop
+    (the 30% drawdown stop + allowlist are the binding limits). This is the policy passed as the
+    runner's `live_policy`; the env-parity check still uses the $10k-scale `forward_run_policy`."""
+    from trader.agent.compliance import COMPLIANCE_TOKEN
+    allow = frozenset({str(t).upper() for t in universe} | {cash_leg.upper(), COMPLIANCE_TOKEN.upper()})
+    return Policy(allowlist=allow,
+                  per_trade_usd=round(bankroll_usd * max_entry_frac * 1.25, 4),
+                  daily_usd=round(bankroll_usd * 4.0, 4),
+                  max_slippage_pct=max_slippage_pct, drawdown_stop_pct=dd_stop_pct,
+                  lifetime_usd_ceiling=round(bankroll_usd * 100.0, 4), chain="bsc")
+
+
+def read_live_bankroll_usdt(*, chain: str = "bsc") -> float:
+    """Read the wallet's current USDT balance (the bankroll anchor) for the launcher to pass as
+    `live_bankroll_usd`. Read ONCE at startup, when the wallet is freshly funded and flat (all USDT);
+    a mid-week restart holding token positions would under-read, so pass an explicit bankroll then."""
+    from trader.execution import twak_cli
+    b = twak_cli.wallet_balance(chain=chain)
+    for t in b.get("tokens", []) or []:
+        if str(t.get("symbol")).upper() == CASH_LEG.upper():
+            return float(t.get("balance") or 0.0)
+    return 0.0
 
 
 @dataclass
@@ -88,7 +120,8 @@ class EventRunner:
                  policy: Policy | None = None, publisher=None, mode: str = "paper",
                  compliance_frac: float = 0.03, bnb_price_fn=None,
                  execute_fn=None, live_policy: Policy | None = None,
-                 live_compliance_usd: float | None = None, live_dry_run: bool = False):
+                 live_compliance_usd: float | None = None, live_dry_run: bool = False,
+                 live_bankroll_usd: float | None = None, min_notional_usd: float = 0.0):
         self.trader = trader
         self.selection = selection
         self.agent_ledger_path = Path(agent_ledger_path)
@@ -106,9 +139,35 @@ class EventRunner:
         # routes through execute_trade's quote-only pre-flight (no signing).
         self.execute_fn = execute_fn
         self.live_policy = live_policy
+        self._live_policy_explicit = live_policy is not None   # don't overwrite a caller-supplied one
         self.live_compliance_usd = (None if live_compliance_usd is None
                                     else float(live_compliance_usd))
         self.live_dry_run = bool(live_dry_run)
+        # The decision env ALWAYS runs at `capital` ($10k, mandatory for the frozen model). A live
+        # fill is the env's $10k-denominated `usd` re-based to the real bankroll by ONE fixed scale =
+        # bankroll/capital (a 10% weight => $1k env => $1k*scale real). This is a FIXED scale on
+        # purpose: the env compounds its equity WITHIN a cold week, and a fixed scale mirrors that
+        # trajectory at 1:scale — so when the env book grows to $11k the real wallet has also grown to
+        # ~bankroll*1.1 and a 10% weight is still 10% of the (mirrored) real equity. (Scaling by
+        # current env_equity instead would strip the within-week equity-proportional sizing the model
+        # learned — do NOT.) `live_bankroll_usd=None` => scale 1.0 (no re-basing; the dev-wallet tests
+        # + the explicit live_compliance_usd override path rely on this). `is not None` + `capital>0`:
+        # an explicit 0.0 bankroll (depleted wallet) => scale 0.0 => $0 intents the executor refuses
+        # (fail-safe), NOT a silent fall-through to full $10k size.
+        if self.capital <= 0:
+            raise ValueError(f"capital must be > 0 (frozen-model book), got {self.capital}")
+        self.live_bankroll_usd = (None if live_bankroll_usd is None else float(live_bankroll_usd))
+        self._live_scale = (self.live_bankroll_usd / self.capital
+                            if self.live_bankroll_usd is not None else 1.0)
+        self.min_notional_usd = float(min_notional_usd)
+        # Live signing with REAL money needs real-money caps: refuse to arm if neither the bankroll
+        # (which auto-builds live_forward_policy in tick) NOR an explicit live_policy is given —
+        # otherwise _sign_live would fall back to the $10k-scale env-parity policy on a real swap.
+        if (self.mode == "live" and self.execute_fn is not None
+                and self.live_bankroll_usd is None and self.live_policy is None):
+            raise ValueError("live signing requires live_bankroll_usd (scales fills + sizes the "
+                             "live caps) or an explicit live_policy — refusing to sign on the "
+                             "$10k-scale env-parity policy")
         self._bnb_price_fn = bnb_price_fn          # injectable BNB USD price(now_ts) for tests
         self._bnb_anchor = None                    # cached BNB close series (False = unavailable)
         self._compliance_pnl = 0.0                 # cumulative realized PnL of the compliance sleeve
@@ -157,16 +216,28 @@ class EventRunner:
         return v if v == v and v > 0 else None      # reject NaN / non-positive
 
     # -- live signing (the TWAK execution path; off in paper) -----------------
-    def _sign_live(self, frm: str, to: str, usd: float, slippage_pct: float) -> dict | None:
+    def _sign_live(self, frm: str, to: str, usd: float, slippage_pct: float,
+                   *, prescaled: bool = False) -> dict | None:
         """Route a guardrail-PASSED fill through the real signing path (`execute_fn`, e.g.
-        `trader.execution.execute.execute_trade`). Returns the executor's result dict, or None
-        when live execution is not wired (paper / no executor) — then the fill is paper-only,
-        exactly as before. NEVER raises: a signing exception is captured into an error dict so
-        one bad swap cannot abort the hourly tick. Real spend is capped by `live_policy` inside
-        the executor (its own two-phase check + risk ledger), independent of the env-parity check."""
+        `trader.execution.execute.execute_trade`). The env's `usd` is re-based to the real bankroll
+        by `self._live_scale` (= bankroll/$10k) UNLESS `prescaled=True` (the explicit
+        `live_compliance_usd` override already gives a real figure). A scaled fill below
+        `min_notional_usd` is SKIPPED on-chain (dust guard) — `{"skipped": ...}`. Returns None when
+        live execution is not wired (paper / no executor) — then the fill is paper-only, exactly as
+        before. NEVER raises: a signing exception is captured into an error dict so one bad swap
+        cannot abort the hourly tick. Real spend is capped by `live_policy` inside the executor (its
+        own two-phase check + risk ledger), independent of the env-parity check."""
         if self.execute_fn is None or self.mode != "live":
             return None
-        intent = TradeIntent(from_asset=frm, to_asset=to, usd=float(usd), chain="bsc",
+        real_usd = float(usd) if prescaled else float(usd) * self._live_scale
+        if self.min_notional_usd > 0.0 and real_usd < self.min_notional_usd:
+            # Dust guard: no on-chain mirror. This is CORRECT for the risk ledger — a skipped fill did
+            # not trade, so it must NOT count toward real spent_today/lifetime (the executor's
+            # state_from_ledger only sees actually-signed attempts). The env/agent book still records
+            # the paper fill (tagged exec_status='skipped') for $10k-parity; the two ledgers are
+            # separate scopes by design (real spend vs paper book), not a divergence.
+            return {"skipped": "below_min_notional", "real_usd": real_usd, "tx_hash": None}
+        intent = TradeIntent(from_asset=frm, to_asset=to, usd=real_usd, chain="bsc",
                              slippage_pct=slippage_pct)
         pol = self.live_policy if self.live_policy is not None else self.policy
         try:
@@ -232,6 +303,13 @@ class EventRunner:
             usd_buy, px_buy = float(bought.get("usd_in") or 0.0), float(bought.get("price") or px)
             usd = (usd_buy / px_buy) * px if px_buy > 0 else usd_buy   # BNB-leg value at the sell price
             frm, to, reason = COMPLIANCE_TOKEN, CASH_LEG, SELL_REASON
+            # BEFORE-FUNDING-LIVE BLOCKER (M4): this sizes the SELL by USD-value-at-anchor-price, which
+            # only APPROXIMATES the exact BNB quantity the BUY acquired. On a dev wallet (ample spare
+            # BNB) and in paper this is fine; on a dedicated USDT-only live wallet, a BNB move between
+            # 01:00 and 23:00 means "$X-worth at the sell price" can over/under-shoot the held qty
+            # (dust left, or an insufficient-balance failure). Real live compliance must unwind the
+            # EXACT bought quantity (capture qty from the BUY exec result; sell amount-in) — do that
+            # before funding the live wallet. Not a paper/dev blocker.
         else:
             return 0                                     # already done today (idempotent) / nothing to sell
 
@@ -239,13 +317,17 @@ class EventRunner:
         intent = TradeIntent(from_asset=frm, to_asset=to, usd=usd, chain="bsc",
                              slippage_pct=self.policy.max_slippage_pct)
         verdict = check_trade(self.policy, intent, self._risk_state(equity, spent_today))
-        # live signing: the REAL swap uses live_compliance_usd (the env equity is the $10k book,
-        # not the real bankroll, so frac*equity would over-size the on-chain swap); falls back to
-        # `usd` if unset. The paper row keeps `usd` for $10k-book sleeve-PnL parity.
+        # live signing: an explicit `live_compliance_usd` is a real figure (prescaled — bypass the
+        # bankroll scale, e.g. the dev-wallet smoke's fixed $0.40); otherwise the env's `usd`
+        # (frac*$10k-equity) is re-based to the real bankroll by `_live_scale`, exactly like a
+        # strategy fill. The paper row keeps `usd` for $10k-book sleeve-PnL parity.
         exec_res = None
         if verdict.allowed:
-            real_usd = self.live_compliance_usd if self.live_compliance_usd is not None else usd
-            exec_res = self._sign_live(frm, to, real_usd, self.policy.max_slippage_pct)
+            if self.live_compliance_usd is not None:
+                exec_res = self._sign_live(frm, to, self.live_compliance_usd,
+                                           self.policy.max_slippage_pct, prescaled=True)
+            else:
+                exec_res = self._sign_live(frm, to, usd, self.policy.max_slippage_pct)
         if reason == SELL_REASON:
             self._compliance_pnl += usd - float(bought.get("usd_in") or 0.0) - cost
         row = {"kind": "fill", "mode": self.mode, "compliance": True, "from": frm, "to": to,
@@ -310,6 +392,13 @@ class EventRunner:
 
         if self.policy is None:
             self.policy = forward_run_policy(res["universe"], self.capital)
+        # Real-money caps for live signing: derive from the bankroll (NOT the $10k env book) once the
+        # universe is known, unless an explicit live_policy was passed. Without this, _sign_live would
+        # cap real swaps at the $10k-scale `self.policy` (the M1 hole). Rebuilt each tick so the
+        # allowlist tracks the weekly universe; same max_slippage as the env-parity check.
+        if self.live_bankroll_usd is not None and not self._live_policy_explicit:
+            self.live_policy = live_forward_policy(res["universe"], self.live_bankroll_usd,
+                                                   max_slippage_pct=self.policy.max_slippage_pct)
 
         day_utc = datetime.fromtimestamp(now_ts, timezone.utc).date().isoformat()
         spent_today = 0.0

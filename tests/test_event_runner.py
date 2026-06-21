@@ -8,7 +8,7 @@ import pytest
 
 from trader.agent import store
 from trader.agent.event_live import WARMUP, WEEK_SECS, MONDAY_PHASE, LiveEventTrader
-from trader.agent.event_runner import EventRunner, forward_run_policy
+from trader.agent.event_runner import EventRunner, forward_run_policy, live_forward_policy
 from trader.risk import Policy
 
 from train_rl import build_volume_panel, load_data  # noqa: E402 (event_live set the path)
@@ -336,13 +336,94 @@ def test_strategy_fills_route_through_executor_in_live(tmp_path, panels):
     ex = _FakeExec()
     runner = EventRunner(LiveEventTrader(_prov()), selection=[],
                          agent_ledger_path=tmp_path / "agent.jsonl",
-                         mode="live", execute_fn=ex, compliance_frac=0.0)
+                         mode="live", execute_fn=ex, compliance_frac=0.0,
+                         live_bankroll_usd=10_000.0)          # scale 1.0 (== env book): executor gets full usd
     runner.tick(ws + 167 * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
     fills = [r for r in store.read_rows(tmp_path / "agent.jsonl")
              if r["kind"] == "fill" and not r.get("compliance")]
     allowed = [f for f in fills if f["guardrail_ok"]]
     assert allowed and all(f.get("tx_hash") == ex.result["tx_hash"] for f in allowed)
     assert len(ex.calls) == len(allowed)                   # one executor call per allowed fill, none for blocked
+
+
+def test_live_signing_requires_bankroll_or_policy(tmp_path):
+    """M1 guard: arming live signing with NEITHER a bankroll NOR an explicit live_policy refuses at
+    construction — otherwise real swaps would be capped by the $10k-scale env-parity policy."""
+    with pytest.raises(ValueError, match="live signing requires"):
+        EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                    mode="live", execute_fn=_FakeExec())   # no live_bankroll_usd, no live_policy
+
+
+def test_live_policy_auto_derived_from_bankroll_not_env_book(tmp_path, panels):
+    """M1 fix: with a bankroll and no explicit live_policy, the executor is handed a policy whose caps
+    are sized to the REAL bankroll (live_forward_policy), NOT the $10k-scale self.policy."""
+    returns, btc, liq, vol = panels
+    ws, _ek = _week_with_fills(returns, btc, liq, vol)
+    ex = _FakeExec()
+    runner = EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=tmp_path / "agent.jsonl",
+                         mode="live", execute_fn=ex, compliance_frac=0.0, live_bankroll_usd=100.0)
+    runner.tick(ws + 167 * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    assert ex.calls                                         # the rule traded
+    pol = ex.calls[0]["policy"]
+    assert pol.per_trade_usd == pytest.approx(100.0 * 0.34 * 1.25)   # bankroll-scaled
+    assert pol.per_trade_usd < 10_000.0                    # NOT the $10k env-parity cap
+
+
+def test_zero_bankroll_scales_to_zero_not_full_size(tmp_path):
+    """M2: an explicit 0.0 bankroll (depleted wallet) => scale 0.0 (=> $0 intents the executor
+    refuses), NOT a silent fall-through to scale 1.0 / full $10k size."""
+    r = EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                    mode="live", execute_fn=_FakeExec(), live_bankroll_usd=0.0)
+    assert r._live_scale == 0.0
+
+
+def test_nonpositive_capital_rejected(tmp_path):
+    with pytest.raises(ValueError, match="capital must be"):
+        EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                    capital=0.0)
+
+
+def test_strategy_fills_scale_to_real_bankroll(tmp_path, panels):
+    """Live fills are the env's $10k-denominated usd re-based to the bankroll by a fixed scale
+    (bankroll/$10k). $100 bankroll => scale 0.01 => a 10% weight ($1k env) signs ~$10."""
+    returns, btc, liq, vol = panels
+    ws, _ek = _week_with_fills(returns, btc, liq, vol)
+    ex = _FakeExec()
+    runner = EventRunner(LiveEventTrader(_prov()), selection=[],
+                         agent_ledger_path=tmp_path / "agent.jsonl",
+                         mode="live", execute_fn=ex, compliance_frac=0.0, live_bankroll_usd=100.0)
+    runner.tick(ws + 167 * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    allowed = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+               if r["kind"] == "fill" and not r.get("compliance") and r["guardrail_ok"]]
+    assert allowed and len(ex.calls) == len(allowed)
+    for call, f in zip(ex.calls, allowed):                  # one signed call per allowed fill, in order
+        assert call["usd"] == pytest.approx(f["usd_in"] * 0.01, rel=1e-9)   # re-based to 1% of the $10k book
+        assert call["usd"] < f["usd_in"]                    # scaled DOWN (env usd is $10k-scale)
+
+
+def test_min_notional_skips_dust_fills(tmp_path, panels):
+    """A scaled fill below `min_notional_usd` is skipped on-chain (the env still records the paper
+    fill; only the live mirror is skipped) — no executor call, exec_status='skipped'."""
+    returns, btc, liq, vol = panels
+    ws, _ek = _week_with_fills(returns, btc, liq, vol)
+    ex = _FakeExec()
+    runner = EventRunner(LiveEventTrader(_prov()), selection=[],
+                         agent_ledger_path=tmp_path / "agent.jsonl", mode="live", execute_fn=ex,
+                         compliance_frac=0.0, live_bankroll_usd=100.0, min_notional_usd=1e6)
+    runner.tick(ws + 167 * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    assert ex.calls == []                                   # everything below $1e6 -> nothing signed
+    allowed = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+               if r["kind"] == "fill" and not r.get("compliance") and r["guardrail_ok"]]
+    assert allowed and all(r.get("exec_status") == "skipped" for r in allowed)
+    assert all(r.get("exec_skipped") == "below_min_notional" for r in allowed)
+
+
+def test_live_forward_policy_scales_caps_to_bankroll():
+    pol = live_forward_policy(["UB", "zec"], 100.0)
+    assert {"UB", "ZEC", "USDT", "BNB"} <= pol.allowlist    # universe + cash leg + compliance leg
+    assert pol.per_trade_usd == pytest.approx(100.0 * 0.34 * 1.25)   # covers the max scaled entry
+    assert pol.daily_usd == pytest.approx(400.0) and pol.drawdown_stop_pct == 30.0
+    assert pol.chain == "bsc"
 
 
 def test_forward_run_policy_allows_universe_and_cash_leg():
