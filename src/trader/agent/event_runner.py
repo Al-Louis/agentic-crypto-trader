@@ -33,6 +33,10 @@ from trader.risk import Policy, RiskState, TradeIntent, check_trade
 # the env's USD "cash" leg maps to a stable for the allowlist / live routing (token<->USDT swaps)
 CASH_LEG = "USDT"
 DD_STOP_PCT = 30.0
+# TWAK can't resolve microcap tickers ("Unknown token: UB on bsc") — live swaps key off the BEP-20
+# CONTRACT via the assetId `c20000714_t<contract>` (c20000714 = the BSC coinId). BNB/USDT resolve by
+# symbol, so only the universe tokens need this.
+BSC_ASSET_PREFIX = "c20000714_t"
 
 
 def _exec_summary(res: dict | None) -> dict:
@@ -67,17 +71,21 @@ def forward_run_policy(universe: list[str], capital: float = 10_000.0, *,
                   lifetime_usd_ceiling=capital * 1_000.0, chain="bsc")
 
 
-def live_forward_policy(universe: list[str], bankroll_usd: float, *, cash_leg: str = CASH_LEG,
-                        dd_stop_pct: float = DD_STOP_PCT, max_slippage_pct: float = 1.0,
-                        max_entry_frac: float = 0.34) -> Policy:
+def live_forward_policy(universe: list[str], bankroll_usd: float, *, asset_ids=None,
+                        cash_leg: str = CASH_LEG, dd_stop_pct: float = DD_STOP_PCT,
+                        max_slippage_pct: float = 1.0, max_entry_frac: float = 0.34) -> Policy:
     """The REAL-money guardrail policy for live signing — caps sized to the actual bankroll (NOT the
     $10k env book). A single scaled entry maxes at ~`max_entry_frac`*bankroll, so per-trade is set a
     little above that; daily allows several round-trips; the lifetime ceiling is a generous backstop
-    (the 30% drawdown stop + allowlist are the binding limits). This is the policy passed as the
-    runner's `live_policy`; the env-parity check still uses the $10k-scale `forward_run_policy`."""
+    (the 30% drawdown stop + allowlist are the binding limits). `asset_ids` adds the token CONTRACTS
+    to the allowlist (the intent-phase check sees the assetId the swap is keyed off; the quote-phase
+    re-check sees the realized SYMBOL, already covered by `universe`). The env-parity check still uses
+    the $10k-scale `forward_run_policy`."""
     from trader.agent.compliance import COMPLIANCE_TOKEN
-    allow = frozenset({str(t).upper() for t in universe} | {cash_leg.upper(), COMPLIANCE_TOKEN.upper()})
-    return Policy(allowlist=allow,
+    allow = {str(t).upper() for t in universe} | {cash_leg.upper(), COMPLIANCE_TOKEN.upper()}
+    if asset_ids:
+        allow |= {str(a).upper() for a in asset_ids if a}
+    return Policy(allowlist=frozenset(allow),
                   per_trade_usd=round(bankroll_usd * max_entry_frac * 1.25, 4),
                   daily_usd=round(bankroll_usd * 4.0, 4),
                   max_slippage_pct=max_slippage_pct, drawdown_stop_pct=dd_stop_pct,
@@ -124,6 +132,10 @@ class EventRunner:
                  live_bankroll_usd: float | None = None, min_notional_usd: float = 0.0):
         self.trader = trader
         self.selection = selection
+        # symbol -> TWAK assetId (contract), so live swaps resolve microcap tokens (BNB/USDT pass
+        # through as symbols). Empty when the selection has no token_address (e.g. unit tests).
+        self._asset_map = {str(s["symbol"]).upper(): BSC_ASSET_PREFIX + str(s["token_address"])
+                           for s in (selection or []) if s.get("token_address")}
         self.agent_ledger_path = Path(agent_ledger_path)
         self.capital = float(capital)
         self.policy = policy                      # built lazily from the env universe if None
@@ -217,6 +229,11 @@ class EventRunner:
         return v if v == v and v > 0 else None      # reject NaN / non-positive
 
     # -- live signing (the TWAK execution path; off in paper) -----------------
+    def _asset_for(self, sym: str) -> str:
+        """The TWAK swap leg for `sym`: the BEP-20 CONTRACT (assetId) for a universe token (TWAK
+        can't resolve microcap tickers), else the symbol itself (BNB/USDT resolve by symbol)."""
+        return self._asset_map.get(str(sym).upper(), sym)
+
     def _sign_live(self, frm: str, to: str, usd: float, slippage_pct: float,
                    *, prescaled: bool = False) -> dict | None:
         """Route a guardrail-PASSED fill through the real signing path (`execute_fn`, e.g.
@@ -238,8 +255,8 @@ class EventRunner:
             # the paper fill (tagged exec_status='skipped') for $10k-parity; the two ledgers are
             # separate scopes by design (real spend vs paper book), not a divergence.
             return {"skipped": "below_min_notional", "real_usd": real_usd, "tx_hash": None}
-        intent = TradeIntent(from_asset=frm, to_asset=to, usd=real_usd, chain="bsc",
-                             slippage_pct=slippage_pct)
+        intent = TradeIntent(from_asset=self._asset_for(frm), to_asset=self._asset_for(to),
+                             usd=real_usd, chain="bsc", slippage_pct=slippage_pct)
         pol = self.live_policy if self.live_policy is not None else self.policy
         try:
             return self.execute_fn(intent, pol, dry_run=self.live_dry_run)
@@ -256,7 +273,8 @@ class EventRunner:
             return None
         pol = self.live_policy if self.live_policy is not None else self.policy
         try:
-            return self.execute_amount_fn(frm, to, float(amount), pol, dry_run=self.live_dry_run)
+            return self.execute_amount_fn(self._asset_for(frm), self._asset_for(to), float(amount),
+                                          pol, dry_run=self.live_dry_run)
         except Exception as e:  # noqa: BLE001 — a swap failure must not crash the loop
             return {"error": f"{type(e).__name__}: {e}"[:300], "tx_hash": None}
 
@@ -428,8 +446,10 @@ class EventRunner:
         # cap real swaps at the $10k-scale `self.policy` (the M1 hole). Rebuilt each tick so the
         # allowlist tracks the weekly universe; same max_slippage as the env-parity check.
         if self.live_bankroll_usd is not None and not self._live_policy_explicit:
-            self.live_policy = live_forward_policy(res["universe"], self.live_bankroll_usd,
-                                                   max_slippage_pct=self.policy.max_slippage_pct)
+            self.live_policy = live_forward_policy(
+                res["universe"], self.live_bankroll_usd,
+                asset_ids=[self._asset_map.get(str(t).upper()) for t in res["universe"]],
+                max_slippage_pct=self.policy.max_slippage_pct)
 
         day_utc = datetime.fromtimestamp(now_ts, timezone.utc).date().isoformat()
         spent_today = 0.0

@@ -505,6 +505,27 @@ def test_live_forward_policy_scales_caps_to_bankroll():
     assert pol.chain == "bsc"
 
 
+def test_live_forward_policy_allowlists_token_contracts():
+    pol = live_forward_policy(["UB"], 100.0, asset_ids=["c20000714_t0xABCdef"])
+    assert "UB" in pol.allowlist                            # the realized SYMBOL (quote-phase check)
+    assert "C20000714_T0XABCDEF" in pol.allowlist           # the CONTRACT assetId (intent-phase check)
+
+
+def test_sign_live_resolves_token_symbol_to_contract(tmp_path):
+    """TWAK can't resolve microcap tickers, so a live token leg is swapped for its BEP-20 contract
+    (assetId); BNB/USDT stay as symbols."""
+    ex = _FakeExec()
+    sel = [{"symbol": "UB", "pair_address": "0xpair", "token_address": "0x40b8129B"}]
+    runner = EventRunner(LiveEventTrader(_prov()), selection=sel,
+                         agent_ledger_path=tmp_path / "a.jsonl", mode="live", execute_fn=ex,
+                         live_policy=_TIGHT)
+    runner._sign_live("USDT", "UB", 1.0, 1.0, prescaled=True)
+    assert ex.calls[-1]["from"] == "USDT"                   # cash leg: bare symbol (TWAK resolves it)
+    assert ex.calls[-1]["to"] == "c20000714_t0x40b8129B"    # token leg: the contract assetId
+    runner._sign_live("UB", "USDT", 1.0, 1.0, prescaled=True)   # and the sell direction
+    assert ex.calls[-1]["from"] == "c20000714_t0x40b8129B" and ex.calls[-1]["to"] == "USDT"
+
+
 def test_forward_run_policy_allows_universe_and_cash_leg():
     pol = forward_run_policy(["ADA", "zec"], capital=10_000.0)
     assert "ADA" in pol.allowlist and "ZEC" in pol.allowlist and "USDT" in pol.allowlist

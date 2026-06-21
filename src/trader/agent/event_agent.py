@@ -53,9 +53,12 @@ def load_provenance(run_dir: str, run_id: str) -> dict:
 
 
 def load_selection(path: str = os.path.join("data", "selection.json")) -> list[dict]:
-    """The universe tokens + pool addresses the live-data updater needs (symbol + pair_address)."""
+    """The universe tokens the harness needs: `symbol` + `pair_address` (live-data updater) +
+    `token_address` (the BEP-20 contract — TWAK can't resolve microcap tickers, so live swaps key
+    off the contract via `event_runner`'s asset-id map)."""
     sel = json.load(open(path, encoding="utf-8"))
-    return [{"symbol": s["symbol"], "pair_address": s.get("pair_address")} for s in sel]
+    return [{"symbol": s["symbol"], "pair_address": s.get("pair_address"),
+             "token_address": s.get("token_address") or s.get("bsc_contract")} for s in sel]
 
 
 def build_parser() -> argparse.ArgumentParser:
