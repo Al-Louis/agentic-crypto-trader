@@ -102,3 +102,25 @@ def test_realized_vol_positive_for_moving_series():
     ohlcv = [[i, 0, 0, 0, c, 0] for i, c in enumerate(closes)]
     rv = gt.realized_vol(ohlcv)
     assert rv is not None and rv > 0
+
+
+def test_endpoint_keyless_by_default(monkeypatch):
+    monkeypatch.delenv("COINGECKO_API_KEY", raising=False)
+    base, headers = gt._endpoint()
+    assert base == gt.GT and "x-cg-demo-api-key" not in headers and "x-cg-pro-api-key" not in headers
+
+
+def test_endpoint_demo_key_routes_to_coingecko(monkeypatch):
+    monkeypatch.setenv("COINGECKO_API_KEY", "CG-test123")
+    monkeypatch.delenv("COINGECKO_API_TIER", raising=False)        # default tier = demo
+    base, headers = gt._endpoint()
+    assert base == gt.CG_DEMO and headers["x-cg-demo-api-key"] == "CG-test123"
+
+
+def test_endpoint_pro_tier_uses_pro_host_and_header(monkeypatch):
+    monkeypatch.setenv("COINGECKO_API_KEY", "CG-test123")
+    monkeypatch.setenv("COINGECKO_API_TIER", "pro")
+    base, headers = gt._endpoint()
+    assert base == gt.CG_PRO and headers["x-cg-pro-api-key"] == "CG-test123"
+    # the on-chain path shape is identical, so only the base + auth differ from keyless
+    assert base.endswith("/onchain")
