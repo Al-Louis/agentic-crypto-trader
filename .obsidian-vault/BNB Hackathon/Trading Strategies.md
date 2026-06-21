@@ -1,8 +1,9 @@
 # Trading Strategies
 
-The decision core is an **open design space** — not yet committed. This note maps the candidate
-strategy families, how each maps to available data surfaces, and the competition constraints that
-shape every viable option. See [[Project Overview]] for the overall objective; [[Market Conditions]]
+The decision core is now **committed**: a selective volatility-ignition reinforcement-learning
+agent (RecurrentPPO/LSTM; champion `sbq-s1`). This note maps the candidate strategy families that
+were weighed to get there, how each maps to available data surfaces, and the competition
+constraints that shape every viable option. See [[Project Overview]] for the overall objective; [[Market Conditions]]
 and [[Simulated Market]] for regime/backtest detail; [[AI Training]] for RL mechanics.
 The tradeable token set and its selection theory live in [[Token Universe]].
 

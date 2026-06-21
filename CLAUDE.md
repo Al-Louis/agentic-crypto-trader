@@ -8,8 +8,10 @@ command — see the pipeline section.)
 
 A from-scratch build of an **autonomous, self-custody crypto trading agent** for the BNB
 Chain "AI Trading Agent Edition" hackathon (Track 1). The agent reads market and on-chain
-data, decides, and signs and executes its own transactions on BSC, hands-off, inside hard
-guardrails. The trading strategy is an **open design space** — not yet committed.
+data, decides with a learned policy, and signs and executes its own transactions on BSC,
+hands-off, inside hard guardrails. The decision core is a **selective volatility-ignition
+reinforcement-learning agent** (RecurrentPPO/LSTM-256), trained and certified offline on a
+held-out frozen TEST split, then run live; the deployed champion is `sbq-s1`.
 
 The single source of project knowledge is the Obsidian vault at `.obsidian-vault/`. Start
 from its map of content: **[[Index]]**, and the neutral **[[Project Overview]]**.

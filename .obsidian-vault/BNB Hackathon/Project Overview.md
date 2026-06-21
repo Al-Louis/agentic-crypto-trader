@@ -2,8 +2,9 @@
 
 A neutral starting point for the [[BNB Hack - AI Trading Agent Edition]] Track 1 entry. See
 [[Index]] for the full map of content. This note frames *what the project is and the
-decisions in front of it* — it deliberately does not commit to a single trading strategy;
-that's an open design space (see [[Trading Strategies]]).
+decisions behind and in front of it*. The strategy question — once an open design space — is
+now **decided**: a selective volatility-ignition reinforcement-learning agent (see
+[[Trading Strategies]], [[AI Training]]).
 
 ## What this is
 
@@ -13,9 +14,9 @@ repeat, hands-off, inside rules it can't violate. During the live window it trad
 assets on BSC and is scored on the result.
 
 The agent is a decision core wrapped around a few mandated surfaces (see [[Tech Stack]]).
-The trading logic that drives it is intentionally modular and swappable — the surrounding
-infrastructure (execution, custody, data, guardrails) is the same regardless of which
-strategy is chosen.
+The trading logic is kept modular behind a clean interface — the surrounding infrastructure
+(execution, custody, data, guardrails) is strategy-agnostic — but the decision core itself is
+now committed: the learned volatility-ignition policy described below.
 
 ## How it's scored (Track 1)
 
@@ -67,19 +68,21 @@ Neutral patterns that hold regardless of strategy:
 - **MCP-driven orchestration.** Both the CMC Agent Hub and TWAK expose MCP, so the agent's
   tool surface is uniform and inspectable.
 
-## Open design space — strategy
+## Strategy — decided
 
-The decision core is *not yet chosen*. Candidate directions, to evaluate on merit (detail
-in [[Trading Strategies]], [[AI Training]], [[Market Conditions]], [[Social Media Scanner]]):
+The decision core is a **selective volatility-ignition reinforcement-learning agent**
+(RecurrentPPO, LSTM-256), trained on the simulated market and certified on a held-out frozen
+TEST split; the deployed champion is `sbq-s1` (detail in [[Trading Strategies]], [[AI Training]]).
+It was reached by evaluating these candidate directions on merit:
 
 - Technical-indicator / momentum strategies (RSI, MACD, regime detection).
 - Wallet-monitoring / copy-style strategies driven by on-chain activity.
 - Sentiment- or news-driven signals (e.g. a social scanner for breaking events).
-- Learned policies (RL/ML) trained against a simulated market.
+- **Learned policies (RL/ML) trained against a simulated market — the direction taken.**
 - Risk-/regime-aware overlays and filters on any of the above.
 
-These are not mutually exclusive, and the surrounding infrastructure is identical for all
-of them — which is why strategy choice can stay open while the execution loop is built.
+The surrounding infrastructure is identical regardless of strategy, which is why the execution
+loop was built in parallel while the decision core was settled.
 
 ## Key constraints & open questions
 
