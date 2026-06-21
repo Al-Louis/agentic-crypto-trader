@@ -37,3 +37,4 @@ def test_parser_defaults():
     args = lea.build_parser().parse_args(["--run-dir", "runs-rl/x"])
     assert args.bankroll_usd is None                        # default: read from the wallet at startup
     assert args.min_notional_usd == 0.50 and args.capital == 10_000.0 and not args.dry_run
+    assert args.ledger_path is None                         # dry-run isolates to its own ledger in main()

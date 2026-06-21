@@ -61,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-refresh", action="store_true", help="skip the network data refresh")
     p.add_argument("--capital", type=float, default=10_000.0, help="cold-weekly env capital (the model "
                    "trained at 10000; do NOT change — only the SCALE to the real bankroll varies)")
+    p.add_argument("--ledger-path", default=None, help="agent-ledger override; a --dry-run defaults "
+                   "to data/agent_ledger.dryrun.jsonl (NEVER the production ledger) and does not publish")
     return p
 
 
@@ -100,10 +102,19 @@ def main(argv: list[str] | None = None) -> int:
     prov = load_provenance(args.run_dir, run_id)
     trader = LiveEventTrader(prov, policy_path=os.path.join(args.run_dir, "policy.zip"),
                              vecnorm_path=os.path.join(args.run_dir, "vecnormalize.pkl"))
-    publish_target = config.get("APENTIC_PUBLISH_TARGET")
-    publisher = build_publisher(AGENT_LEDGER_PATH, publish_target) if publish_target else None
+    # A dry-run is a VALIDATION — it must NEVER touch the production ledger or publish to the live
+    # dashboard. Isolate to a separate ledger + disable publishing unless an explicit --ledger-path.
+    from pathlib import Path  # noqa: PLC0415
+    if args.ledger_path:
+        ledger_path = Path(args.ledger_path)
+    elif args.dry_run:
+        ledger_path = Path(AGENT_LEDGER_PATH).with_name("agent_ledger.dryrun.jsonl")
+    else:
+        ledger_path = Path(AGENT_LEDGER_PATH)
+    publish_target = None if args.dry_run else config.get("APENTIC_PUBLISH_TARGET")
+    publisher = build_publisher(ledger_path, publish_target) if publish_target else None
     selection = load_selection()
-    runner = EventRunner(trader, selection=selection, agent_ledger_path=AGENT_LEDGER_PATH,
+    runner = EventRunner(trader, selection=selection, agent_ledger_path=ledger_path,
                          capital=args.capital, publisher=publisher, mode="live",
                          execute_fn=execute_trade, execute_amount_fn=execute_swap_amount,
                          live_bankroll_usd=float(bankroll), min_notional_usd=args.min_notional_usd,
@@ -111,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"LIVE event-agent start: run_id={run_id} bankroll=${bankroll:,.2f} "
           f"scale={bankroll / args.capital:.4g} dry_run={args.dry_run} "
-          f"min_notional=${args.min_notional_usd} once={args.once} "
+          f"min_notional=${args.min_notional_usd} once={args.once} ledger={ledger_path} "
           f"publish={publish_target or 'off'}", file=sys.stderr)
 
     def _tick(now_ts: int) -> None:
