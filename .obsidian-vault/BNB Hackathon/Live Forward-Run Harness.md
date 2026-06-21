@@ -310,13 +310,45 @@ enforced (negative proof: $1.00 > $0.50 → refused at the intent phase, no netw
 
 The wallet returned ~flat (few-cent AMM + slippage cost); slippage held at 1.0%, impact 0%.
 
+## 2026-06-21 — Stage 3: bankroll-scaled strategy fills (+ gas/routing facts, adversarial review)
+
+The env's fills are `frac × $10k-book`; live trading on a small wallet just re-bases them by ONE
+fixed scale = **bankroll / $10k** at the signing boundary (the decision env stays at $10k — mandatory
+for the frozen model). A 10% weight on a **$100** wallet signs **~$10**. The bankroll is **read at
+runtime** (`read_live_bankroll_usdt` reads the wallet's USDT at startup), so it is not hardcoded; a
+fixed scale mirrors the env's within-week equity trajectory (do NOT scale by current `env_equity` —
+that strips the equity-proportional sizing the model learned).
+
+**Two empirical facts that shrank Stage 3 (measured on the dev wallet, real swaps):**
+- **Routing is a non-issue.** TWAK swaps via **DEX aggregators (0x / LiquidMesh)**, which auto-route
+  `USDT→token` through the deepest pool. Quote-only $30 buys across USDC/WBNB/BTCB-quoted tokens
+  (UB/SKYAI/ZEC/COAI/BabyDoge) all showed **0.000% price impact** — no per-token routing needed. (The
+  pair-freshness staleness is a *signal* problem, not an *execution* one — orthogonal.) So **hold USDT**
+  as the single cash leg; the aggregator buys any token from it.
+- **Gas is ~$0.** Measured `gasUsed × gasPrice` from receipts: some swaps route **gasless** (0 gwei,
+  relayer-paid), others pay BSC's ~0.1 gwei floor = **~$0.015** on 250k gas. The real cost is a
+  proportional **spread** (~0.5–0.8%, scale-invariant), exactly the env's LP-fee term. So there is **no
+  fixed-cost floor** penalising small trades — a $100 wallet tracks the sim faithfully (earlier
+  "$0.20–0.50/swap" estimate was wrong). One-time token *approval* tx per new token (~46k gas, often
+  gasless).
+
+**Implementation (`event_runner.py`, additive/gated):** `live_bankroll_usd` → `_live_scale`;
+`_sign_live` scales every fill (prescaled bypass for the `live_compliance_usd` dev override);
+`min_notional_usd` dust-skip; `live_forward_policy(universe, bankroll)` sizes the real-money caps to the
+bankroll (auto-derived in `tick`). Paper stays byte-identical. **Adversarial 4-lens review** (workflow)
+caught + fixed two real criticals: the `live_policy=None` fallback to $10k caps (now auto-derives from
+bankroll / refuses to arm unconfigured), and the `_live_scale` div-by-zero / falsy-`0.0` bugs. Suite
+**531 passed**.
+
 ## What's NOT built yet
-- **EC2 live flip + real strategy-fill execution.** The signing path is wired at the runner level and
-  proven locally, but: (1) `event_agent._resolve_mode` on the box still REFUSES live (deliberate — the
-  box stays paper; the competition-wallet flip is Phase G/H, [[EC2 Trading Host Runbook]]); (2)
-  **strategy-fill REAL sizing/routing is Stage 3** — env fills are `frac*$10k` (~$hundreds) and the
-  runner hardcodes `CASH_LEG="USDT"`, but most tokens are WBNB/BTCB-quoted ([[Token Universe]]
-  §pair-freshness); at a small real bankroll these *safely refuse* on the per-trade cap (fail-safe),
-  but proper live needs scale-to-real-bankroll + per-token deepest-pool routing.
+- **M4 — compliance SELL must unwind the BUY's EXACT BNB qty (HARD BLOCKER before funding live).** The
+  SELL currently sizes by USD-value-at-anchor-price, which only *approximates* the bought quantity; on a
+  dedicated **USDT-only** live wallet a BNB move 01:00→23:00 can over/under-shoot the held BNB (dust or
+  insufficient-balance failure). Fine for paper + the dev wallet (ample spare BNB). Fix = capture the
+  real BNB qty from the BUY exec result and sell amount-in. Flagged in-code at `_run_compliance`.
+- **The live launcher + EC2 flip.** `event_agent._resolve_mode` on the box still REFUSES live
+  (deliberate — the box stays paper; competition-wallet flip is Phase G/H, [[EC2 Trading Host Runbook]]).
+  A launcher that reads the bankroll, wires `execute_fn=execute_trade` + `live_forward_policy`, and drives
+  the runner in live mode is the remaining glue (plus M4).
 - Richer portfolio / per-trade-reasoning telemetry surface (the fills already carry the trigger +
   obs; [[Trade Reasoning Capture]] is the eventual home).
