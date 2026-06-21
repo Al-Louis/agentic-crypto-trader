@@ -18,8 +18,9 @@ import publish_leaderboard as pl  # noqa: E402  (must import torch-free)
 # --- helpers --------------------------------------------------------------------------------------
 
 def _entry(run_id: str, score: float | None) -> dict:
-    """A minimal leaderboard entry; only run_id + weekly_score drive the ranking."""
-    return {"run_id": run_id, "weekly_score": score, "cumulative_score": 0.0,
+    """A minimal leaderboard entry; `score` drives the ranking via `cumulative_score` (the 6-mo-return
+    ranker). weekly_score is set equal so the tests stay agnostic to which field is the rank key."""
+    return {"run_id": run_id, "weekly_score": score, "cumulative_score": score,
             "config_seed_mean": 0.0, "dq_pass": True, "windows": {},
             "trades_path": f"{run_id}/simulated_trades.json", "generated": "t"}
 
