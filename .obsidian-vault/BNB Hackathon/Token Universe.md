@@ -105,6 +105,33 @@ risk-off "cash" leg for the drawdown-defense overlay ([[Market Conditions]]).
   `scripts/select_universe.py` and `scripts/forensics.py` are re-runnable and the downloader
   is resumable, so re-locking near June 22 is cheap.
 
+## Pair-freshness audit — frozen pools drift (2026-06-21)
+
+`data/selection.json` pins, per token, the **single deepest BSC pool** found at the 2026-06-06
+screen (stage 1 above), and **all** downstream volume/ignition signals read **only that frozen
+pool** (`live_data.fetch_alt_latest(pair_address)` live; `train_rl.build_volume_panel` offline —
+the *same* substrate, so **zero train/serve skew**). Pool dominance, however, **migrates**:
+`scripts/audit_pair_freshness.py` re-checks each frozen pair against the token's *current* deepest
+pool (DexScreener). This substantiates the "Re-screen before the live window" caveat above with
+concrete drift.
+
+**Audit result (2026-06-21): 17/20 still on their deepest pool; 3 stale** (ratio = frozen ÷
+current-deepest liquidity):
+
+| token | frozen quote | ratio | mode | impact |
+|---|---|--:|---|---|
+| **ZEC** | BTCB | **0.044** | same quote, 23× shallower | **only LIVE exposure** — ZEC is in the recent vol-top-8 (actively traded); a thin $69k pool gives worse fills and a distortable `surge` ratio |
+| **ASTER** | BTCB→**WBNB** | 0.001 | quote migrated, frozen pool dead | **fails SAFE** — ~0 vol → drops out of the vol-top-8; scale-free `surge`→0 can't fire a false entry (a *missed opportunity*, not a mis-trade) |
+| **XAUt** | BTCB (gone) | — | dead | no consequence — gold-price, near-zero vol, never ranks in a vol-top-8 anyway |
+
+**Quote-pair confusion is NOT the failure** — the deepest-pool rule already handles it (e.g. UB
+correctly tracks its **USDC** pool, ~99% of UB volume, not a thin USDT pool; see
+[[Live Forward-Run Harness]] §the UB "12:00 ignition late?" forensic). The issue is *staleness*
+of the frozen choice. **Decision for the live window: FREEZE** — repointing a pair is a
+distribution change on a checkpoint whose one-shot TEST is consumed (train/serve skew under the
+30% DD gate). **v2:** make this re-screen **periodic**, and run any repoint as **repoint →
+retrain → re-cert** as one unit, never a serve-time patch.
+
 ## The fixed-13 experiment — causal vol-top-k beats a static set (2026-06-19)
 
 Tested whether **freezing the universe** beats the **causal vol-top-k selector** (which

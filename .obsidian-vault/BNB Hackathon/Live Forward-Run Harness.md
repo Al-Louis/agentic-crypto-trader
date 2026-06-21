@@ -239,6 +239,49 @@ verified **byte-identical to `feat`**; tested (**493 unit + 28 harness**). Merge
 working-tree mods), running sbq-s1. The redundant `feat/live-event-harness` branch was **deleted** →
 `origin/main` (`3cfb5aa`) is the **single canonical branch**.
 
+## 2026-06-21 — pair-freshness audit + the UB "12:00 ignition late?" forensic
+
+**Trigger (user):** UB surged from the daily-session open; the champion bought at **12:00 UTC**,
+and the worry was that ignition monitoring watches **USDT** volume while UB's pool is
+**USDC**-dominated — so the entry might have been late on a thin/lagging USDT signal.
+
+**Finding — premise false, but the instinct caught a real (separate) bug.** Selection reads each
+token's **deepest** pool, not USDT ([[Token Universe]] stage 1); UB is on its **USDC** pool
+(~99% of UB liquidity/volume). Reproducing the env ignition formula (`event_env.py:220-226`,
+`vol_mult=2.0`) on real GeckoTerminal candles (`scripts/probe_ub_pair_timing.py`):
+
+- USDC `surge` crossed 2.0 at **03:00 UTC** — volume was never the bottleneck.
+- The 9h wait to 12:00 was the **price/cushion gate** (`px>EMA72 & ema_up`) holding off after
+  UB's −23% 06-19 crash until the trend reclaimed — the anti-falling-knife gate working, not a
+  data gap. (The 06-19 13:00 `surge`=4.2 spike was a **dump**: price −23%, gates shut — the
+  det-blacklist pattern, correctly *not* an entry.)
+- The **USDT** pool `surge` **never reached 2.0** → a USDT-watcher would have **missed** the
+  +40% move. **Aggregating** all UB pools fires the **same** bar (USDC dominates; median surge
+  lift 0.1%) → the proposed cross-pool aggregation is a **no-op** for UB.
+
+So 12:00 was the **earliest the strategy's own gates allowed**, and pairing was not the cause.
+*Caveat:* the gate reconstruction used the raw USDC price as a proxy for the env's
+factor-adjusted `_px`; bar-level timing is approximate, but the entry-bar verdict held
+identically on USDC and aggregate.
+
+**The real catch — stale frozen pairs** ([[Token Universe]] §pair-freshness): 17/20 fresh; **ZEC
+the only live exposure** (traded on a 23× shallower pool); ASTER/XAUt fail safe.
+
+**Decision — FREEZE for the live window.** Train and serve read the **identical** frozen
+`pair_address` (`build_volume_panel` in both `train_rl.py` and `event_runner.py`), so there is
+**zero train/serve skew today** — the frozen pool *is* sbq-s1's certified distribution.
+Repointing a pair or switching to aggregate volume **creates** skew on a checkpoint whose
+one-shot TEST is consumed; under the 30% DD gate the asymmetry (downside = DQ; upside small —
+thin pools rarely rank into the vol-top-8) says leave it. Log ZEC/ASTER drift as a known
+limitation, not a final-hours edit.
+
+**v2 (post-submission):** periodic dominant-pool re-screen → **repoint → retrain → re-cert** as
+one unit (never a serve-time patch); cross-pool aggregate-volume **only** if liquidity-floored
+(drop pools < ~5% of the deepest) **and** retrained — low priority given the ~0.1% measured lift.
+Safe-now option: a serve-time **WARNING** when a *selected* token's frozen-pool liquidity ratio
+is below floor (pure telemetry, no behavior change, catches the ZEC case). Tools:
+`scripts/audit_pair_freshness.py`, `scripts/probe_ub_pair_timing.py`.
+
 ## What's NOT built yet
 - **Live TWAK signing path** for the event harness (paper-only today; live mode refuses). Separate
   from the Phase-G on-chain registration ([[EC2 Trading Host Runbook]]).
