@@ -1,0 +1,76 @@
+# trader-live-event-agent.service — the LIVE (real-money) event champion loop.
+#
+# This is the SIGNING counterpart to trader-event-agent.service (paper). It is INSTALLED but left
+# DISABLED until the window-open flip — the paper unit keeps running until then.
+#
+# Install (disabled):
+#   sudo install -m 0644 deploy/trader-live-event-agent.service /etc/systemd/system/trader-live-event-agent.service
+#   sudo systemctl daemon-reload
+#
+# THE FLIP (window open, June 22 — AFTER registration + a --dry-run validation):
+#   1) sudoedit /etc/trader/trader.env  → set ALL THREE gates (the launcher refuses without them):
+#        TRADER_MODE=live
+#        AGENT_ALLOW_LIVE=1
+#        AGENT_LIVE_CONFIRM=1
+#   2) sudo systemctl disable --now trader-event-agent          # stop the paper loop
+#   3) sudo systemctl enable  --now trader-live-event-agent     # start the live loop
+#
+# DRY-RUN validation BEFORE the flip (only the first two gates; signs NOTHING, quote-only):
+#   sudo -u trader -H bash -lc 'cd /srv/trader/agentic-crypto-trader && \
+#     TRADER_MODE=live AGENT_ALLOW_LIVE=1 EnvironmentFile-style... \
+#     /srv/trader/venv/bin/python -m trader.agent.live_event_agent \
+#       --run-dir /srv/trader/models/ppo-event-rdLe4-sbq-3c84b4a-s1 --once --dry-run'
+#
+# Wallet shape this expects (already funded): ~$100 USDT (bankroll, read at startup) + a small BNB
+# gas buffer (every tx fee + the compliance SELL is paid in BNB). The bankroll re-bases the env's
+# $10k fills by scale = bankroll/$10k; the decision env stays at $10k. The compliance SELL unwinds
+# the EXACT BNB the BUY bought (amount-in), preserving the buffer.
+
+[Unit]
+Description=Apentic event-driven RL champion LIVE loop (sbq-s1, real-money signing)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/srv/trader/agentic-crypto-trader
+# Provides the THREE gates + TWAK_WALLET_PASSWORD (signing) + API creds. The launcher refuses
+# (exit 2 -> loud fail -> dead-man ages) unless TRADER_MODE=live + AGENT_ALLOW_LIVE=1 +
+# AGENT_LIVE_CONFIRM=1 are all set here, so a half-configured env can never silently trade.
+EnvironmentFile=/etc/trader/trader.env
+Environment=HOME=/srv/trader
+# `twak` subprocesses inherit TWAK_WALLET_PASSWORD from this process env (the env-file) and sign
+# without it ever entering argv/history (the headless-keychain answer; same as the unit secret).
+ExecStart=/srv/trader/venv/bin/python -m trader.agent.live_event_agent --run-dir /srv/trader/models/ppo-event-rdLe4-sbq-3c84b4a-s1 --min-notional-usd 0.50
+Restart=always
+RestartSec=15
+# a tick can take ~1 min (paced data fetch + LSTM replay); plus a live tick polls swap confirms.
+TimeoutStopSec=300
+
+# --- sandbox / hardening (mirrors trader-event-agent.service) ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/trader
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target
