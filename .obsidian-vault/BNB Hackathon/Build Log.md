@@ -1319,3 +1319,71 @@ cert is CONSUMED (no further sbq tuning). Two env knobs (`rotate_pump_block`, `c
 committed default-OFF (byte-identical); candle_exit is return-neutral/DD-protective but not promoted.
 The dashboard export path is hardened and the 5 keepers republished. Single canonical branch =
 `main` @ `3cfb5aa`. → [[Experiment Log]], [[Live Forward-Run Harness]].
+
+## 2026-06-21 (cont.) — public release: pre-flip scrub, README rewrite + doc reconciliation, MIT license
+
+The repo (`github.com/Al-Louis/agentic-crypto-trader`) was flipped **public** for the submission. A
+pre-flip hardening pass scrubbed private infra, rewrote the (badly stale) README into a judge-facing
+front page, reconciled the docs + code off the old "open design space" framing onto the committed
+champion, and added a license. Custody/secrets posture → [[Security and Encryption]]; host scrub →
+[[Remote Capabilities]].
+
+### Pre-public secret/infra scrub (`8013980`)
+
+- **Tailnet host** (IP/FQDN/org) → a `TRAINER_SSH_HOST` env read with a **non-routable placeholder
+  default** (`root@<TRAINER_TAILNET_IP>`), across `remote.py` / `train_loop.py` / `dispatch_demo.py` /
+  `.env.example` / `CLAUDE.md` / the vault runbooks. The real host now lives only in a gitignored `.env`.
+- **AWS account id** (was hardcoded in `.deploy/provision-apentic-data.ps1`) → derived at runtime from
+  `aws sts get-caller-identity` (script stays runnable, value out of source).
+- **`.gitignore` hardened** to guard `trader.env` + the RL weight binaries (`*.pkl`, `policy.zip`,
+  `runs-rl/**/*.zip`) — the core IP can no longer be accidentally committed to a public repo.
+- **Verified clean twice** (an adversarial subagent + a whole-tree `git grep` sweep): NO credentials /
+  keys / mnemonics / `wallet.json` / model weights are or ever were tracked — only the empty
+  `.env.example` + `deploy/trader.env.template`. The 64-hex strings in tracked files are public tx
+  hashes / PancakeSwap event-topic constants, not keys.
+- **History caveat (decided):** the account id + tailnet IP remain in OLD commits (HEAD-scrub only).
+  Both low-severity (an account id isn't a credential; the tailnet IP is non-routable) → judged NOT
+  worth a history rewrite.
+
+### README rewrite (`38c6885`) — a judge-facing front page
+
+A readme-audit workflow (3 verify lenses — layout/build-state, commands/install, public framing →
+synthesis) found the README frozen at ~Phase 1: it called shipped subsystems "stubs (Phase 2+)", the
+MCP server a "skeleton", and listed "~89 tests" (actually ~547). The rewrite leads with the committed
+RL agent and adds a **Status — what's proven** block + an **Evidence** block (the on-chain BNB↔USDT
+round-trip tx hashes, the competition-wallet registration, the frozen-TEST result, the live dashboard),
+a real **Run the agent** section, an accurate as-built layout, the GeckoTerminal train/serve-parity
+data-feed note, and the `training`/`remote` install extras.
+
+### Doc reconciliation (`38c6885`)
+
+`CLAUDE.md`, `Project Overview.md`, and `Trading Strategies.md` still said the strategy was an "open
+design space — not yet committed" — now contradicting reality (and the new README). All three updated
+to state the committed selective volatility-ignition RL champion **sbq-s1**.
+
+### Champion-default reconciliation (`9406c65`)
+
+The deployed champion is `sbq-s1`, but the paper/daily-scan systemd units, `inspect_universe.py`'s
+fallback, the `private-model-store` example RID, the agent docstrings, and a test fixture still named
+the superseded `ef-503b784-s2`. All updated to sbq-s1 (the live unit already pointed there).
+**Historical** references in the vault notes (and `503b784` as a commit sha) left as-is — they record
+what happened.
+
+### MIT license (`200514b`)
+
+`LICENSE` (MIT, © 2026 Alex Louis) + `pyproject.toml` `license = "MIT"` / `license-files` (PEP 639;
+editable install + metadata verified, `License-Expression: MIT`); README License section updated off
+"all rights reserved".
+
+### event_agent docstring fix (`a8c04cc`)
+
+`event_agent` (the PAPER entry point) refused `TRADER_MODE=live` with the stale reason "the event
+harness has no TWAK signing path yet / future work" in four places (module + `_resolve_mode`
+docstrings, the `MODE_ENV` comment, and the user-facing refusal message). The signing path EXISTS — the
+separate gated `trader.agent.live_event_agent`. All four corrected to point there; behaviour unchanged
+(this driver still refuses live); 10 event_agent/live tests pass.
+
+**STATUS:** repo is public-clean — no secrets/keys/weights tracked, an accurate Evidence-backed README,
+one consistent champion name (sbq-s1), MIT-licensed, and no remaining "not built yet" claims. All on
+`main` (`8013980` → `38c6885` → `9406c65` → `200514b` → `a8c04cc`), pushed. → [[Security and Encryption]],
+[[Remote Capabilities]].
