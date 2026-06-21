@@ -240,6 +240,33 @@ guardrail, not a strategy signal; see [[Live Forward-Run Harness]] and [[AI Trai
 - **Not yet verified end-to-end on the desktop** — the dashboard render of the compliance asset is
   pending a `simulate_weekly` re-run after the sbq sweep.
 
+### 2026-06-20/21 — three SYSTEMIC export-path fixes (thin-token attribution)
+
+Three bugs on the **shared export path** that builds the weekly-simulation bundles — all
+**systemic**: they are properties of the export code, so they affect **every published model that
+holds a thin / low-liquidity token**, not one run. In each case the **week TOTAL was always correct**
+(the env equity is the source of truth) — these were **mis-attribution / placement** errors at the
+per-token round-trip layer, **not lost PnL**. Surfaced and fixed while republishing the curated
+keepers; see [[Experiment Log]] §2026-06-21.
+
+1. **Marker drift from gappy candle arrays.** A thin token has missing OHLCV hours (e.g. SIREN W11
+   carried **124 of 168** candles); the dashboard placed trade markers by **array index** assuming a
+   dense one-bar-per-hour series, so markers drifted (~14h off). **Fix:** `ap.densify_candles` fills
+   internal gaps with **flat zero-volume bars** (`o=h=l=c=prev_close`, `v=0`) so the array is
+   contiguous one-bar-per-hour. Applied in `build_portfolio_artifacts`. (commit `6896557`)
+2. **Corrupt negative `exit_price` from a `fold_positions` dust crumb.** `fold_positions` (FIFO
+   round-trip reconstruction) left a float dust crumb (qty ~`1e-12`) that the ledger-snap divided
+   into, producing a **negative** `exit_price` (−0.124 / −230% on SIREN). **Fix:** drop sub-$0.01 dust
+   positions before the snap + snap the residual onto the **largest-notional** position. (commit
+   `6896557`)
+3. **Forced end-of-week close showed +$0.** Positions held to the session end were recorded at
+   `exit_price = entry_price` (0 PnL), and the ledger-snap mis-attributed their real gain to another
+   row. **Fix:** mark held-to-end lots at the **week-end close price** (`end_px`). (commit `c019556`)
+
+Same fidelity posture as the INVARIANT above (do NOT bend data to schema): the per-token reconstruction
+must net to the env's true equity (recon $0). After the fixes, the curated keepers were republished
+clean (see [[Experiment Log]] §2026-06-21).
+
 ## Producer side (this repo)
 - Single-asset: `trader.report.export_run` (+ `roundtrips_from_position`).
 - Portfolio: `trader.report.export_portfolio_run`; `scripts/train_rl.py` records per-step

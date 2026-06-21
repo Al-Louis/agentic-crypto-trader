@@ -2383,3 +2383,55 @@ the bar, per the rung-0 demotion). Pending the user's green-light (shared deskto
 
 **OPEN co-factor:** `ROTATION_OUT` can still swap a held-but-flat token out before its pump (a second shakeout mechanism) —
 the next thread if the suppression retrain helps but rotation caps it. Reward/curriculum detail → [[AI Training]].
+
+## 2026-06-19 — SUPPRESSION retrain landed → `sbq-s1` is the new CHAMPION + deploy pick (supersedes `ef2-s3`/`ef-s2`)
+
+The sideways EMA-break suppression (built `abf089b`) was retrained in-distribution. **Champion + deploy pick is now `sbq-s1`**
+(`ppo-event-rdLe4-sbq-3c84b4a-s1`): `universe_mode=voltopk` k=10, `vol_mult` 2.0, **suppression ON** (`shallow_break_max=0.02`,
+`consol_vol_max=0.015`), `entry_forward` reward, RecurrentPPO LSTM-256. This **supersedes the `ef2-s3` champion / `ef-s2` deploy
+pick** above. A **prior** suppression run — `fxsbq` (`ppo-event-rdLe4-fxsbq-62800ff`), the FIXED-13-universe + suppression FF-thesis
+vehicle — set the grading **bar** for the two levers below at **val cold-weekly seed-mean 0.543**; the two experiments are graded
+against `fxsbq`, not the live champion. (Frozen-TEST certification of `sbq-s1` is the third entry below.) See [[AI Training]],
+[[event-forward-run-harness]].
+
+## 2026-06-19 — `rotate_pump_block` (anti-chase rotation brake), run `fxsbqr` (`ppo-event-rdLe4-fxsbqr-71bdfc9`): NO-GO
+
+**Lever.** In loser-funded rotation (`_rotate_for`), do NOT liquidate a holding to fund an entry into a candidate that already ran
+up **> `rotate_pump_block` (0.15)** over the prior **`rotate_pump_win` (24h)** bars — refuse to chase a name that has already
+popped. Config-gated, default `0.0` = OFF = byte-identical.
+
+**Motivation.** `fxsbq-s1` Week-21 (Apr 6-13): the FF→ZEC rotation at Apr-10 01:00 **SOLD FF to buy ZEC's SECOND pump leg**
+(entry ~5h after a local top, +44% over ZEC's cycle); both legs lost (FF −1.2%, ZEC#2 −1.6%). A thin offline calibration on the
+published-s1 realized trades had already warned the run-up penalty was **suggestive only above ~15%, n~5, no test-split coverage**.
+
+**VERDICT — NO-GO.** Val cold-weekly seed-mean **0.505 vs `fxsbq` 0.543** — a return wash / hair below, with no drawdown benefit.
+The anti-chase / rotation lever is **REFUTED as a net win**; `rotate_pump_block` stays default-OFF. (This is the already-thin
+offline signal failing to clear the honest gate, as the calibration warned.)
+
+## 2026-06-19 — `candle_exit` (candlestick exit), run `fxsbqc` (`ppo-event-rdLe4-fxsbqc-d0f926e`): return WASH, DD BETTER
+
+**Lever.** If HOLDING an **in-profit** position and the bar is an **INVERTED HAMMER** (upper wick ≥ `candle_uw_min`·range [0.5],
+lower wick ≤ `candle_lw_max`·range [0.25]) **or** a **DOJI** (body ≤ `candle_doji_max`·range [0.10], open≈close), **PROMPT** an
+exit. **Discretionary** — the rule-default sells but the agent can hold — reason `CANDLE_EXIT`, precedence **below** the trailing
+stop + EMA-break. Config-gated, default OFF = byte-identical.
+
+**Motivation.** Q-token traps: W19 an inverted hammer one bar after entry preceded a dump (−20% floor); W16 a doji (Mar 4 21:00).
+The offline probe (`scripts/probe_candle_exit.py`) found the signal **~flat / noise** on held-in-profit positions (forwards ~0%,
+inconsistent across splits); built per the user's direction anyway, with the **gate as arbiter**.
+
+**VERDICT — return-neutral, risk-reducing.** Val cold-weekly seed-mean **0.540 vs `fxsbq` 0.543** = return WASH, **BUT worst-week
+DD 14.0% vs 20.0%** = **DD-BETTER (DQ-protective)**. The agent learned to honor the prompt **selectively** — it didn't dump
+winners (return held) while trimming the worst giveback weeks. A return-neutral, drawdown-reducing lever.
+
+## 2026-06-21 — FROZEN-TEST certification of `sbq-s1`: PASS (+58.6% OOS) — the one-shot test now CONSUMED
+
+The one-shot held-out OOS certification of the champion. **`sbq-s1` was selected on VALIDATION** (the loop gates on val;
+best-seed by val return), so the **TEST split was genuinely held out** — this is the human's one-shot certification, now spent.
+
+**Held-out TEST result (5 cold weeks, fresh $10k each):** **+58.6% sum / +11.7%/week mean / 5-of-5 winning weeks / worst-week DD
+8.8% / DQ-safe.** It **HELD UP vs validation** (+7.1%/wk, 67% win) — no overfitting collapse. **PASS.**
+
+**Caveat — pump-concentrated.** W24 alone was **+37.6%** (a token-B ~3x); the other 4 weeks ran **+0.3% to +16.9%** — big in
+volatile weeks, near-flat-but-positive / capital-preserving in quiet ones. Per the meta-overfit guard, **NO further tuning to the
+`sbq` config now that test is spent** ([[seed-mean-is-iteration-not-deployment]]). The frozen TEST is **CONSUMED**; `sbq-s1` is
+certified for deployment. See [[event-forward-run-harness]], [[AI Training]].

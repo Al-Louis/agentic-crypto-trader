@@ -74,3 +74,21 @@ In the `rl_loop` **verdict** phase (driver, laptop-side): after a sweep grades, 
 3. eff-s1 was **re-published clean** (0 empty-candle assets). The page is healed.
 
 > Reminder: `weekly_score` = OOS val+test per-week mean return = `(val.ret_sum + test.ret_sum) / (val.n_weeks + test.n_weeks)` from `simulate_weekly`'s `meta.windows` — see §"Locked decisions". The fixed-universe experiment that produced eff-s1 is a CLOSED branch (causal vol-top-k beats it); its sim bundles remain on the board only as the prior #1 lineage.
+
+## 2026-06-21 — primary rank → 6-month cumulative; new board (#1 sbq-s1); export fixes; index de-clutter
+
+**Primary rank metric changed: `weekly_score` → `cumulative_score`** (user request). The Simulation leaderboard now ranks by the **6-month cumulative return** = `windows.overall.ret_sum` (the long-run / post-competition deployment lens), demoting `weekly_score` (the OOS per-week mean) to a secondary display stat. `weekly_score` is still computed and displayed; only the sort key changed. Backend `publish_leaderboard` updated (commit e73f09b); the frontend label updated in `alexlouis-site` (commit 38f3b82). This inverts the original §"Locked decisions" choice (which made `weekly_score` the PRIMARY rank) — the board is now read primarily as a deployment ranker, not the random-week hackathon predictor.
+
+**New simulated leaderboard top-3** (ranked by `cumulative_score` = 6-month cumulative return):
+- **#1 sbq-s1 — +125% 6-mo**
+- **#2 eff-s1 — +104% 6-mo**
+- **#3 fxsbqc-s0 — +86% 6-mo**
+
+**Champion re-crowned: sbq-s1** (`ppo-event-rdLe4-sbq-3c84b4a-s1` — voltopk k=10, vol_mult=2.0, + sideways EMA-break suppression; the deploy pick — see [[Trading Strategies]]). `simulated_champion.json` now tracks it (rank-1). **ef2-s3 (+57% 6-mo) dropped off the top-3.** ef-s2 and ef2-s3 are no longer the champion anywhere — supersedes the prior 2026-06-19 re-crown and all earlier "champion = ef-s2 / ef2-s3" wording.
+
+**Dashboard export fixes — 3 systemic bugs on the shared export path.** All affect every published model holding a thin / low-liquidity token; cross-linked to [[Apentic Data Contract]]:
+1. **Marker drift** — thin tokens have missing OHLCV hours (e.g. SIREN W11 = 124 of 168 candles); the dashboard placed trade markers by ARRAY INDEX assuming a dense series, so markers drifted (~14h). Fix: `ap.densify_candles` fills internal gaps with flat zero-volume bars (`o=h=l=c=prev_close`, `v=0`) so the array is contiguous one-bar-per-hour, applied in `build_portfolio_artifacts` (commit 6896557).
+2. **Corrupt exit_price** — `fold_positions` (FIFO round-trip reconstruction) left a float dust crumb (qty ~1e-12) that the ledger-snap divided into, producing a NEGATIVE exit_price (−0.124 / −230% on SIREN). Fix: drop sub-$0.01 dust positions before the snap + snap the residual onto the LARGEST-notional position (6896557).
+3. **Forced end-of-week close showed +$0** — positions held to the session end were recorded at exit=entry (0 PnL) and the ledger-snap mis-attributed their real gain to another row. Fix: mark held-to-end lots at the week-end close price (`end_px`); the week TOTAL was always correct (env equity) — this was mis-attribution, not lost PnL (commit c019556).
+
+**Simulations index de-cluttered: 15 → 5 keepers** (`reset_sim_index.py`). The S3 publisher can de-list but not byte-delete ([[apentic-publisher-no-delete]]), so this is the same de-list posture as the leaderboard eviction above. The 5 keepers were then **re-published with the export fixes** applied.

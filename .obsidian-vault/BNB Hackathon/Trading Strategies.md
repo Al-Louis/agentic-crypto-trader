@@ -945,3 +945,59 @@ The `vol_mult` provenance bug (train_event never recorded vol_mult → simulate 
 instead of the trained 2.0, depressing ef2's published numbers) was found and fixed in commit
 `2345fd6`. All 4 ef2 seeds were re-published at the correct vol_mult=2.0. ef2-s1 cold-weekly
 moved from +4.9%/wk at 2.5 to +6.0%/wk at 2.0 (the Apr-27 week: +9.4% → +26.0%).
+
+---
+
+## Exit / rotation levers — the FF-thesis branch closes (2026-06-21)
+
+The suppression fix above (catch the chop-then-pump tail) shipped into the deploy candidate
+**sbq-s1** (`ppo-event-rdLe4-sbq-3c84b4a-s1` — universe_mode=voltopk k=10, vol_mult=2.0, sideways
+EMA-break suppression `shallow_break_max=0.02` / `consol_vol_max=0.015`, entry_forward reward,
+RecurrentPPO LSTM-256). Two further exit-side levers — both motivated by the same FF-style chase /
+trap failures — were then built and graded against the **fxsbq** FF-thesis vehicle
+(`ppo-event-rdLe4-fxsbq-62800ff`, fixed-13 + suppression, val cold-weekly seed-mean **0.543**).
+Both were honestly gated; the loop tests the lever, not the prior.
+
+### rotate_pump_block — anti-chase rotation brake (run fxsbqr `71bdfc9`) — REFUTED as a net win
+
+**Lever.** In loser-funded rotation (`_rotate_for`), do **not** liquidate a holding to fund an
+entry into a candidate that has already run up `> rotate_pump_block` (=0.15) over the prior
+`rotate_pump_win` (=24h) bars. Config-gated, default 0.0 = OFF = byte-identical.
+
+**Motivation.** fxsbq-s1 Week-21 (Apr 6–13): the FF→ZEC rotation at Apr-10 01:00 sold FF to buy
+ZEC's *second* pump leg (entry ~5h after a local top, +44% over ZEC's cycle); both legs lost
+(FF −1.2%, ZEC#2 −1.6%). The brake aimed to forbid chasing a candidate that already ran.
+
+**Verdict: NO-GO.** Val cold-weekly seed-mean **0.505 vs fxsbq 0.543** — a return wash / hair
+below, with no drawdown benefit. The anti-chase / rotation lever is **refuted as a net win**;
+`rotate_pump_block` stays default-OFF. (A thin offline calibration on the published-s1 realized
+trades had already warned the run-up penalty was suggestive only above ~15% with n≈5 and no
+test-split coverage.) Note this is the **rotation** side of the FF case; the EMA-break / hold side
+was addressed by the suppression fix above. See [[Experiment Log]].
+
+### candle_exit — candlestick exit on a held in-profit position (run fxsbqc `d0f926e`) — return-WASH, DD-better
+
+**Lever.** If **holding an in-profit position** and the bar is an **inverted hammer** (upper wick
+`>= candle_uw_min*range` [0.5], lower wick `<= candle_lw_max*range` [0.25]) **or a doji** (body
+`<= candle_doji_max*range` [0.10], open≈close), **prompt** an exit. Discretionary (the rule
+default-sells but the agent can hold), reason `CANDLE_EXIT`, precedence **below** the trailing stop
+and EMA-break. Config-gated, default OFF = byte-identical.
+
+**Motivation.** The Q-token traps: W19 an inverted hammer one bar after entry preceded a −20%-floor
+dump; W16 a doji (Mar 4 21:00). The offline probe (`probe_candle_exit.py`) found the signal
+~flat/noise on held-in-profit positions (forwards ~0%, inconsistent across splits); built per the
+user's direction anyway, with the gate as arbiter (consistent with the standing finding that wick
+shapes are bearish only on full-ignition entry bars, not a clean exit signal mid-hold).
+
+**Verdict: return WASH, DD-BETTER.** Val cold-weekly seed-mean **0.540 vs fxsbq 0.543** (neutral),
+**but worst-week DD 14.0% vs 20.0%** — meaningfully DQ-protective. Return-neutral and
+risk-reducing: the agent learned to honor the prompt selectively (it did not dump winners). A
+risk-side keeper, not a return lever.
+
+### Branch status
+
+With the rotation brake refuted and the candle exit only risk-protective, the **FF-thesis
+exit/rotation exploration is closed.** The deploy pick is **sbq-s1** — the voltopk-10 +
+suppression policy, NOT the fixed-13 fxsbq family (consistent with the fixed-13 closed branch
+above). sbq-s1 is the current champion and the live paper-harness model; its frozen-TEST
+certification and deploy are logged in [[Experiment Log]].

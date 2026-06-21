@@ -1205,9 +1205,117 @@ DIRECTIONAL — it DRAGS in a down/bear week (a sample week realized **−$74 = 
 GAINS in an up week; given the bearish live-week thesis it will tend to drag. It is the price of Rule-1,
 tunable via `BUY_HOUR` / `SELL_HOUR` / `DEFAULT_FRAC` (a shorter hold = less directional risk).
 
-**STATUS (precise):** PAPER/sim logic, committed + pushed (`d936101` + `b43d0e2` on
-`feat/live-event-harness`). **LIVE execution of these trades on June 22 still needs the TWAK SIGNING PATH**
+**STATUS (precise):** PAPER/sim logic, committed + pushed (`d936101` + `b43d0e2`; now on `main`
+after the 2026-06-21 branch reconciliation, §below). **LIVE execution of these trades on June 22 still needs the TWAK SIGNING PATH**
 (separate, not built; this fixed BNB↔USDT swap is the ideal first live trade). Live-window start assumed
 **2026-06-22 00:00 UTC** (verify vs the rules). The end-to-end DASHBOARD render of the compliance asset is
 NOT yet verified on the desktop (pending a `simulate_weekly` re-run after the sbq sweep).
 → [[Live Forward-Run Harness]], [[AI Training]].
+
+## 2026-06-19/21 — two refuted env knobs, dashboard export fixes, leaderboard re-rank, sbq-s1 certified + deployed, branch reconciliation
+
+The sbq sweep landed: **champion + deploy pick = `sbq-s1`** (`ppo-event-rdLe4-sbq-3c84b4a-s1`) —
+`universe_mode=voltopk` k=10, `vol_mult=2.0`, + the sideways EMA-break suppression
+(`shallow_break_max=0.02`, `consol_vol_max=0.015`), `entry_forward` reward, RecurrentPPO LSTM-256.
+Two further single-variable env knobs were built and tested against `fxsbq`
+(`ppo-event-rdLe4-fxsbq-62800ff`, the fixed-13 + suppression FF-thesis vehicle; its val cold-weekly
+seed-mean **0.543** is the bar). Both REFUTED as net wins; the dashboard export path was hardened;
+the leaderboard re-ranked; sbq-s1 was frozen-test certified and surgically deployed live; and the two
+divergent branches were reconciled to one. Numbers/verdicts → [[Experiment Log]], [[AI Training]];
+deploy mechanics → [[Live Forward-Run Harness]]; dashboard schema/contract → [[Apentic Data Contract]],
+[[Dashboard Leaderboard]].
+
+- **`71bdfc9` — `rotate_pump_block` (anti-chase rotation brake). REFUTED.** In loser-funded rotation
+  (`_rotate_for`), do NOT liquidate a holding to fund an entry into a candidate that already ran up
+  > `rotate_pump_block` (=0.15) over the prior `rotate_pump_win` (=24h) bars. Config-gated, default
+  `0.0` = OFF = byte-identical. Motivated by fxsbq-s1 Week-21 (Apr 6-13): the FF→ZEC rotation at
+  Apr-10 01:00 SOLD FF to buy ZEC's SECOND pump leg (entry ~5h after a local top, +44% over ZEC's
+  cycle); both legs lost (FF −1.2%, ZEC#2 −1.6%). **Verdict:** run `fxsbqr`
+  (`ppo-event-rdLe4-fxsbqr-71bdfc9`) val cold-weekly seed-mean **0.505** vs fxsbq 0.543 = NO-GO
+  (return wash / hair below, no DD benefit) → the anti-chase / rotation lever is refuted as a net win;
+  stays default-OFF. (A thin offline calibration on the published-s1 realized trades had warned the
+  run-up penalty was suggestive only above ~15% with n~5 / no test-split coverage.)
+- **`d0f926e` — `candle_exit` (candlestick exit). REFUTED on return, DD-protective.** If HOLDING an
+  IN-PROFIT position and the bar is an INVERTED HAMMER (upper wick ≥ `candle_uw_min`·range [0.5],
+  lower wick ≤ `candle_lw_max`·range [0.25]) or a DOJI (body ≤ `candle_doji_max`·range [0.10],
+  open≈close), PROMPT an exit. Discretionary (rule-default sells, the agent may hold), reason
+  `CANDLE_EXIT`, precedence below the trailing stop + EMA-break. Config-gated, default OFF =
+  byte-identical. Motivated by Q-token traps — W19 an inverted hammer one bar after entry preceded a
+  −20%-floor dump; W16 a doji (Mar 4 21:00). The offline probe (`probe_candle_exit.py`) found the
+  signal ~flat/noise on held-in-profit positions (forwards ~0%, inconsistent across splits); built per
+  the user's direction anyway, gate as arbiter. **Verdict:** run `fxsbqc`
+  (`ppo-event-rdLe4-fxsbqc-d0f926e`) val cold-weekly seed-mean **0.540** vs fxsbq 0.543 = return WASH,
+  BUT worst-week DD **14.0% vs 20.0%** = DD-BETTER (DQ-protective) — return-neutral, risk-reducing; the
+  agent learned to honor the prompt selectively (didn't dump winners).
+
+### Dashboard export fixes (3, all SYSTEMIC on the shared export path → [[Apentic Data Contract]])
+
+These hit every published model with a thin/low-liquidity token (missing-OHLCV hours + FIFO
+round-trip dust); the per-week TOTAL was always correct (env equity) — these were mis-attribution /
+marker-placement bugs, not lost or invented PnL.
+
+- **`6896557` — marker drift + corrupt exit_price.** (1) Thin tokens have missing OHLCV hours (e.g.
+  SIREN W11 had 124 of 168 candles); the dashboard placed trade markers by ARRAY INDEX assuming a
+  dense series, so markers drifted (~14h). FIX: `ap.densify_candles` fills internal gaps with flat
+  zero-volume bars (`o=h=l=c=prev_close`, `v=0`) so the array is contiguous one-bar-per-hour; applied
+  in `build_portfolio_artifacts`. (2) `fold_positions` (FIFO round-trip reconstruction) left a float
+  dust crumb (qty ~1e-12) that the ledger-snap divided into → a NEGATIVE exit_price (−0.124 / −230% on
+  SIREN). FIX: drop sub-$0.01 dust positions before the snap + snap the residual onto the
+  LARGEST-notional position.
+- **`c019556` — forced end-of-week close showed +$0.** Positions held to the session end were
+  recorded at exit=entry (0 PnL) and the ledger-snap mis-attributed their real gain to another row.
+  FIX: mark held-to-end lots at the week-end close price (`end_px`).
+
+### Leaderboard re-rank to 6-month cumulative (user request → [[Dashboard Leaderboard]])
+
+- **`e73f09b` (backend `publish_leaderboard`) + `38f3b82` (alexlouis-site frontend label).** Changed
+  the Simulation leaderboard's PRIMARY rank metric from `weekly_score` (OOS per-week mean) to
+  `cumulative_score` (6-month cumulative return = `windows.overall.ret_sum`); `weekly_score` still
+  computed + displayed. Board now: **#1 `sbq-s1` (+125% 6-mo) / #2 `eff-s1` (+104%) / #3 `fxsbqc-s0`
+  (+86%)**; champion = `sbq-s1`; ef2-s3 (+57%) dropped off the top-3. Dashboard de-cluttered: the
+  Simulations model index curated 15 → 5 keepers (`reset_sim_index.py`; the S3 publisher de-lists,
+  not byte-deletes — the no-byte-delete fact), then the 5 republished with the export fixes above.
+
+### Frozen-test certification of sbq-s1 (2026-06-21) — the one-shot OOS cert, now CONSUMED
+
+sbq-s1 was selected on VALIDATION (the loop gates on val; best-seed by val return), so the TEST split
+was genuinely held out. **Held-out TEST (5 cold weeks, fresh $10k each): +58.6% sum / +11.7%/wk mean
+/ 5-of-5 winning weeks / worst-week DD 8.8% / DQ-safe.** HELD UP vs validation (+7.1%/wk, 67% win) —
+no overfitting collapse. PASS. Caveat (not buried): **pump-concentrated** — W24 +37.6% (a token-B
+~3×); the other 4 weeks +0.3% to +16.9% (big in volatile weeks, near-flat-but-positive /
+capital-preserving in quiet ones). Per the meta-overfit guard: **NO further tuning to the sbq config
+now that test is spent.**
+
+### Live deploy of sbq-s1 to the EC2 paper harness (2026-06-21), replacing ef-s2 (→ [[Live Forward-Run Harness]])
+
+- **SURGICAL deploy.** Weights (`policy.zip` + `vecnormalize.pkl` + `metrics.json`) pushed to
+  `s3://alexlouis-act-private/models/<run-id>/`; on the box only the **2 INFERENCE files** were updated
+  to the new code (`src/trader/train/event_env.py` = the suppression env, `scripts/simulate.py` =
+  `env_kwargs_from_provenance`) — the live harness code (`event_agent` / `runner` / `telemetry` /
+  `compliance`) was UNTOUCHED. EC2 pulled the bundle via boto3 (instance role; no `aws` CLI on the box).
+  Dry-run gate passed (loads, suppression applied, ticked uni=10). `trader-event-agent.service`
+  `--run-dir` repointed to sbq-s1 + restarted → active, paper mode, publishing `trading/` telemetry.
+- **KEY PRINCIPLE: the serving env must MATCH the checkpoint's training env.** ef-s2 was trained
+  WITHOUT suppression (served with the frozen pre-suppression env); sbq-s1 was trained WITH
+  suppression, so it ships WITH the suppression env = matched, no train/serve skew.
+
+### Branch reconciliation (2026-06-21) — now ONE canonical branch (→ [[Remote Capabilities]])
+
+- `origin/main` (the live-harness line: `event_agent`/`runner`, telemetry, compliance) and
+  `origin/feat/live-event-harness` (the training/export/leaderboard line) had DIVERGED at merge-base
+  `55cf113`. Root cause: a parallel EC2-deploy chat cherry-picked the compliance commit onto main +
+  added telemetry, deliberately EXCLUDING the suppression env commit (to avoid the ef-s2 train/serve
+  skew above). `feat` was effectively a SUPERSET of main (the harness was the same commits
+  cherry-picked to both; `feat` had it + all the training/export + a +32-line `compliance_positions`
+  superset). **Merged `feat` → `main` in an isolated worktree** (3 conflicts only: `compliance.py` +
+  `test_event_runner.py` took feat's superset; `Experiment Log.md` combined). Merged tree verified
+  byte-identical to `feat`; tested (**493 unit + 28 harness**). Merge commit **`3cfb5aa`** (2 parents).
+- The box was redeployed from **COMMITTED `main`** (clean working tree, no fragile working-tree mods),
+  running sbq-s1. The redundant `feat/live-event-harness` branch was **deleted** → **`origin/main`
+  (`3cfb5aa`) is the SINGLE canonical branch.**
+
+**STATUS (precise):** sbq-s1 is the deployed/champion model and the #1 board entry; the frozen-test
+cert is CONSUMED (no further sbq tuning). Two env knobs (`rotate_pump_block`, `candle_exit`) are
+committed default-OFF (byte-identical); candle_exit is return-neutral/DD-protective but not promoted.
+The dashboard export path is hardened and the 5 keepers republished. Single canonical branch =
+`main` @ `3cfb5aa`. → [[Experiment Log]], [[Live Forward-Run Harness]].

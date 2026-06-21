@@ -1,9 +1,11 @@
 # Live Forward-Run Harness
 
-How the trained RL champion (**ef-s2**, `ppo-event-rdLe4-ef-503b784-s2`) runs **live on BSC in
+How the trained RL champion (**sbq-s1**, `ppo-event-rdLe4-sbq-3c84b4a-s1`) runs **live on BSC in
 paper mode** on the EC2 host, forward-testing before the June 22–28 scored window. Built
-2026-06-17 (branch `feat/live-event-harness`). The host itself is [[EC2 Trading Host Runbook]];
-the model + training are [[AI Training]]; the telemetry surface is [[Apentic Data Contract]] §trading/.
+2026-06-17; the deployed champion is now sbq-s1 (replaced ef-s2 on 2026-06-21 — see §below). The
+canonical code line is `main` (the `feat/live-event-harness` branch was merged in and deleted —
+see §branch reconciliation). The host itself is [[EC2 Trading Host Runbook]]; the model + training
+are [[AI Training]]; the telemetry surface is [[Apentic Data Contract]] §trading/.
 
 ## The core principle — reuse the validated loop, don't reimplement
 
@@ -26,9 +28,9 @@ newest bar can introduce a new event. Obs-parity thus reduces from "did I reimpl
 correctly" to "does my live panel equal the recorded panel" — a diffable data check.
 
 **$10k cold-weekly is mandatory, not a choice.** The env prices fills on its internal index;
-running ef-s2 at a different capital (e.g. $1k) changes the AMM-cost/liquidity fraction → fill
-skew → out-of-distribution. So the paper book IS the env's per-week $10k equity, exactly as the
-model was validated and the competition scores.
+running the champion at a different capital (e.g. $1k) changes the AMM-cost/liquidity fraction →
+fill skew → out-of-distribution. So the paper book IS the env's per-week $10k equity, exactly as
+the model was validated and the competition scores.
 
 ## Modules (`src/trader/agent/`)
 
@@ -58,8 +60,8 @@ past bars stay byte-identical. The train/serve-skew guarantee, proven without th
 
 ## Live data source — GeckoTerminal (parity-locked), NOT CMC
 
-The live 1h OHLCV feed is **GeckoTerminal BSC-pool candles** — because that is what ef-s2 trained
-on (the recorded data came from `download_ohlcv` → GeckoTerminal pools). CMC was considered and
+The live 1h OHLCV feed is **GeckoTerminal BSC-pool candles** — because that is what the champion
+trained on (the recorded data came from `download_ohlcv` → GeckoTerminal pools). CMC was considered and
 **rejected**: it is CEX-aggregated spot (different price/volume/microstructure), which would push
 the frozen model out-of-distribution; and the existing `cmc_market` only does `quotes/latest`, no
 1h history. Decided with the user 2026-06-17. (Switching feeds would require retraining on the new
@@ -110,8 +112,8 @@ rate-limit-resilient and ~1 of 20 pools is effectively dead.
 Each hourly tick fetches all 20 tokens (~20 gentle calls/tick with 3s pacing + backoff) to append
 the 1 new bar. Self-healing (a one-bar-behind token catches up next tick). If 429s persist in
 steady state, the clean fix is a GeckoTerminal API key (higher limits) — surface it rather than let
-data silently drift. The **≥1-trade/day floor** — ef-s2's published gate shows several low-activity
-weeks (`daily_floor_ok` in `status.json`) — was a real DQ risk; it is now **ADDRESSED** by the
+data silently drift. The **≥1-trade/day floor** — the selective event champion shows several
+low-activity weeks (`daily_floor_ok` in `status.json`) — was a real DQ risk; it is now **ADDRESSED** by the
 compliance overlay (see §below). The runner already *tracked* the floor; the overlay *satisfies* it.
 
 ## Daily market scan (`market_metrics.json`)
@@ -119,7 +121,7 @@ compliance overlay (see §below). The runner already *tracked* the floor; the ov
 A daily EC2 timer (`trader.agent.daily_scan`, `trader-daily-scan.timer` @ 00:10 UTC) refreshes the
 top-level **`market_metrics.json`** dashboard (vol/correlation, via `compute_market_metrics`) and
 appends a **`selected`** block = the model's ACTUAL current vol-top-8, read from the same env path
-the harness trades (`eval_universe_and_caps` over the cold-week window). Because ef-s2 selects
+the harness trades (`eval_universe_and_caps` over the cold-week window). Because the champion selects
 **weekly**, `selected` changes weekly while the metrics refresh daily — it surfaces the real traded
 set transparently and does **not** drive the model (a daily re-pick would be OOD for the frozen
 model — the explicit design decision). Torch-free. Publishes top-level via the instance role (a
@@ -181,16 +183,64 @@ exposure**, so it is **DIRECTIONAL** — it **drags in a down/bear week** (a sam
 ([[Market Conditions]] §live-week-read) it will tend to drag. It is the price of Rule-1; tunable via
 `BUY_HOUR` / `SELL_HOUR` / `DEFAULT_FRAC` in `compliance.py` (a shorter hold = less directional risk).
 
-**Status (precise):** this is **PAPER/sim logic**, committed + pushed (`d936101` + `b43d0e2` on
-`feat/live-event-harness`). **LIVE execution of these trades on June 22 still needs the TWAK signing
+**Status (precise):** this is **PAPER/sim logic**, committed + pushed (`d936101` + `b43d0e2`, now on
+`main` after the branch reconciliation §below). **LIVE execution of these trades on June 22 still needs the TWAK signing
 path** (separate, not built — this fixed BNB↔USDT swap is the ideal first live trade). Live-window
 start assumed 2026-06-22 00:00 UTC (an assumption to verify vs the rules). The **end-to-end dashboard
 render** of the compliance asset is **NOT yet verified** on the desktop (pending a `simulate_weekly`
 re-run after the sbq sweep).
+
+## 2026-06-21 — sbq-s1 deployed, replacing ef-s2 (the surgical 2-file deploy)
+
+The deployed champion is now **sbq-s1** (`ppo-event-rdLe4-sbq-3c84b4a-s1`): the prior config
+(`voltopk` k=10, `vol_mult=2.0`) **plus sideways EMA-break suppression** (`shallow_break_max=0.02`,
+`consol_vol_max=0.015`), `entry_forward` reward, RecurrentPPO LSTM-256. It was certified on the
+held-out **frozen TEST** split (5 cold weeks, fresh $10k each): **+58.6% sum / +11.7%/wk / 5-of-5
+winning weeks / worst-week DD 8.8% / DQ-safe** — held up vs validation, no overfit collapse (the
+one-shot OOS cert is now CONSUMED; no further tuning to the sbq config). Selection details + the
+frozen-TEST certification live in [[AI Training]] and [[Experiment Log]].
+
+**The train/serve-match principle (the deploy invariant).** The serving env must MATCH the
+checkpoint's training env, or the model goes out-of-distribution. ef-s2 was trained **without**
+suppression, so it was served with the frozen **pre**-suppression env. sbq-s1 was trained **with**
+suppression, so it ships **with** the suppression env — matched, no train/serve skew. This is the
+[[AI Training]] obs-parity rule applied to a config change, not just a feed change.
+
+**Surgical 2-file deploy.** Only the two **inference** files were updated on the box to the new
+code: `src/trader/train/event_env.py` (the suppression env) and `scripts/simulate.py`
+(`env_kwargs_from_provenance`, so the live harness rebuilds the suppression `env_kwargs` from the
+checkpoint's provenance). The **live harness code was UNTOUCHED** (`event_agent` / `event_runner`
+/ telemetry / `compliance`) — the suppression is entirely inside the reused `EventRungEnv`, exactly
+per the "reuse the validated loop" principle §above. Steps:
+1. Weights (`policy.zip` + `vecnormalize.pkl` + `metrics.json`) pushed to the private bucket
+   `s3://alexlouis-act-private/models/ppo-event-rdLe4-sbq-3c84b4a-s1/` (§private model store).
+2. EC2 pulled the bundle via **boto3 + the instance role** (no `aws` CLI on the box).
+3. **Dry-run gate passed** — model loads, suppression applied, a tick selects `uni=10`.
+4. `trader-event-agent.service` repointed (`--run-dir` → sbq-s1) + restarted → active, paper mode,
+   publishing `trading/` telemetry.
+
+The leaderboard now ranks #1 sbq-s1; champion = sbq-s1 (see [[Dashboard Leaderboard]]).
+
+## 2026-06-21 — branch reconciliation (one canonical branch: `main`)
+
+`origin/main` (the live-harness line: `event_agent`/`runner`, telemetry, compliance) and
+`origin/feat/live-event-harness` (the training / export / leaderboard line) had **diverged** at
+merge-base `55cf113`. Root cause: a parallel EC2-deploy chat cherry-picked the compliance commit
+onto `main` + added telemetry, deliberately **excluding** the suppression-env commit (to avoid
+**ef-s2** train/serve skew — ef-s2 had to keep its pre-suppression env). With sbq-s1 (trained with
+suppression) now the champion, that exclusion is moot.
+
+`feat` was effectively a **superset** of `main` (the harness was the same commits cherry-picked to
+both; `feat` additionally had all the training/export work + a +32-line `compliance_positions`
+superset). Merged `feat` → `main` in an isolated worktree — only 3 conflicts: `compliance.py` +
+`test_event_runner.py` (took `feat`'s superset) and `Experiment Log.md` (combined). The merged tree
+verified **byte-identical to `feat`**; tested (**493 unit + 28 harness**). Merge commit **`3cfb5aa`**
+(2 parents). The box was redeployed from **committed `main`** (clean working tree, no fragile
+working-tree mods), running sbq-s1. The redundant `feat/live-event-harness` branch was **deleted** →
+`origin/main` (`3cfb5aa`) is the **single canonical branch**.
 
 ## What's NOT built yet
 - **Live TWAK signing path** for the event harness (paper-only today; live mode refuses). Separate
   from the Phase-G on-chain registration ([[EC2 Trading Host Runbook]]).
 - Richer portfolio / per-trade-reasoning telemetry surface (the fills already carry the trigger +
   obs; [[Trade Reasoning Capture]] is the eventual home).
-- Branch `feat/live-event-harness` is **unmerged** to main (the box runs the branch).

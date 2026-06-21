@@ -59,7 +59,8 @@ gate (`src/trader/train/weekly_eval.py`) over **val+test COLD weeks** (fresh $10
 re-picked causally): (1) worst single-week maxDD < 30%, (2) **beats the rung-0 RULE** on the paired
 edge (bootstrap CI lower bound > 0). Judge on the **seed mean**; always read the **worst seed's DD**.
 B&H + Random are reported, never binding. Substrate ceiling today = `wkw` (rdLe4 + wick_reject 0.25),
-+5.1pts vs rung-0; deploy pick = `ef-s2`.
++5.1pts vs rung-0; deploy pick = `ef-s2`. *(As of 2026-06-18. SUPERSEDED — the deploy pick / champion is
+now `sbq-s1`; see §2026-06-21.)*
 
 ### Why this lever (the motivating finding — [[Experiment Log]] §2026-06-18)
 The `_ignite` trigger is **regime-conditional**: on the bear/chop-heavy TRAIN era, ignitions are
@@ -1271,10 +1272,70 @@ satisfied without re-shaping the policy or the reward:
   is the price of Rule-1 and is tunable (BUY_HOUR / SELL_HOUR / DEFAULT_FRAC). It sits in the **separate
   sleeve**, so it does NOT bias the policy's honest cold-weekly evaluation.
 
-**STATUS:** paper/sim logic only, committed + pushed (`d936101` + `b43d0e2` on
-`feat/live-event-harness`). LIVE on-chain execution of these trades on June 22 still needs the **TWAK
+**STATUS:** paper/sim logic only, committed + pushed (`d936101` + `b43d0e2`; now on `main`
+after the 2026-06-21 branch reconciliation, §below). LIVE on-chain execution of these trades on June 22 still needs the **TWAK
 signing path** (separate, not built — this fixed BNB↔USDT swap is the ideal first live trade). The
 end-to-end dashboard render of the compliance asset is NOT yet verified on the desktop (pending a
 `simulate_weekly` re-run after the sbq sweep). Execution detail (runner overlay, schedule, sleeve
 PnL, dashboard schema fields) lives in the Live Forward-Run Harness note + [[Simulated Market]] — this
 note owns training, not execution.
+
+## 2026-06-21 — sbq-s1 is the CHAMPION + deploy pick (frozen-TEST CERTIFIED, now live); two env knobs swept
+
+The session that turned the §2026-06-19 sideways-suppression lever into a deployed champion and spent the
+frozen test on it. **The deployed/champion model is now `sbq-s1`, NOT `ef-s2`/`ef2`** — every "deploy pick
+= ef-s2" / "champion = ef2" reference in the older dated sections above is superseded by this entry. The
+Simulation leaderboard's PRIMARY rank metric also changed from `weekly_score` (OOS per-week mean) to
+**`cumulative_score`** (6-month cumulative return = `windows.overall.ret_sum`); `weekly_score` is still
+computed + displayed. Board now #1 `sbq-s1` (+125% 6-mo) / #2 `eff-s1` (+104%) / #3 `fxsbqc-s0` (+86%).
+Detail + the export-bug fixes + branch reconciliation → [[Experiment Log]] §2026-06-21, [[Simulated Market]],
+[[Dashboard Leaderboard]].
+
+### The champion — `sbq-s1` (suppression substrate, certified)
+
+`ppo-event-rdLe4-sbq-3c84b4a-s1` — `universe_mode=voltopk` k=10, `vol_mult=2.0`, **sideways EMA-break
+suppression ON** (`shallow_break_max=0.02`, `consol_vol_max=0.015` — the FF-validated thresholds the
+§2026-06-19 "new open lever" built at `abf089b`), `reward_mode=entry_forward`, RecurrentPPO LSTM-256. The
+suppression knob is the **substrate**; the two knobs below were swept on top of it this session.
+
+**FROZEN-TEST CERTIFICATION (now CONSUMED).** `sbq-s1` was selected on VALIDATION (the loop gates on val;
+best-seed by val return), so the TEST split was genuinely held out. Held-out TEST (5 cold weeks, fresh
+$10k each): **+58.6% sum / +11.7%/wk mean / 5-of-5 winning weeks / worst-week DD 8.8% / DQ-safe** — HELD
+UP vs validation (+7.1%/wk, 67% win), no overfitting collapse → **PASS.** Caveat (stated plainly):
+**pump-concentrated** — W24 +37.6% is a single token ~3×; the other 4 weeks +0.3% to +16.9% (big in
+volatile weeks, near-flat-but-positive / capital-preserving in quiet ones). Per the meta-overfit guard,
+**NO further tuning to the `sbq` config now that test is spent** (the `ppo2-real` +83%→+11% collapse is
+why test is reserved).
+
+**Now deployed.** `sbq-s1` replaced `ef-s2` on the EC2 paper harness (surgical 2-file inference update,
+weights pulled via boto3; matched train/serve env — `sbq` was TRAINED with suppression so it SHIPS with
+the suppression env, no skew, unlike `ef-s2` which was served on the frozen pre-suppression env). The
+live harness owns that detail; this note owns training. See the Live Forward-Run Harness note.
+
+### The two env knobs swept this session — both config-gated, default-OFF (byte-identical when OFF)
+
+Both were graded honest cold-weekly against `fxsbq` (`ppo-event-rdLe4-fxsbq-62800ff`, fixed-13 + suppression,
+the FF-thesis vehicle; its val cold-weekly seed-mean **0.543** is the bar). The probe-before-build discipline
+held: each had a cheap offline probe whose read was honored in the verdict.
+
+| knob | run | lever | val seed-mean vs `fxsbq` (0.543) | worst-week DD | verdict |
+|------|-----|-------|----------------------------------|---------------|---------|
+| `rotate_pump_block` | `fxsbqr` (`71bdfc9`) | in loser-funded rotation, do NOT liquidate a holding to fund a candidate that already ran up > `rotate_pump_block`(0.15) over the prior `rotate_pump_win`(24h) bars | **0.505** (return wash / hair below, no DD benefit) | — | **NO-GO — REFUTED** |
+| `candle_exit` | `fxsbqc` (`d0f926e`) | if HOLDING an in-profit position and the bar is an INVERTED HAMMER (`candle_uw_min`0.5 / `candle_lw_max`0.25) or a DOJI (`candle_doji_max`0.10), PROMPT an exit — DISCRETIONARY (rule-default sells, agent can hold), reason `CANDLE_EXIT`, precedence BELOW trailing stop + EMA-break | **0.540** (return WASH) | **14.0% vs 20.0% = DD-BETTER** | RETURN-NEUTRAL, RISK-REDUCING (DQ-protective) |
+
+- **`rotate_pump_block` (anti-chase rotation brake) — REFUTED.** Motivation: `fxsbq-s1` Week-21 the FF→ZEC
+  rotation at Apr-10 01:00 SOLD FF to buy ZEC's SECOND pump leg (entry ~5h after a local top, +44% over
+  ZEC's cycle); both legs lost (FF −1.2%, ZEC#2 −1.6%). A thin offline calibration on the published-s1
+  realized trades had warned the run-up penalty was suggestive only above ~15% with n~5 / no test-split
+  coverage — and the sweep confirmed it: return wash, no DD benefit. **The anti-chase / rotation lever is
+  refuted as a net win; `rotate_pump_block` stays default-OFF.**
+- **`candle_exit` (candlestick exit) — RETURN-NEUTRAL, DD-BETTER.** Motivation: Q-token traps — W19 an
+  inverted hammer one bar after entry preceded a dump (−20% floor); W16 a doji (Mar 4 21:00). The offline
+  probe (`probe_candle_exit.py`) found the signal ~flat/noise on held-in-profit positions (forwards ~0%,
+  inconsistent across splits); built per the user's direction anyway with the gate as arbiter. Verdict:
+  return-neutral but **worst-week DD 14.0% vs 20.0% = DD-protective** — the agent learned to honor the
+  prompt SELECTIVELY (it did NOT dump winners). A risk-reducing, return-neutral add. Note `fxsbqc-s0` sits
+  #3 on the cumulative-return leaderboard (+86%).
+
+Both knobs default 0 / OFF (byte-identical to the prior reward stream when off), consistent with every prior
+env lever (the §2026-06-19 suppression knobs, `regime_base`, `basket_default`, `rule_default`).
