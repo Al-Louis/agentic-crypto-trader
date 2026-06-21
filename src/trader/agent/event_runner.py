@@ -35,6 +35,22 @@ CASH_LEG = "USDT"
 DD_STOP_PCT = 30.0
 
 
+def _exec_summary(res: dict | None) -> dict:
+    """Compact a live-executor result (`execute_trade`'s return) into fill-row fields. Returns
+    `{}` when there was no live signing (paper / no executor) so the paper fill row stays
+    BYTE-IDENTICAL to before this sleeve existed."""
+    if res is None:
+        return {}
+    status = ("dry_run" if res.get("dry_run") else "refused" if res.get("refused")
+              else "error" if res.get("error") else res.get("status") or "unknown")
+    out = {"exec_status": status, "tx_hash": res.get("tx_hash")}
+    if res.get("refused"):
+        out["exec_refused"] = res["refused"]
+    if res.get("error"):
+        out["exec_error"] = res["error"]
+    return out
+
+
 def forward_run_policy(universe: list[str], capital: float = 10_000.0, *,
                        cash_leg: str = CASH_LEG, dd_stop_pct: float = DD_STOP_PCT,
                        max_slippage_pct: float = 1.0) -> Policy:
@@ -70,7 +86,9 @@ class EventRunner:
     def __init__(self, trader: LiveEventTrader, *, selection: list[dict],
                  agent_ledger_path: Path, capital: float = 10_000.0,
                  policy: Policy | None = None, publisher=None, mode: str = "paper",
-                 compliance_frac: float = 0.03, bnb_price_fn=None):
+                 compliance_frac: float = 0.03, bnb_price_fn=None,
+                 execute_fn=None, live_policy: Policy | None = None,
+                 live_compliance_usd: float | None = None, live_dry_run: bool = False):
         self.trader = trader
         self.selection = selection
         self.agent_ledger_path = Path(agent_ledger_path)
@@ -79,6 +97,18 @@ class EventRunner:
         self._publisher = publisher
         self.mode = mode
         self.compliance_frac = float(compliance_frac)   # >=1-trade/day overlay size (0 disables it)
+        # --- live execution (the TWAK signing path) — OFF unless ALL of: mode=="live" AND an
+        # `execute_fn` is wired. Default (execute_fn=None) keeps paper byte-identical, so the EC2
+        # paper service is untouched. `live_policy` (the tight real-money caps) governs the actual
+        # signing; the env-parity guardrail check still uses self.policy. `live_compliance_usd`
+        # overrides the compliance round-trip notional for live (the env equity is the $10k book,
+        # NOT the real bankroll, so frac*equity would over-size the real swap). `live_dry_run`
+        # routes through execute_trade's quote-only pre-flight (no signing).
+        self.execute_fn = execute_fn
+        self.live_policy = live_policy
+        self.live_compliance_usd = (None if live_compliance_usd is None
+                                    else float(live_compliance_usd))
+        self.live_dry_run = bool(live_dry_run)
         self._bnb_price_fn = bnb_price_fn          # injectable BNB USD price(now_ts) for tests
         self._bnb_anchor = None                    # cached BNB close series (False = unavailable)
         self._compliance_pnl = 0.0                 # cumulative realized PnL of the compliance sleeve
@@ -125,6 +155,24 @@ class EventRunner:
         except (KeyError, ValueError, TypeError):
             return None
         return v if v == v and v > 0 else None      # reject NaN / non-positive
+
+    # -- live signing (the TWAK execution path; off in paper) -----------------
+    def _sign_live(self, frm: str, to: str, usd: float, slippage_pct: float) -> dict | None:
+        """Route a guardrail-PASSED fill through the real signing path (`execute_fn`, e.g.
+        `trader.execution.execute.execute_trade`). Returns the executor's result dict, or None
+        when live execution is not wired (paper / no executor) — then the fill is paper-only,
+        exactly as before. NEVER raises: a signing exception is captured into an error dict so
+        one bad swap cannot abort the hourly tick. Real spend is capped by `live_policy` inside
+        the executor (its own two-phase check + risk ledger), independent of the env-parity check."""
+        if self.execute_fn is None or self.mode != "live":
+            return None
+        intent = TradeIntent(from_asset=frm, to_asset=to, usd=float(usd), chain="bsc",
+                             slippage_pct=slippage_pct)
+        pol = self.live_policy if self.live_policy is not None else self.policy
+        try:
+            return self.execute_fn(intent, pol, dry_run=self.live_dry_run)
+        except Exception as e:  # noqa: BLE001 — a swap failure must not crash the loop
+            return {"error": f"{type(e).__name__}: {e}"[:300], "tx_hash": None}
 
     # -- daily >=1-trade/day compliance overlay -------------------------------
     def _bnb_price(self, now_ts: int) -> float | None:
@@ -191,13 +239,22 @@ class EventRunner:
         intent = TradeIntent(from_asset=frm, to_asset=to, usd=usd, chain="bsc",
                              slippage_pct=self.policy.max_slippage_pct)
         verdict = check_trade(self.policy, intent, self._risk_state(equity, spent_today))
+        # live signing: the REAL swap uses live_compliance_usd (the env equity is the $10k book,
+        # not the real bankroll, so frac*equity would over-size the on-chain swap); falls back to
+        # `usd` if unset. The paper row keeps `usd` for $10k-book sleeve-PnL parity.
+        exec_res = None
+        if verdict.allowed:
+            real_usd = self.live_compliance_usd if self.live_compliance_usd is not None else usd
+            exec_res = self._sign_live(frm, to, real_usd, self.policy.max_slippage_pct)
         if reason == SELL_REASON:
             self._compliance_pnl += usd - float(bought.get("usd_in") or 0.0) - cost
-        store.append({"kind": "fill", "mode": self.mode, "compliance": True, "from": frm, "to": to,
-                      "usd_in": usd, "usd_out": usd, "cost_usd": cost, "price": px, "price_index": px,
-                      "reason": reason, "trigger": reason, "token": COMPLIANCE_TOKEN, "obs": None,
-                      "bar_ts": int(now_ts), "guardrail_ok": bool(verdict.allowed),
-                      "guardrail_codes": verdict.codes}, self.agent_ledger_path, now=None)
+        row = {"kind": "fill", "mode": self.mode, "compliance": True, "from": frm, "to": to,
+               "usd_in": usd, "usd_out": usd, "cost_usd": cost, "price": px, "price_index": px,
+               "reason": reason, "trigger": reason, "token": COMPLIANCE_TOKEN, "obs": None,
+               "bar_ts": int(now_ts), "guardrail_ok": bool(verdict.allowed),
+               "guardrail_codes": verdict.codes}
+        row.update(_exec_summary(exec_res))
+        store.append(row, self.agent_ledger_path, now=None)
         if not verdict.allowed:
             store.append({"kind": "refusal", "mode": self.mode, "compliance": True,
                           "intent": {"from": frm, "to": to, "usd": usd}, "refusals": verdict.codes},
@@ -264,24 +321,28 @@ class EventRunner:
                                  slippage_pct=self.policy.max_slippage_pct)
             verdict = check_trade(self.policy, intent, self._risk_state(equity, spent_today))
             spent_today += usd
+            exec_res = None
             if verdict.allowed:
                 recorded += 1
+                exec_res = self._sign_live(frm, to, usd, intent.slippage_pct)  # live only; None in paper
             else:
                 blocked += 1
             # paper: record the env's fill either way, tagged with the guardrail verdict; in live
-            # an !allowed verdict would BLOCK signing (the env fill would not be mirrored on-chain).
+            # an !allowed verdict BLOCKS signing (no _sign_live call -> never mirrored on-chain).
             # `price` is the REAL USD market close at the bar; `price_index` is the env's internal
-            # return-index the PnL/equity is computed in (kept for traceability).
+            # return-index the PnL/equity is computed in. `_exec_summary` adds tx_hash/exec_status
+            # in live (else {} -> the paper row is byte-identical to before this sleeve).
             real_px = self._real_price(f.token, int(f.time))
-            store.append({"kind": "fill", "mode": self.mode, "from": frm, "to": to,
-                          "usd_in": usd, "usd_out": usd, "cost_usd": float(f.fee),
-                          "price": real_px if real_px is not None else float(f.price),
-                          "price_index": float(f.price),
-                          "reason": f.reason, "token": f.token,
-                          "trigger": f.reason, "obs": f.obs, "bar_ts": int(f.time),
-                          "guardrail_ok": bool(verdict.allowed),
-                          "guardrail_codes": verdict.codes},
-                         self.agent_ledger_path, now=None)
+            row = {"kind": "fill", "mode": self.mode, "from": frm, "to": to,
+                   "usd_in": usd, "usd_out": usd, "cost_usd": float(f.fee),
+                   "price": real_px if real_px is not None else float(f.price),
+                   "price_index": float(f.price),
+                   "reason": f.reason, "token": f.token,
+                   "trigger": f.reason, "obs": f.obs, "bar_ts": int(f.time),
+                   "guardrail_ok": bool(verdict.allowed),
+                   "guardrail_codes": verdict.codes}
+            row.update(_exec_summary(exec_res))
+            store.append(row, self.agent_ledger_path, now=None)
             if not verdict.allowed:
                 store.append({"kind": "refusal", "mode": self.mode,
                               "intent": {"from": frm, "to": to, "usd": usd},

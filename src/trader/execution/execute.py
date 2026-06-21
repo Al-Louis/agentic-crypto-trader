@@ -81,8 +81,14 @@ def _unavailable(detail: str, phase: str, intent: TradeIntent, path: Path) -> di
 def execute_trade(intent: TradeIntent, policy: Policy = SPIKE_POLICY, *,
                   ledger_path: Path = ledger.LEDGER_PATH, cli=twak_cli,
                   poll_attempts: int = POLL_ATTEMPTS, poll_interval_s: float = POLL_INTERVAL_S,
-                  sleep=time.sleep) -> dict:
-    """Check → quote → re-check → record → swap → confirm. `cli` is injectable for tests."""
+                  sleep=time.sleep, dry_run: bool = False) -> dict:
+    """Check → quote → re-check → record → swap → confirm. `cli` is injectable for tests.
+
+    `dry_run=True` performs the full two-phase guardrail check (intent + realized quote) but
+    stops BEFORE the ledger attempt row, the swap, and the confirm — nothing is written and no
+    money moves. It is the safe end-to-end validation: a refusal still returns the refusal dict
+    (so the caller sees exactly what a real call would block); a pass returns
+    `{"dry_run": True, "would_execute": True, "quote", "usd"}`."""
     # 1) intent-phase check against persisted state (refuse early — no network on refusal).
     state = ledger.state_from_ledger(ledger_path)
     verdict = check_trade(policy, intent, state)
@@ -107,6 +113,12 @@ def execute_trade(intent: TradeIntent, policy: Policy = SPIKE_POLICY, *,
     verdict = check_trade(policy, quote_intent, state)
     if not verdict.allowed:
         return _refusal(verdict, "quote", quote_intent, ledger_path)
+
+    # dry-run stops here: every cap passed on the realized quote, but write nothing and sign
+    # nothing — report what WOULD execute. The safe pre-flight (no ledger row, no swap, no poll).
+    if dry_run:
+        return {"dry_run": True, "would_execute": True, "status": "dry_run",
+                "usd": quote_intent.usd, "quote": parsed}
 
     # 3) the attempt row must be ON DISK before signing — no record, no trade.
     try:

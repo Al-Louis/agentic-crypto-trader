@@ -182,3 +182,26 @@ def test_parse_tx_status_boolean_shape():
     assert parse_tx_status({"confirmed": False, "pending": False, "failed": True}) == "failed"
     # failed wins over a contradictory confirmed flag (conservative)
     assert parse_tx_status({"confirmed": True, "failed": True}) == "failed"
+
+
+# -- dry-run: the safe pre-flight (full check, quote, re-check — but sign/write NOTHING) -----
+
+def test_dry_run_checks_quote_but_signs_and_writes_nothing(tmp_path):
+    res, cli = run(intent(), tmp_path, dry_run=True)
+    assert res["dry_run"] is True and res["would_execute"] is True and res["status"] == "dry_run"
+    assert res["usd"] > 0.99 and res["quote"]["out_symbol"] == "USDT"
+    assert cli.calls == ["quote"]                          # quoted, never signed, never polled
+    assert ledger.read_rows(tmp_path / "ledger.jsonl") == []   # no attempt/result row written
+
+
+def test_dry_run_still_refuses_out_of_policy_intent(tmp_path):
+    res, cli = run(intent(usd=5.0), tmp_path, dry_run=True)
+    assert res["refused"] == ["PER_TRADE_CAP"] and res["phase"] == "intent"
+    assert cli.calls == []                                 # refusal short-circuits before the quote
+
+
+def test_dry_run_refuses_on_quote_implied_slippage(tmp_path):
+    # the quote re-check binds even in dry-run: minReceived implies 2% vs the 1% cap -> refuse.
+    res, cli = run(intent(), tmp_path, dry_run=True, cli=FakeCli(quote_out=quote_text(slip_pct=2.0)))
+    assert res["refused"] == ["SLIPPAGE_BOUND"] and res["phase"] == "quote"
+    assert cli.calls == ["quote"] and "swap" not in cli.calls

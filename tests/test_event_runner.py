@@ -48,6 +48,25 @@ def _runner(tmp_path, **kw):
     return EventRunner(trader, selection=[], agent_ledger_path=tmp_path / "agent.jsonl", **kw)
 
 
+class _FakeExec:
+    """Stand-in for `execute_trade` — records each call (intent + policy + dry_run) and returns a
+    scripted result, so the live-signing WIRING is tested without any network/keychain/real funds."""
+
+    def __init__(self, result=None):
+        self.calls = []
+        self.result = result if result is not None else {
+            "tx_hash": "0x" + "cd" * 32, "status": "confirmed", "usd": 0.40}
+
+    def __call__(self, intent, policy, *, dry_run=False):
+        self.calls.append({"from": intent.from_asset, "to": intent.to_asset, "usd": intent.usd,
+                           "slippage_pct": intent.slippage_pct, "dry_run": dry_run, "policy": policy})
+        return self.result
+
+
+_TIGHT = Policy(allowlist=frozenset({"BNB", "USDT"}), per_trade_usd=0.5, daily_usd=1.5,
+                max_slippage_pct=1.0, drawdown_stop_pct=30.0, lifetime_usd_ceiling=3.0, chain="bsc")
+
+
 def test_tick_records_fills_equity_and_heartbeat(tmp_path, panels):
     returns, *_ = panels
     ws = _first_full_week(returns)
@@ -274,6 +293,56 @@ def test_compliance_disabled_when_frac_zero(tmp_path, panels):
     r = runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
     assert r.compliance_trades == 0
     assert not any(x.get("compliance") for x in store.read_rows(tmp_path / "agent.jsonl"))
+
+
+# -- live signing sleeve (the TWAK execution path; gated on mode=="live" + an executor) -----
+
+def test_compliance_live_signs_at_tiny_notional_and_records_tx(tmp_path, panels):
+    """In live mode the compliance BUY routes through the executor at `live_compliance_usd` (NOT
+    the $10k-book frac*equity), under the tight live policy, and the tx hash lands on the fill."""
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    ex = _FakeExec()
+    runner = _runner(tmp_path, mode="live", bnb_price_fn=lambda ts: 600.0,
+                     execute_fn=ex, live_policy=_TIGHT, live_compliance_usd=0.40)
+    rb = runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    assert rb.compliance_trades == 1
+    buy = next(c for c in ex.calls if c["from"] == "USDT" and c["to"] == "BNB")
+    assert buy["usd"] == pytest.approx(0.40) and buy["policy"] is _TIGHT and buy["dry_run"] is False
+    comp = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+            if r["kind"] == "fill" and r.get("compliance")]
+    assert comp and comp[0]["tx_hash"] == ex.result["tx_hash"] and comp[0]["exec_status"] == "confirmed"
+
+
+def test_paper_mode_never_calls_the_executor(tmp_path, panels):
+    """Default (paper) keeps the fill row byte-identical: the executor is never called and no
+    exec fields are added — the EC2 paper service is unaffected by the sleeve."""
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    ex = _FakeExec()
+    runner = _runner(tmp_path, mode="paper", bnb_price_fn=lambda ts: 600.0, execute_fn=ex)
+    runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    assert ex.calls == []
+    comp = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+            if r["kind"] == "fill" and r.get("compliance")]
+    assert comp and "tx_hash" not in comp[0] and "exec_status" not in comp[0]
+
+
+def test_strategy_fills_route_through_executor_in_live(tmp_path, panels):
+    """Every guardrail-passed strategy fill is signed via the executor in live mode (the env-fill
+    half of the sleeve), and the tx hash is recorded on each allowed fill."""
+    returns, btc, liq, vol = panels
+    ws, _ek = _week_with_fills(returns, btc, liq, vol)
+    ex = _FakeExec()
+    runner = EventRunner(LiveEventTrader(_prov()), selection=[],
+                         agent_ledger_path=tmp_path / "agent.jsonl",
+                         mode="live", execute_fn=ex, compliance_frac=0.0)
+    runner.tick(ws + 167 * 3600, panels=panels, predict_fn=RULE, refresh_data=False)
+    fills = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+             if r["kind"] == "fill" and not r.get("compliance")]
+    allowed = [f for f in fills if f["guardrail_ok"]]
+    assert allowed and all(f.get("tx_hash") == ex.result["tx_hash"] for f in allowed)
+    assert len(ex.calls) == len(allowed)                   # one executor call per allowed fill, none for blocked
 
 
 def test_forward_run_policy_allows_universe_and_cash_leg():
