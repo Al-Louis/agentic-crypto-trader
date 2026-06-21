@@ -11,10 +11,14 @@ Ledger discipline: the attempt row lands on disk BEFORE the swap is signed (if i
 written, the trade is refused), so the daily/lifetime caps survive a crash mid-trade. TWAK's
 own `--slippage` is belt-and-suspenders *under* these checks, never instead of them.
 
-Return contract:
-  in-policy + landed   -> {"tx_hash", "status", "usd", "quote"}
+Return contract (all success/dry-run keys read via .get() by callers — additive keys are safe):
+  in-policy + landed   -> {"tx_hash", "status", "usd", "quote", "out_amount", "out_symbol"}
+  in-policy + dry_run  -> {"dry_run": True, "would_execute": True, "status", "usd", "quote"}
   out-of-policy        -> {"refused": [codes], "detail": [...], "phase": intent|quote|state}
   passed checks, swap/confirm failed -> {"error": ..., "tx_hash": maybe} (spend stays counted)
+`out_amount`/`out_symbol` are the REALIZED output leg (lets a caller capture the exact quantity
+received — e.g. the compliance BUY's BNB, to unwind it precisely via `execute_swap_amount`).
+`execute_swap_amount` (below) mirrors this for an exact-AMOUNT input swap.
 """
 
 from __future__ import annotations
@@ -146,19 +150,42 @@ def execute_trade(intent: TradeIntent, policy: Policy = SPIKE_POLICY, *,
                 "tx_hash": None}
 
     # 5) poll confirmation; record the outcome either way.
+    status = _poll_confirmation(cli, tx_hash, intent.chain, poll_attempts, poll_interval_s, sleep)
+    out_amount, out_symbol = parse_swap_output(swap_out)
+    _append_result({"kind": "result", "tx_hash": tx_hash, "status": status,
+                    "usd": quote_intent.usd, "out_amount": out_amount}, ledger_path)
+    return {"tx_hash": tx_hash, "status": status, "usd": quote_intent.usd, "quote": parsed,
+            "out_amount": out_amount, "out_symbol": out_symbol}
+
+
+def parse_swap_output(swap_out: dict) -> tuple[float | None, str | None]:
+    """The REALIZED `(amount, symbol)` a swap delivered, from its `output` leg (e.g.
+    '0.00068 BNB'). `(None, None)` if absent/unparseable — never raises. Lets a caller capture
+    the exact token quantity received (e.g. the BNB a compliance BUY landed, to unwind precisely)."""
+    try:
+        m = twak_cli._AMOUNT_SYM.match(str((swap_out or {}).get("output", "")))
+        if m:
+            return float(m.group(1)), m.group(2).upper()
+    except Exception:  # noqa: BLE001
+        pass
+    return None, None
+
+
+def _poll_confirmation(cli, tx_hash: str, chain: str, attempts: int, interval_s: float,
+                       sleep) -> str:
+    """Poll `twak tx` until confirmed/failed (or attempts exhausted). Transient RPC errors keep
+    polling (a just-broadcast tx may 404 briefly). Shared by the USD- and amount-based paths."""
     status = "pending"
-    for i in range(max(1, poll_attempts)):
+    for i in range(max(1, attempts)):
         try:
-            status = parse_tx_status(cli.tx_status(tx_hash, chain=intent.chain))
+            status = parse_tx_status(cli.tx_status(tx_hash, chain=chain))
         except Exception:  # noqa: BLE001 — transient RPC trouble: keep polling
             status = "pending"
         if status in ("confirmed", "failed"):
             break
-        if i < poll_attempts - 1:
-            sleep(poll_interval_s)
-    _append_result({"kind": "result", "tx_hash": tx_hash, "status": status,
-                    "usd": quote_intent.usd}, ledger_path)
-    return {"tx_hash": tx_hash, "status": status, "usd": quote_intent.usd, "quote": parsed}
+        if i < attempts - 1:
+            sleep(interval_s)
+    return status
 
 
 def _append_result(row: dict, path: Path) -> None:
@@ -167,3 +194,69 @@ def _append_result(row: dict, path: Path) -> None:
         ledger.append(row, path)
     except Exception:  # noqa: BLE001,S110 — never mask a live trade outcome behind a disk error
         pass
+
+
+def execute_swap_amount(from_asset: str, to_asset: str, amount: float, policy: Policy = SPIKE_POLICY,
+                        *, ledger_path: Path = ledger.LEDGER_PATH, cli=twak_cli,
+                        chain: str = "bsc", slippage_pct: float = 1.0, decimals: int | None = None,
+                        poll_attempts: int = POLL_ATTEMPTS, poll_interval_s: float = POLL_INTERVAL_S,
+                        sleep=time.sleep, dry_run: bool = False) -> dict:
+    """Swap an EXACT token AMOUNT (not a USD notional) through the SAME guardrails as execute_trade.
+
+    Needed to unwind a held position precisely (the compliance SELL sells the exact BNB the BUY
+    acquired, preserving the wallet's gas buffer — a USD-sized sell can over/under-shoot on an
+    intraday price move). Cap enforcement happens on the QUOTE's realized USD (the out leg must be
+    valuable, e.g. a stable): amount-in has no pre-quote USD, so the single (quote-phase) check IS
+    the guardrail. Same return shape as execute_trade (+ `amount`). Signature kept parallel; `cli`
+    injectable for tests."""
+    rec = TradeIntent(from_asset=from_asset, to_asset=to_asset, usd=0.0, chain=chain,
+                      slippage_pct=slippage_pct)   # placeholder for refusal-record asdict() only
+
+    # 1) read-only amount-in quote, then check the caps on the QUOTE's realized numbers.
+    try:
+        parsed = twak_cli.parse_quote(cli.quote_amount(from_asset, to_asset, amount, chain=chain,
+                                                       slippage_pct=slippage_pct, decimals=decimals))
+    except Exception as e:  # noqa: BLE001 — quote failure/missing fields: fail closed
+        return _unavailable(f"amount quote unavailable: {type(e).__name__}: {e}", "quote",
+                            rec, ledger_path)
+    if parsed["usd_value"] is None:
+        return _unavailable("amount quote cannot be valued in USD (no stable leg)", "quote",
+                            rec, ledger_path)
+    quote_intent = TradeIntent(
+        from_asset=parsed["in_symbol"], to_asset=parsed["out_symbol"], usd=parsed["usd_value"],
+        chain=chain, slippage_pct=max(parsed["implied_slippage_pct"], parsed["price_impact_pct"]))
+    verdict = check_trade(policy, quote_intent, ledger.state_from_ledger(ledger_path))
+    if not verdict.allowed:
+        return _refusal(verdict, "quote", quote_intent, ledger_path)
+    if dry_run:
+        return {"dry_run": True, "would_execute": True, "status": "dry_run", "amount": amount,
+                "usd": quote_intent.usd, "quote": parsed}
+
+    # 2) attempt row on disk BEFORE signing (records the amount + realized USD).
+    try:
+        ledger.append({"kind": "attempt", "intent": {"from_asset": from_asset, "to_asset": to_asset,
+                       "amount": float(amount), "chain": chain}, "quote": parsed,
+                       "usd": quote_intent.usd}, ledger_path)
+    except Exception as e:  # noqa: BLE001
+        return _unavailable(f"ledger unwritable: {type(e).__name__}: {e}", "state", rec, ledger_path)
+
+    # 3) sign + broadcast (amount-in), then poll.
+    try:
+        swap_out = cli.swap_amount(from_asset, to_asset, amount, chain=chain,
+                                   slippage_pct=slippage_pct, decimals=decimals)
+    except Exception as e:  # noqa: BLE001 — outcome unknown; attempt spend stays counted
+        _append_result({"kind": "result", "tx_hash": None, "status": "swap_error",
+                        "error": f"{type(e).__name__}: {e}"[:300]}, ledger_path)
+        return {"error": f"swap failed: {type(e).__name__}: {e}"[:300], "tx_hash": None}
+    tx_hash = extract_tx_hash(swap_out)
+    if not tx_hash:
+        _append_result({"kind": "result", "tx_hash": None, "status": "unknown",
+                        "error": "no tx hash in swap output"}, ledger_path)
+        return {"error": "no tx hash in swap output — verify on bscscan before retrying",
+                "tx_hash": None}
+    status = _poll_confirmation(cli, tx_hash, chain, poll_attempts, poll_interval_s, sleep)
+    out_amount, out_symbol = parse_swap_output(swap_out)
+    _append_result({"kind": "result", "tx_hash": tx_hash, "status": status,
+                    "usd": quote_intent.usd, "out_amount": out_amount}, ledger_path)
+    return {"tx_hash": tx_hash, "status": status, "usd": quote_intent.usd, "amount": amount,
+            "quote": parsed, "out_amount": out_amount, "out_symbol": out_symbol}

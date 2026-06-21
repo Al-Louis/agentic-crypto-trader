@@ -136,6 +136,48 @@ def wallet_balance(*, chain: str = "bsc", timeout: float = READ_TIMEOUT_S) -> di
     return run_json(["wallet", "balance", "--chain", chain, "--json"], timeout=timeout)
 
 
+# --- amount-in swaps (swap an EXACT token quantity, not a USD notional) ----------------------
+# The `twak swap <amount> <from> <to>` form (no --usd). Needed to unwind a held position
+# precisely — e.g. the compliance SELL sells the exact BNB the BUY acquired, preserving the
+# wallet's gas buffer (a USD-sized sell can over/under-shoot on an intraday price move).
+
+def _fmt_amount(amount: float) -> str:
+    """Plain decimal token amount — never scientific notation (twak won't parse `6.8e-4`)."""
+    return f"{float(amount):.18f}".rstrip("0").rstrip(".") or "0"
+
+
+def quote_amount_args(from_asset: str, to_asset: str, amount: float, *, chain: str,
+                      slippage_pct: float, decimals: int | None = None) -> list[str]:
+    args = ["swap", _fmt_amount(amount), str(from_asset), str(to_asset), "--chain", chain,
+            "--slippage", f"{slippage_pct:g}", "--quote-only", "--json"]
+    if decimals is not None:                       # for tokens not in twak's registry
+        args += ["--decimals", str(int(decimals))]
+    return args
+
+
+def swap_amount_args(from_asset: str, to_asset: str, amount: float, *, chain: str,
+                     slippage_pct: float, decimals: int | None = None) -> list[str]:
+    return [a for a in quote_amount_args(from_asset, to_asset, amount, chain=chain,
+                                         slippage_pct=slippage_pct, decimals=decimals)
+            if a != "--quote-only"]
+
+
+def quote_amount(from_asset: str, to_asset: str, amount: float, *, chain: str = "bsc",
+                 slippage_pct: float = 1.0, decimals: int | None = None,
+                 timeout: float = QUOTE_TIMEOUT_S) -> str:
+    """Read-only quote for an exact-amount swap. Raw stdout (human prefix + JSON) for parse_quote."""
+    return run_text(quote_amount_args(from_asset, to_asset, amount, chain=chain,
+                                      slippage_pct=slippage_pct, decimals=decimals), timeout=timeout)
+
+
+def swap_amount(from_asset: str, to_asset: str, amount: float, *, chain: str = "bsc",
+                slippage_pct: float = 1.0, decimals: int | None = None,
+                timeout: float = SWAP_TIMEOUT_S) -> dict:
+    """EXECUTES an exact-amount swap (signs + broadcasts; password via keychain). Parsed JSON."""
+    return run_json(swap_amount_args(from_asset, to_asset, amount, chain=chain,
+                                     slippage_pct=slippage_pct, decimals=decimals), timeout=timeout)
+
+
 # --- quote parsing (pure) --------------------------------------------------------------------
 
 def _leg(q: dict, key: str) -> tuple[float, str]:

@@ -119,7 +119,7 @@ class EventRunner:
                  agent_ledger_path: Path, capital: float = 10_000.0,
                  policy: Policy | None = None, publisher=None, mode: str = "paper",
                  compliance_frac: float = 0.03, bnb_price_fn=None,
-                 execute_fn=None, live_policy: Policy | None = None,
+                 execute_fn=None, execute_amount_fn=None, live_policy: Policy | None = None,
                  live_compliance_usd: float | None = None, live_dry_run: bool = False,
                  live_bankroll_usd: float | None = None, min_notional_usd: float = 0.0):
         self.trader = trader
@@ -138,6 +138,7 @@ class EventRunner:
         # NOT the real bankroll, so frac*equity would over-size the real swap). `live_dry_run`
         # routes through execute_trade's quote-only pre-flight (no signing).
         self.execute_fn = execute_fn
+        self.execute_amount_fn = execute_amount_fn   # amount-in executor for the compliance qty-unwind
         self.live_policy = live_policy
         self._live_policy_explicit = live_policy is not None   # don't overwrite a caller-supplied one
         self.live_compliance_usd = (None if live_compliance_usd is None
@@ -245,6 +246,20 @@ class EventRunner:
         except Exception as e:  # noqa: BLE001 — a swap failure must not crash the loop
             return {"error": f"{type(e).__name__}: {e}"[:300], "tx_hash": None}
 
+    def _sign_live_amount(self, frm: str, to: str, amount: float, slippage_pct: float) -> dict | None:
+        """Sign a swap of an EXACT token AMOUNT (the M4 unwind: the compliance SELL sells the precise
+        BNB the BUY acquired, never a USD notional that could over/under-shoot the held balance).
+        Routes through `execute_amount_fn` (e.g. `execute_swap_amount`) under `live_policy`. Returns
+        None when amount-in live execution isn't wired (then the caller falls back to the USD path).
+        NEVER raises."""
+        if self.execute_amount_fn is None or self.mode != "live" or not (amount and amount > 0):
+            return None
+        pol = self.live_policy if self.live_policy is not None else self.policy
+        try:
+            return self.execute_amount_fn(frm, to, float(amount), pol, dry_run=self.live_dry_run)
+        except Exception as e:  # noqa: BLE001 — a swap failure must not crash the loop
+            return {"error": f"{type(e).__name__}: {e}"[:300], "tx_hash": None}
+
     # -- daily >=1-trade/day compliance overlay -------------------------------
     def _bnb_price(self, now_ts: int) -> float | None:
         """BNB USD close at/just-before `now_ts`, from the BNB anchor parquet (same source the harness
@@ -303,13 +318,6 @@ class EventRunner:
             usd_buy, px_buy = float(bought.get("usd_in") or 0.0), float(bought.get("price") or px)
             usd = (usd_buy / px_buy) * px if px_buy > 0 else usd_buy   # BNB-leg value at the sell price
             frm, to, reason = COMPLIANCE_TOKEN, CASH_LEG, SELL_REASON
-            # BEFORE-FUNDING-LIVE BLOCKER (M4): this sizes the SELL by USD-value-at-anchor-price, which
-            # only APPROXIMATES the exact BNB quantity the BUY acquired. On a dev wallet (ample spare
-            # BNB) and in paper this is fine; on a dedicated USDT-only live wallet, a BNB move between
-            # 01:00 and 23:00 means "$X-worth at the sell price" can over/under-shoot the held qty
-            # (dust left, or an insufficient-balance failure). Real live compliance must unwind the
-            # EXACT bought quantity (capture qty from the BUY exec result; sell amount-in) — do that
-            # before funding the live wallet. Not a paper/dev blocker.
         else:
             return 0                                     # already done today (idempotent) / nothing to sell
 
@@ -317,16 +325,30 @@ class EventRunner:
         intent = TradeIntent(from_asset=frm, to_asset=to, usd=usd, chain="bsc",
                              slippage_pct=self.policy.max_slippage_pct)
         verdict = check_trade(self.policy, intent, self._risk_state(equity, spent_today))
-        # live signing: an explicit `live_compliance_usd` is a real figure (prescaled — bypass the
-        # bankroll scale, e.g. the dev-wallet smoke's fixed $0.40); otherwise the env's `usd`
-        # (frac*$10k-equity) is re-based to the real bankroll by `_live_scale`, exactly like a
-        # strategy fill. The paper row keeps `usd` for $10k-book sleeve-PnL parity.
+        # live signing. SELL: unwind the EXACT BNB the BUY landed (amount-in via `_sign_live_amount`,
+        # M4) so an intraday BNB move can't over/under-shoot the held balance or the wallet's gas
+        # buffer; it falls back to the USD path only if the amount-in executor isn't wired or no qty
+        # was recorded. BUY / no-qty: an explicit `live_compliance_usd` real figure (prescaled — dev
+        # override) OR the env's `usd` re-based to the bankroll by `_live_scale`. Paper row keeps
+        # `usd` for $10k-book sleeve-PnL parity.
         exec_res = None
         if verdict.allowed:
-            if self.live_compliance_usd is not None:
+            sell_qty = float((bought or {}).get("bnb_qty") or 0.0) if reason == SELL_REASON else 0.0
+            if self.live_compliance_usd is not None:                 # dev override: fixed USD both legs
                 exec_res = self._sign_live(frm, to, self.live_compliance_usd,
                                            self.policy.max_slippage_pct, prescaled=True)
-            else:
+            elif reason == SELL_REASON:
+                # Unwind the EXACT BNB the BUY landed (amount-in). Sign ONLY when a real qty was
+                # captured (proof the BUY confirmed). NEVER sign a USD-sized SELL on a position that
+                # may not exist (a refused/failed BUY) — that would sell the wallet's gas buffer or
+                # revert. No captured qty in live => record a skip, do not sign. (NOTE: the live
+                # wallet MUST hold a BNB gas buffer beyond the compliance position — the SELL's tx
+                # fee is paid in BNB; selling the exact bought qty leaves the buffer for gas.)
+                if sell_qty > 0.0:
+                    exec_res = self._sign_live_amount(frm, to, sell_qty, self.policy.max_slippage_pct)
+                if exec_res is None and self.mode == "live" and self.execute_amount_fn is not None:
+                    exec_res = {"skipped": "no_bought_qty", "tx_hash": None}
+            else:                                                    # BUY leg (env usd re-based by scale)
                 exec_res = self._sign_live(frm, to, usd, self.policy.max_slippage_pct)
         if reason == SELL_REASON:
             self._compliance_pnl += usd - float(bought.get("usd_in") or 0.0) - cost
@@ -335,6 +357,15 @@ class EventRunner:
                "reason": reason, "trigger": reason, "token": COMPLIANCE_TOKEN, "obs": None,
                "bar_ts": int(now_ts), "guardrail_ok": bool(verdict.allowed),
                "guardrail_codes": verdict.codes}
+        # persist the realized BNB qty the BUY acquired so the SELL leg can unwind it exactly (M4).
+        # Gated on a CONFIRMED BUY with a real positive out_amount — a refused/pending/failed BUY or a
+        # malformed swap output leaves NO bnb_qty, so the SELL skips signing (never over/under-shoots).
+        if (reason == BUY_REASON and isinstance(exec_res, dict)
+                and exec_res.get("status") == "confirmed"
+                and str(exec_res.get("out_symbol")).upper() == COMPLIANCE_TOKEN
+                and isinstance(exec_res.get("out_amount"), (int, float))
+                and exec_res["out_amount"] > 0.0):
+            row["bnb_qty"] = float(exec_res["out_amount"])
         row.update(_exec_summary(exec_res))
         store.append(row, self.agent_ledger_path, now=None)
         if not verdict.allowed:

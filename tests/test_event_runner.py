@@ -67,6 +67,44 @@ _TIGHT = Policy(allowlist=frozenset({"BNB", "USDT"}), per_trade_usd=0.5, daily_u
                 max_slippage_pct=1.0, drawdown_stop_pct=30.0, lifetime_usd_ceiling=3.0, chain="bsc")
 
 
+class _FakeExecBnbOut:
+    """USD executor whose result reports the REALIZED BNB it bought (out_amount/out_symbol), so the
+    compliance BUY can capture the qty for the M4 amount-in unwind. BNB at a flat $600."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, intent, policy, *, dry_run=False):
+        self.calls.append({"from": intent.from_asset, "to": intent.to_asset, "usd": intent.usd})
+        return {"tx_hash": "0x" + "bb" * 32, "status": "confirmed", "usd": intent.usd,
+                "out_amount": intent.usd / 600.0, "out_symbol": "BNB"}
+
+
+class _FakeAmountExec:
+    """Amount-in executor (stands in for execute_swap_amount) — records the exact qty it was asked
+    to swap so the test can assert the SELL unwinds the BUY's BNB quantity, not a USD notional."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, frm, to, amount, policy, *, dry_run=False):
+        self.calls.append({"from": frm, "to": to, "amount": amount, "policy": policy})
+        return {"tx_hash": "0x" + "ee" * 32, "status": "confirmed", "amount": amount,
+                "out_amount": amount * 600.0, "out_symbol": "USDT"}
+
+
+class _FakeExecRefuse:
+    """USD executor that REFUSES every call (e.g. a real drawdown/cap block) — for asserting the
+    compliance SELL never signs when the BUY didn't land."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, intent, policy, *, dry_run=False):
+        self.calls.append({"from": intent.from_asset, "to": intent.to_asset})
+        return {"refused": ["DRAWDOWN_STOP"], "phase": "intent"}
+
+
 def test_tick_records_fills_equity_and_heartbeat(tmp_path, panels):
     returns, *_ = panels
     ws = _first_full_week(returns)
@@ -381,6 +419,47 @@ def test_nonpositive_capital_rejected(tmp_path):
     with pytest.raises(ValueError, match="capital must be"):
         EventRunner(LiveEventTrader(_prov()), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
                     capital=0.0)
+
+
+def test_compliance_sell_unwinds_exact_bnb_qty_amount_in(tmp_path, panels):
+    """M4: the live compliance SELL routes through the AMOUNT-in executor with the EXACT BNB the BUY
+    acquired (captured as bnb_qty on the BUY fill), not a USD notional that could over/under-shoot."""
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    usd_ex, amt_ex = _FakeExecBnbOut(), _FakeAmountExec()
+    runner = _runner(tmp_path, mode="live", bnb_price_fn=lambda ts: 600.0,
+                     execute_fn=usd_ex, execute_amount_fn=amt_ex, live_bankroll_usd=100.0)
+    runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)   # BUY 01:00
+    runner.tick(ws + (2 * 24 + 23) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)  # SELL 23:00
+    comp = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+            if r["kind"] == "fill" and r.get("compliance")]
+    buy = next(r for r in comp if r["reason"] == "COMPLIANCE_BUY")
+    assert buy.get("bnb_qty") and buy["bnb_qty"] > 0       # BUY captured the realized BNB qty
+    assert amt_ex.calls and amt_ex.calls[0]["from"] == "BNB" and amt_ex.calls[0]["to"] == "USDT"
+    assert amt_ex.calls[0]["amount"] == pytest.approx(buy["bnb_qty"])   # SELL unwinds the EXACT qty
+    # the compliance BUY went via the USD executor (USDT->BNB); the SELL did NOT (it's the only amount-in)
+    assert any(c["from"] == "USDT" and c["to"] == "BNB" for c in usd_ex.calls)
+    assert not any(c["from"] == "BNB" and c["to"] == "USDT" for c in usd_ex.calls)  # SELL avoided USD path
+
+
+def test_compliance_sell_skips_when_buy_did_not_land(tmp_path, panels):
+    """Safety (review M4): if the live BUY is refused (no real BNB), the SELL must NOT sign a
+    USD-sized swap (it would sell the wallet's gas buffer). No captured qty => SELL skips signing."""
+    returns, *_ = panels
+    ws = _first_full_week(returns)
+    usd_ex, amt_ex = _FakeExecRefuse(), _FakeAmountExec()
+    runner = _runner(tmp_path, mode="live", bnb_price_fn=lambda ts: 600.0,
+                     execute_fn=usd_ex, execute_amount_fn=amt_ex, live_bankroll_usd=100.0)
+    runner.tick(ws + (2 * 24 + 1) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)   # BUY (refused)
+    runner.tick(ws + (2 * 24 + 23) * 3600, panels=panels, predict_fn=RULE, refresh_data=False)  # SELL
+    comp = [r for r in store.read_rows(tmp_path / "agent.jsonl")
+            if r["kind"] == "fill" and r.get("compliance")]
+    buy = next(r for r in comp if r["reason"] == "COMPLIANCE_BUY")
+    sell = next(r for r in comp if r["reason"] == "COMPLIANCE_SELL")
+    assert "bnb_qty" not in buy                             # refused BUY captured no qty
+    assert amt_ex.calls == []                               # SELL never attempted amount-in
+    assert sell.get("exec_status") == "skipped" and sell.get("exec_skipped") == "no_bought_qty"
+    assert not any(c["from"] == "BNB" and c["to"] == "USDT" for c in usd_ex.calls)  # never sold the buffer
 
 
 def test_strategy_fills_scale_to_real_bankroll(tmp_path, panels):

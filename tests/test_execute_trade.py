@@ -9,8 +9,11 @@ fixture shape (human prefix + JSON, no USD field)."""
 import json
 from pathlib import Path
 
-from trader.execution.execute import execute_trade, extract_tx_hash, parse_tx_status
-from trader.risk import TradeIntent, ledger
+import pytest
+
+from trader.execution.execute import (execute_swap_amount, execute_trade, extract_tx_hash,
+                                       parse_swap_output, parse_tx_status)
+from trader.risk import Policy, TradeIntent, ledger
 
 FIX = Path(__file__).parent / "fixtures"
 QUOTE_OK = (FIX / "twak_quote_bnb_usdt.txt").read_text(encoding="utf-8")
@@ -50,6 +53,18 @@ class FakeCli:
     def tx_status(self, *a, **kw):
         self.calls.append("tx_status")
         return self.tx_out if not isinstance(self.tx_out, list) else self.tx_out.pop(0)
+
+    def quote_amount(self, *a, **kw):                      # amount-in quote (reuses quote_out)
+        self.calls.append("quote_amount")
+        if isinstance(self.quote_out, Exception):
+            raise self.quote_out
+        return self.quote_out
+
+    def swap_amount(self, *a, **kw):                       # amount-in swap (reuses swap_out)
+        self.calls.append("swap_amount")
+        if isinstance(self.swap_out, Exception):
+            raise self.swap_out
+        return self.swap_out
 
 
 def run(intent, tmp_path, cli=None, **kw):
@@ -205,3 +220,48 @@ def test_dry_run_refuses_on_quote_implied_slippage(tmp_path):
     res, cli = run(intent(), tmp_path, dry_run=True, cli=FakeCli(quote_out=quote_text(slip_pct=2.0)))
     assert res["refused"] == ["SLIPPAGE_BOUND"] and res["phase"] == "quote"
     assert cli.calls == ["quote"] and "swap" not in cli.calls
+
+
+# -- amount-in execution (the M4 unwind: swap an EXACT token quantity, guardrailed) ----------
+
+def _wide() -> Policy:
+    return Policy(allowlist=frozenset({"BNB", "USDT"}), per_trade_usd=5.0, daily_usd=20.0,
+                  max_slippage_pct=1.0, drawdown_stop_pct=30.0, lifetime_usd_ceiling=50.0, chain="bsc")
+
+
+def test_parse_swap_output_shapes():
+    assert parse_swap_output({"output": "0.00068 BNB"}) == (pytest.approx(0.00068), "BNB")
+    assert parse_swap_output({"output": "1.98 usdt"}) == (pytest.approx(1.98), "USDT")
+    assert parse_swap_output({}) == (None, None)
+    assert parse_swap_output({"output": "garbage"}) == (None, None)
+
+
+def test_execute_swap_amount_dry_run_signs_nothing(tmp_path):
+    cli = FakeCli(quote_out=quote_text(in_sym="BNB", out_sym="USDT", usd=2.0))
+    res = execute_swap_amount("BNB", "USDT", 0.0034, _wide(), ledger_path=tmp_path / "l.jsonl",
+                              cli=cli, poll_interval_s=0, sleep=lambda s: None, dry_run=True)
+    assert res["dry_run"] and res["amount"] == 0.0034 and res["usd"] == pytest.approx(2.0)
+    assert "quote_amount" in cli.calls and "swap_amount" not in cli.calls
+    assert ledger.read_rows(tmp_path / "l.jsonl") == []     # nothing written
+
+
+def test_execute_swap_amount_signs_and_returns_realized_output(tmp_path):
+    cli = FakeCli(quote_out=quote_text(in_sym="BNB", out_sym="USDT", usd=2.0),
+                  swap_out={"txHash": TX, "output": "1.98 USDT"})
+    res = execute_swap_amount("BNB", "USDT", 0.0034, _wide(), ledger_path=tmp_path / "l.jsonl",
+                              cli=cli, poll_interval_s=0, sleep=lambda s: None)
+    assert res["tx_hash"] == TX and res["status"] == "confirmed" and res["amount"] == 0.0034
+    assert res["out_amount"] == pytest.approx(1.98) and res["out_symbol"] == "USDT"   # realized leg
+    assert [r["kind"] for r in ledger.read_rows(tmp_path / "l.jsonl")] == ["attempt", "result"]
+    assert "quote_amount" in cli.calls and "swap_amount" in cli.calls
+
+
+def test_execute_swap_amount_refuses_on_quote_cap_before_signing(tmp_path):
+    # realized USD $3 > a $0.50 per-trade cap -> refuse at the quote phase, never sign.
+    tight = Policy(allowlist=frozenset({"BNB", "USDT"}), per_trade_usd=0.5, daily_usd=10.0,
+                   max_slippage_pct=1.0, drawdown_stop_pct=30.0, lifetime_usd_ceiling=50.0, chain="bsc")
+    cli = FakeCli(quote_out=quote_text(in_sym="BNB", out_sym="USDT", usd=3.0))
+    res = execute_swap_amount("BNB", "USDT", 0.005, tight, ledger_path=tmp_path / "l.jsonl",
+                              cli=cli, poll_interval_s=0, sleep=lambda s: None)
+    assert res["refused"] == ["PER_TRADE_CAP"] and res["phase"] == "quote"   # realized USD > cap
+    assert "swap_amount" not in cli.calls
