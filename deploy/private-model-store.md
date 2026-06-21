@@ -42,7 +42,7 @@ Either the desktop pushes directly (attach `deploy/iam/private-models-put-policy
 desktop's publisher IAM user), or an admin uploads. The three files per run:
 
 ```bash
-RID=ppo-event-rdLe4-ef-503b784-s2
+RID=ppo-event-rdLe4-sbq-3c84b4a-s1
 aws s3 cp runs-rl/$RID/policy.zip        s3://alexlouis-act-private/models/$RID/
 aws s3 cp runs-rl/$RID/vecnormalize.pkl  s3://alexlouis-act-private/models/$RID/
 aws s3 cp runs-rl/$RID/$RID/metrics.json s3://alexlouis-act-private/models/$RID/
@@ -54,7 +54,7 @@ On the box, into the run-dir the event-agent expects (`<run-dir>/policy.zip`,
 `vecnormalize.pkl`, `<run-id>/metrics.json`):
 
 ```bash
-RID=ppo-event-rdLe4-ef-503b784-s2
+RID=ppo-event-rdLe4-sbq-3c84b4a-s1
 mkdir -p /srv/trader/models/$RID/$RID
 aws s3 cp s3://alexlouis-act-private/models/$RID/policy.zip       /srv/trader/models/$RID/
 aws s3 cp s3://alexlouis-act-private/models/$RID/vecnormalize.pkl /srv/trader/models/$RID/

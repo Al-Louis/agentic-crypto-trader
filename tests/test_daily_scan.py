@@ -34,7 +34,7 @@ def test_build_selected_is_the_models_vol_top8(recorded):
     returns, btc, liq, vol = recorded
     ek = LiveEventTrader(_prov()).env_kwargs(returns)
     now_ts = int(returns.index.max())
-    sel = build_selected(returns, btc, liq, vol, ek, now_ts, "ppo-event-rdLe4-ef-503b784-s2")
+    sel = build_selected(returns, btc, liq, vol, ek, now_ts, "ppo-event-rdLe4-sbq-3c84b4a-s1")
     assert len(sel["tokens"]) == 8                                   # k=8
     assert set(sel["caps"]) == set(sel["tokens"])
     # risk-parity caps within [cap_floor, max_entry_frac]

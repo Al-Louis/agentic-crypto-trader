@@ -1,10 +1,10 @@
 """`python -m trader.agent.event_agent` — the live paper-trading entry point for the
-event-driven RL champion (ef-s2).
+event-driven RL champion (sbq-s1).
 
 Wires the checkpoint -> LiveEventTrader -> EventRunner -> the `trading/` publisher and drives
 one tick per closed 1h bar, a few minutes after each hour so the bar's data has settled.
 
-  python -m trader.agent.event_agent --run-dir runs-rl/ppo-event-rdLe4-ef-503b784-s2 --once
+  python -m trader.agent.event_agent --run-dir runs-rl/ppo-event-rdLe4-sbq-3c84b4a-s1 --once
   python -m trader.agent.event_agent --run-dir runs-rl/<run-id>            # forever, hourly
 
 Checkpoint layout (matches scripts/simulate_weekly): `<run-dir>/policy.zip`,

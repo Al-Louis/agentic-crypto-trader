@@ -20,7 +20,7 @@ Group=trader
 WorkingDirectory=/srv/trader/agentic-crypto-trader
 EnvironmentFile=/etc/trader/trader.env
 Environment=HOME=/srv/trader
-ExecStart=/srv/trader/venv/bin/python -m trader.agent.daily_scan --run-dir /srv/trader/models/ppo-event-rdLe4-ef-503b784-s2 --window last --publish
+ExecStart=/srv/trader/venv/bin/python -m trader.agent.daily_scan --run-dir /srv/trader/models/ppo-event-rdLe4-sbq-3c84b4a-s1 --window last --publish
 
 # --- sandbox / hardening (mirrors trader-event-agent.service) ---
 NoNewPrivileges=yes

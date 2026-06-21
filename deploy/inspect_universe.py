@@ -24,7 +24,7 @@ from trader.agent.event_live import LiveEventTrader, cold_week_window  # noqa: E
 
 
 def main() -> None:
-    rid = sys.argv[1] if len(sys.argv) > 1 else "ppo-event-rdLe4-ef-503b784-s2"
+    rid = sys.argv[1] if len(sys.argv) > 1 else "ppo-event-rdLe4-sbq-3c84b4a-s1"
     prov = json.load(open(f"/srv/trader/models/{rid}/{rid}/metrics.json", encoding="utf-8"))["provenance"]
     returns, btc, _a, liq = load_data()
     vol = build_volume_panel(list(returns.columns), returns.index)

@@ -1,4 +1,4 @@
-# trader-event-agent.service — the live EVENT-DRIVEN RL champion (ef-s2) paper loop.
+# trader-event-agent.service — the live EVENT-DRIVEN RL champion (sbq-s1) paper loop.
 # Replaces the HoldCore placeholder unit (trader-agent.service) for the forward-run.
 # Install: sudo install -m 0644 deploy/trader-event-agent.service /etc/systemd/system/trader-event-agent.service
 # Then:    sudo systemctl daemon-reload && sudo systemctl enable --now trader-event-agent
@@ -14,7 +14,7 @@
 #   append-only ledger; a restart cannot double-record (the fill-diff is keyed on bar timestamp).
 
 [Unit]
-Description=Apentic event-driven RL champion paper loop (ef-s2)
+Description=Apentic event-driven RL champion paper loop (sbq-s1)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=600
@@ -28,7 +28,7 @@ WorkingDirectory=/srv/trader/agentic-crypto-trader
 EnvironmentFile=/etc/trader/trader.env
 Environment=HOME=/srv/trader
 # The deployed checkpoint (edit --run-dir on a redeploy, e.g. to a different run-id).
-ExecStart=/srv/trader/venv/bin/python -m trader.agent.event_agent --run-dir /srv/trader/models/ppo-event-rdLe4-ef-503b784-s2
+ExecStart=/srv/trader/venv/bin/python -m trader.agent.event_agent --run-dir /srv/trader/models/ppo-event-rdLe4-sbq-3c84b4a-s1
 Restart=always
 RestartSec=15
 # A tick can take ~1 min (paced data fetch + factor regen + LSTM replay); allow it to finish.

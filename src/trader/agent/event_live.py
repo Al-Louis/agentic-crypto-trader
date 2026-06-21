@@ -1,6 +1,6 @@
-"""Live driver for the event-driven RL champion (ef-s2) — the weekly-replay harness.
+"""Live driver for the event-driven RL champion (sbq-s1) — the weekly-replay harness.
 
-The champion (`ppo-event-rdLe4-ef-503b784-s2`, RecurrentPPO/LSTM on `EventRungEnv`) is only
+The champion (`ppo-event-rdLe4-sbq-3c84b4a-s1`, RecurrentPPO/LSTM on `EventRungEnv`) is only
 valid fed the EXACT observation its env produced in training. Rather than reimplement the obs
 or the exit machinery live (train/serve skew = out-of-distribution = silent breakage), this
 driver **re-runs the validated inference loop verbatim** and swaps only the data layer:
