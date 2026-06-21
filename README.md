@@ -208,5 +208,4 @@ python scripts/oos_validate.py
 
 ## License
 
-No license has been added yet. Until one is, treat this code as **all rights reserved** — no
-permission is granted to use, copy, modify, or distribute it.
+[MIT](LICENSE) © 2026 Alex Louis.

@@ -2,6 +2,8 @@
 name = "agentic-crypto-trader"
 version = "0.1.0"
 description = "Autonomous self-custody crypto trading agent for BNB Chain (hackathon Track 1)"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.2.0",
