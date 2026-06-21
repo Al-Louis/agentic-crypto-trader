@@ -85,6 +85,24 @@ def test_project_empty_ledger_publishes_nothing():
     assert project([ROWS[0]]) == {}  # a fill alone has no mark to stamp `generated` from
 
 
+def test_published_fill_carries_tx_hash_for_the_dashboard():
+    """The dashboard reads `tx_hash` off each trade — lock the contract: a LIVE signed fill carries
+    its real hash (+ exec_status), a refused/skipped fill carries tx_hash=None (no on-chain tx)."""
+    TX = "0x9f6f3ceef515549f74294527c0c644dee1f2d9275991b343e7ae5bc95fbc1dc1"
+    signed = {"kind": "fill", "mode": "live", "from": "USDT", "to": "UB", "usd_in": 17.0,
+              "usd_out": 17.0, "cost_usd": 0.09, "reason": "IGNITION", "token": "UB",
+              "bar_ts": _BAR_TS, "exec_status": "confirmed", "tx_hash": TX,
+              "ts": "2026-06-12T01:00:00+00:00"}
+    refused = {"kind": "fill", "mode": "live", "from": "USDT", "to": "Q", "usd_in": 50.0,
+               "usd_out": 50.0, "cost_usd": 0.0, "reason": "IGNITION", "token": "Q",
+               "bar_ts": _BAR_TS, "exec_status": "refused", "tx_hash": None,
+               "exec_refused": ["PER_TRADE_CAP"], "ts": "2026-06-12T01:00:01+00:00"}
+    fills = project([signed, refused, *ROWS[2:]])["trades.json"]["fills"]   # reuse the equity/hb marks
+    by_tok = {f["token"]: f for f in fills}
+    assert by_tok["UB"]["tx_hash"] == TX and by_tok["UB"]["exec_status"] == "confirmed"
+    assert by_tok["Q"]["tx_hash"] is None and by_tok["Q"]["exec_status"] == "refused"
+
+
 # --- the put path (local target = same code path as s3, minus boto3) -----------
 
 def test_publish_trading_writes_valid_json(tmp_path):
