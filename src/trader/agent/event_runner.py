@@ -27,7 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from trader.agent import store
-from trader.agent.event_live import LiveEventTrader, new_fills, week_start_for
+from trader.agent.event_live import (LiveEventTrader, fills_from_records, new_fills,
+                                     week_start_for)
 from trader.risk import Policy, RiskState, TradeIntent, check_trade
 
 # the env's USD "cash" leg maps to a stable for the allowlist / live routing (token<->USDT swaps)
@@ -216,6 +217,22 @@ class EventRunner:
                 if r.get("kind") == "fill" and isinstance(r.get("bar_ts"), int)
                 and int(r["bar_ts"]) >= ws]
         return max(bars) if bars else ws - 1
+
+    def _recorded_fill_keys(self, ws: int) -> set:
+        """The (bar_ts, token, side) of every STRATEGY fill already recorded for the current week
+        (>= ws) — the dedup set for the tick loop. Excludes the compliance sleeve (its bar_ts is the
+        wall-clock tick, not a strategy bar). Read from disk so a restart dedups idempotently and a
+        fill seeded as `missed` (to skip a pre-fix entry we won't chase) is never re-signed."""
+        keys = set()
+        for r in store.read_rows(self.agent_ledger_path):
+            if r.get("kind") != "fill" or r.get("compliance"):
+                continue
+            bt = r.get("bar_ts")
+            if not isinstance(bt, int) or int(bt) < ws:
+                continue
+            side = "buy" if r.get("to") == r.get("token") else "sell"
+            keys.add((int(bt), str(r.get("token")), side))
+        return keys
 
     def _real_price(self, token: str, bar_ts: int) -> float | None:
         """The token's real USD close at the fill's bar (for display) — None if unavailable, in
@@ -423,15 +440,12 @@ class EventRunner:
                                         predict_fn=predict_fn)
         ws = res["week_start"]
 
-        # week rollover OR a process restart (in-memory cursor lost): resume the fill-diff cursor
-        # from the LEDGER — the latest fill bar already recorded for this week — so a restart never
-        # re-records the week's fills (the duplicate-on-restart bug). A genuine new week has no
-        # fills >= ws yet, so the cursor is ws-1 and the week records from its open.
+        # The week's fills are recorded by IDENTITY-DEDUP against the ledger (the loop below), so a
+        # restart never re-records and the env's back-dated fills are never dropped. `new_week` only
+        # drives the within-week drawdown-anchor reset.
         new_week = ws != self._week_start
         if new_week:
             self._week_start = ws
-            self._acted_ts = self._ledger_cursor(ws)
-        after = self._acted_ts if self._acted_ts is not None else self._ledger_cursor(ws)
 
         eq_series = res["equity"]
         equity = float(eq_series.iloc[-1]) if len(eq_series) else self.capital
@@ -455,7 +469,21 @@ class EventRunner:
         day_utc = datetime.fromtimestamp(now_ts, timezone.utc).date().isoformat()
         spent_today = 0.0
         recorded = blocked = 0
-        for f in new_fills(res["records"], after):
+        # IDENTITY-DEDUP: record every env strategy fill in THIS week (bar >= ws) not already in the
+        # ledger, keyed by (bar_ts, token, side). REPLACES the forward-only cursor that silently
+        # dropped fills the env back-dates to a bar already behind the cursor (sbq-s1's lagged
+        # week-open ignition). A late-surfaced fill is still caught; the key check makes double-signing
+        # impossible — a recorded fill, INCLUDING one seeded as `missed` to skip a pre-fix entry we
+        # won't chase, is never re-signed.
+        recorded_keys = self._recorded_fill_keys(ws)
+        for f in fills_from_records(res["records"]):
+            ft = int(f.time)
+            if ft < ws:                                       # cold-week fills only (>= the open)
+                continue
+            fkey = (ft, str(f.token), f.side)
+            if fkey in recorded_keys:                         # already recorded -> never re-sign
+                continue
+            recorded_keys.add(fkey)
             usd = abs(float(f.usd))
             frm, to = (CASH_LEG, f.token) if f.side == "buy" else (f.token, CASH_LEG)
             intent = TradeIntent(from_asset=frm, to_asset=to, usd=usd, chain="bsc",
@@ -501,10 +529,6 @@ class EventRunner:
         store.append({"kind": "heartbeat", "mode": self.mode, "tick": now_ts,
                       "equity_usd": equity, "week_start": ws}, self.agent_ledger_path, now=None)
 
-        # advance the cursor by the latest BAR timestamp processed, NOT wall-clock now_ts: fills
-        # are keyed by bar-time, which lags wall-time by ~the bar duration, so a wall-clock cursor
-        # silently drops every fill after the first tick (the missed-exit bug).
-        self._acted_ts = int(res["win_index"][-1]) if res.get("win_index") else now_ts
         if self._publisher is not None:
             try:
                 self._publisher()

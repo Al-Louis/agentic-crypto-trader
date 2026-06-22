@@ -532,3 +532,93 @@ def test_forward_run_policy_allows_universe_and_cash_leg():
     assert "BNB" in pol.allowlist                          # the daily compliance round-trip leg
     assert pol.drawdown_stop_pct == 30.0 and pol.chain == "bsc"
     assert pol.per_trade_usd == 10_000.0
+
+
+# --- IDENTITY-DEDUP fill recording (the fix for sbq-s1's dropped week-open ignition) -------------
+# The old forward-only cursor dropped a fill the env back-dates to a bar already behind the cursor
+# (a lagged ignition, surfaced late and attributed to its origin bar). Dedup records by
+# (bar_ts, token, side) against the ledger: a late fill is caught, and a recorded/seeded one is
+# never re-signed.
+
+from trader.agent.event_live import fills_from_records  # noqa: E402
+
+
+class _FakeTrader:
+    """evaluate_week with SCRIPTED records per now_ts — exercises the dedup/drop logic deterministically
+    (no real env / torch). `records_by_now[now_ts]` is a list of evaluate_event_policy-shaped records."""
+
+    recurrent = False
+
+    def __init__(self, ws, records_by_now):
+        self._ws = int(ws)
+        self._by_now = records_by_now
+
+    def env_kwargs(self, returns):
+        return {}
+
+    def evaluate_week(self, returns, btc, liq, vol, now_ts, env_kwargs, *, predict_fn=None):
+        recs = self._by_now[int(now_ts)]
+        bars = sorted({int(r["time"]) for r in recs} | {self._ws})
+        eq = pd.Series([10_000.0] * len(bars), index=bars)
+        toks = sorted({f["token"] for r in recs for f in r["fills"]}) or ["UB"]
+        return {"week_start": self._ws, "equity": eq, "records": recs, "universe": toks,
+                "win_index": bars, "fills": fills_from_records(recs)}
+
+
+def _rec(bar, token, usd, reason="IGNITION"):
+    f = {"token": token, "usd": float(usd), "fee": 0.0, "time": int(bar), "px": 1.0,
+         "reason": reason, "obs": {}}
+    return {"time": int(bar), "weights": {}, "trades_usd": {token: float(usd)},
+            "trade_fees": {token: 0.0}, "fills": [f]}
+
+
+_DUMMY_PANELS = (pd.DataFrame(index=[0]), None, None, None)   # FakeTrader ignores panel content
+
+
+def test_dedup_catches_a_backdated_fill_the_cursor_would_drop(tmp_path):
+    """THE regression for the live miss: a fill surfaces LATE on an EARLIER bar (the env's lagged
+    ignition). The old forward cursor — advanced past the later bar — dropped it; dedup records it."""
+    ws = 1782086400
+    Y, X = ws + 5 * 3600, ws + 1 * 3600           # later bar Y seen first; earlier bar X surfaces later
+    by_now = {ws + 5 * 3600 + 200: [_rec(Y, "AAA", 100.0)],
+              ws + 6 * 3600 + 200: [_rec(Y, "AAA", 100.0), _rec(X, "BBB", 120.0)]}
+    runner = EventRunner(_FakeTrader(ws, by_now), selection=[],
+                         agent_ledger_path=tmp_path / "a.jsonl", compliance_frac=0.0)
+    runner.tick(ws + 5 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    runner.tick(ws + 6 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    fills = {(r["bar_ts"], r["token"]) for r in store.read_rows(tmp_path / "a.jsonl")
+             if r.get("kind") == "fill"}
+    assert (Y, "AAA") in fills and (X, "BBB") in fills          # the BACK-DATED fill is caught, not dropped
+
+
+def test_dedup_idempotent_on_the_backdated_fill(tmp_path):
+    """A later tick (with X now 'old') must not re-record either fill — identity dedup is idempotent."""
+    ws = 1782086400
+    Y, X = ws + 5 * 3600, ws + 1 * 3600
+    recs = [_rec(Y, "AAA", 100.0), _rec(X, "BBB", 120.0)]
+    by_now = {ws + 6 * 3600 + 200: recs, ws + 7 * 3600 + 200: recs}
+    runner = EventRunner(_FakeTrader(ws, by_now), selection=[],
+                         agent_ledger_path=tmp_path / "a.jsonl", compliance_frac=0.0)
+    runner.tick(ws + 6 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    runner.tick(ws + 7 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    n = sum(1 for r in store.read_rows(tmp_path / "a.jsonl") if r.get("kind") == "fill")
+    assert n == 2                                              # each recorded exactly once
+
+
+def test_seeded_missed_fill_is_not_resigned_live(tmp_path):
+    """The 'don't chase' guard: a fill SEEDED as `missed` in the ledger (the UB the live run dropped)
+    is deduped — the executor is NEVER called for it, so the wallet doesn't chase a stale entry."""
+    ws = 1782086400
+    bar = ws                                                  # the week-open ignition bar (UB)
+    store.append({"kind": "fill", "mode": "live", "compliance": False, "from": "USDT", "to": "UB",
+                  "token": "UB", "usd_in": 17.8, "usd_out": 17.8, "cost_usd": 0.0, "bar_ts": bar,
+                  "reason": "IGNITION", "trigger": "IGNITION", "guardrail_ok": True,
+                  "guardrail_codes": [], "exec_status": "missed", "tx_hash": None},
+                 tmp_path / "a.jsonl", now=None)
+    ex = _FakeExec()
+    by_now = {ws + 3 * 3600 + 200: [_rec(bar, "UB", 1820.0)]}   # env still holds the UB entry at the open
+    runner = EventRunner(_FakeTrader(ws, by_now), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                         mode="live", execute_fn=ex, live_policy=_TIGHT, live_bankroll_usd=100.0,
+                         min_notional_usd=0.0, compliance_frac=0.0)
+    runner.tick(ws + 3 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    assert ex.calls == []                                     # UB deduped -> NEVER chased on-chain
