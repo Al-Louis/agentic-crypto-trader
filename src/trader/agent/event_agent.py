@@ -34,6 +34,7 @@ HOUR = 3600
 MODE_ENV = "TRADER_MODE"            # paper | live (live refused here — signing is live_event_agent)
 LIVE_OPT_IN_ENV = "AGENT_ALLOW_LIVE"
 DEFAULT_TICK_OFFSET = 180           # seconds after the hour to tick (let the bar's data settle)
+DEFAULT_CANDLE_WINDOW = 168         # trailing 1h candles published per token to trading/candles/
 
 
 def seconds_until_next_tick(now: int, interval: int = HOUR, offset: int = DEFAULT_TICK_OFFSET) -> float:
@@ -98,6 +99,30 @@ def _resolve_mode() -> str:
     return mode
 
 
+def publish_aux_feeds(publish_target, selection, trader, now_ts, *,
+                      candle_window=DEFAULT_CANDLE_WINDOW):
+    """Per-tick auxiliary CDN feeds the dashboard charts — per-token candlesticks
+    (`trading/candles/`) + the decision-tape signals tally (`signals.json`). SHARED by both the
+    paper (`event_agent`) and live (`live_event_agent`) launchers so the live process keeps them
+    fresh: these froze at go-live because the loop forked and only the paper launcher published
+    them. Fail-safe — a publish error here must NEVER stop the trading loop. No-op without a target."""
+    if not publish_target:
+        return
+    try:
+        from trader.agent.candles import publish_candles  # noqa: PLC0415
+        n = publish_candles(selection, publish_target, window_bars=candle_window)
+        print(f"[candles] published {n} token files -> {publish_target}/candles/", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        print(f"candle publish warning: {e!r}", file=sys.stderr)
+    try:
+        from trader.agent.signals import publish_signals_tally  # noqa: PLC0415
+        t = publish_signals_tally(trader, publish_target, now_ts)["totals"]
+        print(f"[signals] seen={t['signals_seen']} exec={t['executed']} "
+              f"ignored={t['ignored']} -> {publish_target}/signals.json", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        print(f"signals publish warning: {e!r}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config.load_dotenv()
@@ -131,24 +156,9 @@ def main(argv: list[str] | None = None) -> int:
               f"eq=${r.equity_usd:,.2f} dd={r.drawdown_pct:.1f}% "
               f"fills+{r.fills_recorded}/blocked{r.fills_blocked} "
               f"trades_today={r.trades_today} uni={len(r.universe)}", file=sys.stderr)
-        # publish per-token candlesticks under trading/candles/ (within the put-only grant);
-        # fail-safe — a publish error must never stop the loop.
-        if publish_target:
-            try:
-                from trader.agent.candles import publish_candles  # noqa: PLC0415
-                n = publish_candles(selection, publish_target, window_bars=args.candle_window)
-                print(f"[candles] published {n} token files -> {publish_target}/candles/",
-                      file=sys.stderr)
-            except Exception as e:  # noqa: BLE001
-                print(f"candle publish warning: {e!r}", file=sys.stderr)
-            # publish the decision-tape tally (signals seen/executed/ignored per day); fail-safe.
-            try:
-                from trader.agent.signals import publish_signals_tally  # noqa: PLC0415
-                t = publish_signals_tally(trader, publish_target, now_ts)["totals"]
-                print(f"[signals] seen={t['signals_seen']} exec={t['executed']} "
-                      f"ignored={t['ignored']} -> {publish_target}/signals.json", file=sys.stderr)
-            except Exception as e:  # noqa: BLE001
-                print(f"signals publish warning: {e!r}", file=sys.stderr)
+        # per-tick auxiliary CDN feeds (candles + signals tally) — shared with the live launcher.
+        publish_aux_feeds(publish_target, selection, trader, now_ts,
+                          candle_window=args.candle_window)
 
     if args.once:
         _tick(int(args.now if args.now is not None else _now()))

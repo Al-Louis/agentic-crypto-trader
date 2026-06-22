@@ -34,8 +34,9 @@ import threading
 from datetime import datetime, timezone
 
 from trader import config
-from trader.agent.event_agent import (DEFAULT_TICK_OFFSET, HOUR, _now, load_provenance,
-                                       load_selection, seconds_until_next_tick)
+from trader.agent.event_agent import (DEFAULT_CANDLE_WINDOW, DEFAULT_TICK_OFFSET, HOUR, _now,
+                                       load_provenance, load_selection, publish_aux_feeds,
+                                       seconds_until_next_tick)
 
 MODE_ENV = "TRADER_MODE"
 LIVE_OPT_IN_ENV = "AGENT_ALLOW_LIVE"
@@ -61,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-refresh", action="store_true", help="skip the network data refresh")
     p.add_argument("--capital", type=float, default=10_000.0, help="cold-weekly env capital (the model "
                    "trained at 10000; do NOT change — only the SCALE to the real bankroll varies)")
+    p.add_argument("--candle-window", type=int, default=DEFAULT_CANDLE_WINDOW, help="trailing 1h "
+                   "candles to publish per token to trading/candles/ (default 168 = 7d)")
     p.add_argument("--ledger-path", default=None, help="agent-ledger override; a --dry-run defaults "
                    "to data/agent_ledger.dryrun.jsonl (NEVER the production ledger) and does not publish")
     return p
@@ -132,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
               f"eq=${r.equity_usd:,.2f} fills+{r.fills_recorded}/blk{r.fills_blocked} "
               f"compliance={r.compliance_trades} trades_today={r.trades_today} "
               f"uni={len(r.universe)}", file=sys.stderr)
+        # resume the dashboard's candle + signals feeds (these froze at go-live until ported from
+        # the paper launcher). publish_target is None on a --dry-run, so this no-ops there.
+        publish_aux_feeds(publish_target, selection, trader, now_ts, candle_window=args.candle_window)
 
     if args.once:
         _tick(int(args.now if args.now is not None else _now()))

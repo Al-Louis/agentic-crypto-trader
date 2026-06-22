@@ -150,3 +150,51 @@ def test_broken_publisher_never_stops_the_loop(tmp_path, capsys):
     rows = store.read_rows(cfg.agent_ledger_path)
     assert sum(1 for r in rows if r["kind"] == "heartbeat") == 2
     assert "publish warning" in capsys.readouterr().err
+
+
+# --- the shared per-tick aux-feed publisher (candles + signals tally) -----------
+# Defined in event_agent, called by BOTH launchers. Regression guard for the go-live freeze where
+# the LIVE launcher's tick didn't publish trading/candles/ (the dashboard candle chart went empty).
+
+from trader.agent.event_agent import publish_aux_feeds  # noqa: E402
+
+
+def test_aux_feeds_noop_without_target():
+    publish_aux_feeds(None, [{"symbol": "X"}], object(), 0)   # no target -> clean no-op, no raise
+    publish_aux_feeds("", [], object(), 0)
+
+
+def test_aux_feeds_publishes_candles_and_signals(monkeypatch):
+    import trader.agent.candles as candles_mod
+    import trader.agent.signals as signals_mod
+    seen = {}
+
+    def fake_candles(sel, tgt, **kw):
+        seen["candles"] = {"sel": sel, "target": tgt, "window": kw.get("window_bars")}
+        return 4
+
+    def fake_signals(tr, tgt, ts):
+        seen["signals"] = {"target": tgt, "now": ts}
+        return {"totals": {"signals_seen": 5, "executed": 2, "ignored": 3}}
+
+    monkeypatch.setattr(candles_mod, "publish_candles", fake_candles)
+    monkeypatch.setattr(signals_mod, "publish_signals_tally", fake_signals)
+    sel = [{"symbol": "HUMA", "pair_address": "0xabc"}]
+    publish_aux_feeds("s3://b/trading", sel, object(), 123, candle_window=50)
+    assert seen["candles"] == {"sel": sel, "target": "s3://b/trading", "window": 50}
+    assert seen["signals"] == {"target": "s3://b/trading", "now": 123}
+
+
+def test_aux_feeds_is_fail_safe(monkeypatch, capsys):
+    # a broken candle/signals publish must NOT propagate — it would kill the trading loop
+    import trader.agent.candles as candles_mod
+    import trader.agent.signals as signals_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("s3 down")
+
+    monkeypatch.setattr(candles_mod, "publish_candles", boom)
+    monkeypatch.setattr(signals_mod, "publish_signals_tally", boom)
+    publish_aux_feeds("s3://b/trading", [], object(), 0)      # must return cleanly
+    err = capsys.readouterr().err
+    assert "candle publish warning" in err and "signals publish warning" in err
