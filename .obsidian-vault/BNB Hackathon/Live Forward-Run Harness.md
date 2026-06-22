@@ -59,6 +59,9 @@ the model was validated and the competition scores.
   (ticks on start, then at HH:03), clean SIGTERM shutdown. Refuses `TRADER_MODE=live` by design — the
   gated live-signing path is the SEPARATE **`live_event_agent.py`** (triple env gate; see the
   2026-06-21 launcher + 2026-06-22 entries), so the box's paper service can never arm the signer.
+- **`wallet_recon.py`** (2026-06-22) — the ACTUAL on-chain wallet equity/PnL feed (`trading/wallet.json`),
+  separate from the env book; the live launcher also uses its `read_live_equity_usd` as the
+  self-correcting startup bankroll. Read-only, flag-gated (`--publish-wallet`), fail-safe. See §2026-06-22.
 
 **Obs-parity gate (offline, `tests/test_live_data.py`):** truncate a recorded token, replay later
 bars forward, prove `r_alt` + volume match recorded EXACTLY (`rtol 1e-9`) on the appended bars and
@@ -411,6 +414,29 @@ ledger append → restart could re-sign). Open follow-up: a two-phase `pending`�
 tick → agent down ~20 min. Build rows in Python + validate (the repair re-parsed, kept parseable rows,
 rebuilt the seed via `json.dumps`). (2) Pasting multi-line scripts on this box auto-indents + breaks
 heredoc closes → use **base64 one-liners**. → [[live-signing-path-built]].
+
+## 2026-06-22 — ACTUAL wallet equity/PnL (`wallet_recon`) + self-correcting bankroll
+
+The dashboard's `trading/*` are the **$10k env BOOK** (the strategy's notional — what the leaderboard
+ranks); the real competition wallet is ~$105. `trader.agent.wallet_recon` adds the actual-money layer
+(schema → [[Apentic Data Contract]] `trading/`):
+
+- **`wallet.json`** — `Σ(on-chain balanceOf qty × OHLCV price)` over USDT + every universe token + BNB
+  (USDT=1; token closes from the same store the candles use; BNB from the anchor parquet). Publishes
+  `{equity_usd, baseline_usd, pnl_usd, pnl_pct, holdings[], stale}`. Read-only, fail-safe, **FLAG-GATED
+  `--publish-wallet`** (OFF by default → existing feeds byte-identical until proven). `build_wallet_payload`
+  is pure (prices injected, tested); holdings read by ERC-20 `balanceOf` over the KNOWN universe so a token
+  the strategy bought is captured even if a wallet tool wouldn't list it.
+- **Real fill amounts.** `_exec_summary` records the executor's realized leg per signed fill (`exec_usd` =
+  the real ~$30 swap, not the $10k-book `usd_in`, + `exec_out_amount`/`_symbol`); `status.live_scale`
+  (bankroll/$10k, live-only) lets the frontend derive real usd for fills recorded before that field.
+- **Self-correcting bankroll.** `read_live_equity_usd` = the TOTAL on-chain equity (NOT USDT-only, which
+  undercounts when capital is parked in tokens — $67.83 vs the real $104). The launcher uses it as the
+  startup bankroll when `AGENT_WALLET_ADDRESS` is set, so the $10k-book scale self-corrects on a restart
+  (no `--bankroll-usd` pinning); falls back to USDT-only on a read error; `--bankroll-usd` still wins.
+- **DEPLOYED + PROVEN 2026-06-22 15:42Z:** bankroll auto-read $103.18 (scale 0.01032), `wallet.json` live
+  = real equity $103.18 / +2.09% vs $101.06. The validation also confirmed the dedup fix had deployed —
+  ~$30 into token B (tx `0x45fcacb3…`, IGNITION confirmed). Commits `6691869`/`8e0ec2e`/`c64dc5b`.
 
 ## What's NOT built yet
 - ~~**Live deployment (EC2 flip + funding).**~~ **DONE 2026-06-22** — competition wallet funded (~$100

@@ -313,12 +313,28 @@ built 2026-06-12) projects these append-only rows from `data/agent_ledger.jsonl`
 
 ```
 trading/heartbeat.json  { generated, mode, tick, equity_usd }
-trading/status.json     { generated, mode, tick, equity_usd, peak_usd, drawdown,
-                          below_dust, trades_today, daily_floor_ok, n_fills, n_refusals }
+trading/status.json     { generated, mode, tick, equity_usd, peak_usd, drawdown, below_dust,
+                          trades_today, daily_floor_ok, n_fills, n_refusals, live_scale? }
 trading/equity.json     { generated, mode, series: [{ ts, equity_usd, drawdown }] }
-trading/trades.json     { generated, mode, fills: [<fill rows + time/time_utc>], refusals: [...] }
+trading/trades.json     { generated, mode, fills: [<fill rows + time/time_utc + exec_*>], refusals: [...] }
+trading/candles/index.json  { generated, interval_seconds, tokens: [{ symbol, slug, n, last }] }
+trading/candles/<slug>.json { token, slug, generated, interval_seconds, candles: [{ t,o,h,l,c,v }] }
+trading/signals.json    { generated, week_start, totals:{seen,executed,ignored,…}, days, events }
+trading/wallet.json     { generated, address, source:"onchain", stale, equity_usd, baseline_usd,
+                          pnl_usd, pnl_pct, holdings: [{ token, qty, price_usd, value_usd }] }
 ```
 
+- **BOOK vs WALLET (live, 2026-06-22).** `heartbeat`/`status`/`equity`/`trades` all report the **$10k env
+  BOOK** (the strategy's cold-weekly notional — what the leaderboard ranks), NOT the real wallet. The
+  ACTUAL competition-wallet equity/PnL is **`trading/wallet.json`** — `Σ(on-chain balanceOf qty × OHLCV
+  price)` over USDT + universe tokens + BNB, published by `trader.agent.wallet_recon` (flag-gated
+  `--publish-wallet`, read-only, fail-safe; `stale:true` if any holding couldn't be priced). The
+  frontend's equity/PnL panel should read `wallet.json`; keep the book as a labeled "strategy notional".
+- **REAL fill amounts (live, 2026-06-22).** Each signed live fill carries the realized swap: `exec_usd`
+  (the actual ~$30 scaled swap, NOT the $10k-book `usd_in`), `exec_out_amount` + `exec_out_symbol` (the
+  token bought / USDT received). For fills recorded before that field existed, derive `usd_in ×
+  status.live_scale` (= bankroll/$10k, live-only). Fill tape: `fill.exec_usd ?? fill.usd_in *
+  status.live_scale`. Paper rows have no `exec_*`/`live_scale` and correctly show the paper book.
 - **`generated` is the newest `heartbeat`/`equity` row `ts`, never the wall clock** — a
   stopped loop publishes *as* stale, so the frontend's dead-man aging is honest by
   construction.

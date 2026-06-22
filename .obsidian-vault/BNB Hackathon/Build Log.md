@@ -1441,3 +1441,35 @@ this box adds 2-space auto-indent + indents heredoc closes → use base64 one-li
 **STATUS (2026-06-22 ~09:16Z): LIVE + GREEN** — ticking clean (no StoreError), UB shows `missed`/no-tx
 (deduped, not chased), compliance fill+tx preserved, candle/signals feeds live; the next genuine ignition
 WILL land on the wallet. Box on `origin/main@a7d3683`. → [[Live Forward-Run Harness]], [[live-signing-path-built]].
+
+## 2026-06-22 (cont.) — ACTUAL wallet equity/PnL on the dashboard (on-chain reconciliation)
+
+The dashboard's `trading/*` all reported the **$10k env BOOK**, not the real ~$105 wallet — confusing
+(at one point the book showed −2.3% while the real wallet was +2%, because the wallet correctly SKIPPED
+the missed UB that retraced). Built the real-wallet layer + matching trade-data so the frontend shows
+actual money. Schema → [[Apentic Data Contract]] `trading/`; design → [[Live Forward-Run Harness]].
+
+- **`wallet.json` — on-chain wallet reconciliation (`6691869`).** New `trader.agent.wallet_recon`: reads
+  real holdings on-chain (BNB `eth_getBalance` + each universe token + USDT `balanceOf` over the KNOWN
+  universe, decimals per token via `eth_call`), prices them with the SAME OHLCV/anchor source as the
+  candles (parity; USDT=1), publishes `{equity_usd, baseline_usd, pnl_usd, pnl_pct, holdings, stale}`.
+  Read-only, fail-safe, **FLAG-GATED `--publish-wallet`** (OFF by default → existing feeds byte-identical
+  until proven). `build_wallet_payload` is pure (prices injected).
+- **Real fill amounts + `live_scale` (`8e0ec2e`).** `_exec_summary` now records the executor's realized
+  leg on each signed fill — `exec_usd` (the real ~$30 swap, not the $10k-book `usd_in`) + `exec_out_amount`/
+  `_symbol`; `status.json` publishes `live_scale` (bankroll/$10k, live-only) so the frontend derives a
+  pre-field fill's real usd = `usd_in × live_scale`. Both additive/live-only → paper byte-identical.
+- **Self-correcting bankroll (`c64dc5b`).** The startup bankroll was USDT-only (`read_live_bankroll_usdt`)
+  — undercounts once capital is parked in tokens ($67.83 USDT while the wallet was ~$104). Now
+  `read_live_equity_usd` = the TOTAL on-chain equity (USDT + tokens + BNB); the launcher uses it as the
+  default bankroll when `AGENT_WALLET_ADDRESS` is set → the $10k-book scale **self-corrects on restart**,
+  no `--bankroll-usd` pinning. Falls back to USDT-only on a read error; `--bankroll-usd` still overrides.
+- **PROVEN + DEPLOYED 2026-06-22 ~15:42Z.** The on-chain read validated against the real wallet — and
+  REVEALED the dedup fix working: the agent had deployed ~$30 into token **B** (tx `0x45fcacb3…`, IGNITION
+  confirmed). Flipped on: bankroll auto-read **$103.18** (USDT 67.91 + B 28.57 + BNB 6.70 — NOT the $67.83
+  USDT), scale 0.01032; `wallet.json` LIVE = **real equity $103.18 / +2.09% vs $101.06**,
+  `status.live_scale=0.0103`. +14 tests. Box on `origin/main@c64dc5b`.
+
+**STATUS: the dashboard now shows REAL money.** Frontend equity/PnL → `wallet.json`; fill tape →
+`exec_usd ?? usd_in × live_scale`. The $10k book stays the labeled "strategy notional" (leaderboard).
+→ [[Live Forward-Run Harness]], [[live-signing-path-built]], [[Apentic Data Contract]].
