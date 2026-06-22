@@ -33,12 +33,13 @@ from trader import config
 HOUR = 3600
 MODE_ENV = "TRADER_MODE"            # paper | live (live refused here — signing is live_event_agent)
 LIVE_OPT_IN_ENV = "AGENT_ALLOW_LIVE"
-DEFAULT_TICK_OFFSET = 900           # seconds after the hour to tick. GeckoTerminal often hasn't
-#   finalized the just-closed thin-pool candle until ~10-16 min after the close, so the old 180s
-#   (HH:03) RACED it and missed the bar for a FULL hour (the live B trade's ~5% slip). HH:15 lets
-#   the bar settle in ONE later fetch pass — no re-poll loop (the reverted settle-wait wall-clock-
-#   overran + 429-stormed Gecko). Stays < interval; compliance still fires (01:xx/23:xx, hour-keyed).
-#   Calibrate against the real finalization lag with scripts/probe_gecko_lag.py at an hour boundary.
+DEFAULT_TICK_OFFSET = 600           # seconds after the hour to tick. GeckoTerminal finalizes the
+#   just-closed thin-pool candle ~4-8 min after the close (CALIBRATED 2026-06-22 @20:00Z over the 20
+#   live pools: median 259s / P90 376s / slowest ACTIVE pool 465s; XAUt is perma-stale, never settles
+#   AND is never traded). The old 180s (HH:03) raced that and missed the bar for a FULL hour (the live
+#   B trade's ~5% slip). 600s (HH:10) clears the slowest active pool with ~2min margin in ONE fetch
+#   pass — no re-poll loop (the reverted settle-wait wall-clock-overran + 429-stormed Gecko). Stays
+#   < interval; compliance still fires (01:xx/23:xx, hour-keyed). Re-calibrate: scripts/calibrate_gecko_lag.py.
 DEFAULT_CANDLE_WINDOW = 168         # trailing 1h candles published per token to trading/candles/
 
 
