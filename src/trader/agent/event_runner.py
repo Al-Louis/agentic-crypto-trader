@@ -234,6 +234,23 @@ class EventRunner:
             keys.add((int(bt), str(r.get("token")), side))
         return keys
 
+    def _onchain_held(self, token: str, ws: int) -> bool:
+        """Did a strategy BUY of `token` actually LAND on-chain this week — a `confirmed` leg, net of
+        confirmed sells? Gates a strategy SELL so the runner never signs an UNBACKED sell: the env
+        book can be long a token the wallet never bought (a `missed` entry, or one the guardrails
+        BLOCKED), and signing that exit would swap funds the wallet doesn't hold. Only
+        `exec_status=="confirmed"` legs count — a missed/skipped/blocked buy does not."""
+        net = 0
+        for r in store.read_rows(self.agent_ledger_path):
+            if (r.get("kind") != "fill" or r.get("compliance")
+                    or str(r.get("token")) != token or r.get("exec_status") != "confirmed"):
+                continue
+            bt = r.get("bar_ts")
+            if not isinstance(bt, int) or int(bt) < ws:
+                continue
+            net += 1 if r.get("to") == token else -1
+        return net > 0
+
     def _real_price(self, token: str, bar_ts: int) -> float | None:
         """The token's real USD close at the fill's bar (for display) — None if unavailable, in
         which case the caller keeps the env's internal index price."""
@@ -493,7 +510,16 @@ class EventRunner:
             exec_res = None
             if verdict.allowed:
                 recorded += 1
-                exec_res = self._sign_live(frm, to, usd, intent.slippage_pct)  # live only; None in paper
+                # LIVE sell-side position guard: never sign a SELL of a token the wallet didn't
+                # actually buy on-chain. The env book can be long a position the wallet is NOT (a
+                # missed or a guardrail-BLOCKED entry), and signing its exit would route a real swap
+                # of funds the wallet doesn't hold. Record it skipped (no on-chain mirror), don't sign.
+                # Paper is unaffected — _sign_live is a no-op there. Mirrors the compliance SELL guard.
+                if (self.mode == "live" and f.side == "sell"
+                        and not self._onchain_held(str(f.token), ws)):
+                    exec_res = {"skipped": "no_onchain_position", "tx_hash": None}
+                else:
+                    exec_res = self._sign_live(frm, to, usd, intent.slippage_pct)  # live; None in paper
             else:
                 blocked += 1
             # paper: record the env's fill either way, tagged with the guardrail verdict; in live

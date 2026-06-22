@@ -494,7 +494,10 @@ def test_min_notional_skips_dust_fills(tmp_path, panels):
     allowed = [r for r in store.read_rows(tmp_path / "agent.jsonl")
                if r["kind"] == "fill" and not r.get("compliance") and r["guardrail_ok"]]
     assert allowed and all(r.get("exec_status") == "skipped" for r in allowed)
-    assert all(r.get("exec_skipped") == "below_min_notional" for r in allowed)
+    # buys are dust-skipped (below_min_notional); their SELLs skip earlier as no_onchain_position
+    # (the dust buy never confirmed an on-chain position) — both are valid "nothing signed" skips
+    assert all(r.get("exec_skipped") in ("below_min_notional", "no_onchain_position") for r in allowed)
+    assert any(r.get("exec_skipped") == "below_min_notional" for r in allowed)   # dust guard still fires
 
 
 def test_live_forward_policy_scales_caps_to_bankroll():
@@ -622,3 +625,49 @@ def test_seeded_missed_fill_is_not_resigned_live(tmp_path):
                          min_notional_usd=0.0, compliance_frac=0.0)
     runner.tick(ws + 3 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
     assert ex.calls == []                                     # UB deduped -> NEVER chased on-chain
+
+
+_WIDE = Policy(allowlist=frozenset({"USDT", "UB", "AAA", "BNB"}), per_trade_usd=1e6, daily_usd=1e6,
+               max_slippage_pct=1.0, drawdown_stop_pct=30.0, lifetime_usd_ceiling=1e9, chain="bsc")
+
+
+def test_unbacked_sell_is_skipped_not_signed_live(tmp_path):
+    """C1/C2 guard: when the env EXITS a token the wallet never bought (a seeded-missed entry — same
+    as a guardrail-blocked one), the SELL must NOT be signed — no unbacked on-chain swap of phantom
+    funds. It is recorded skipped:no_onchain_position instead."""
+    ws = 1782086400
+    store.append({"kind": "fill", "mode": "live", "compliance": False, "from": "USDT", "to": "UB",
+                  "token": "UB", "usd_in": 17.8, "usd_out": 17.8, "cost_usd": 0.0, "bar_ts": ws,
+                  "reason": "IGNITION", "trigger": "IGNITION", "guardrail_ok": True,
+                  "guardrail_codes": [], "exec_status": "missed", "tx_hash": None},
+                 tmp_path / "a.jsonl", now=None)
+    ex = _FakeExec()
+    sell_bar = ws + 4 * 3600
+    by_now = {ws + 4 * 3600 + 200: [_rec(ws, "UB", 1820.0),
+                                    _rec(sell_bar, "UB", -900.0, "TRAILING_STOP")]}
+    runner = EventRunner(_FakeTrader(ws, by_now), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                         mode="live", execute_fn=ex, live_policy=_WIDE, live_bankroll_usd=100.0,
+                         min_notional_usd=0.0, compliance_frac=0.0)
+    runner.tick(ws + 4 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    assert ex.calls == []                                     # BUY deduped (missed), SELL skipped (unbacked)
+    sells = [r for r in store.read_rows(tmp_path / "a.jsonl")
+             if r.get("kind") == "fill" and r.get("from") == "UB"]
+    assert sells and all(r.get("exec_status") == "skipped"
+                         and r.get("exec_skipped") == "no_onchain_position" for r in sells)
+
+
+def test_sell_signs_when_the_buy_actually_landed_live(tmp_path):
+    """The guard is not over-broad: a SELL of a token whose BUY confirmed on-chain DOES sign."""
+    ws = 1782086400
+    ex = _FakeExec()                                          # default result is status=confirmed
+    buy_bar, sell_bar = ws + 1 * 3600, ws + 4 * 3600
+    by_now = {ws + 1 * 3600 + 200: [_rec(buy_bar, "AAA", 500.0)],
+              ws + 4 * 3600 + 200: [_rec(buy_bar, "AAA", 500.0),
+                                    _rec(sell_bar, "AAA", -500.0, "TRAILING_STOP")]}
+    runner = EventRunner(_FakeTrader(ws, by_now), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                         mode="live", execute_fn=ex, live_policy=_WIDE, live_bankroll_usd=100.0,
+                         min_notional_usd=0.0, compliance_frac=0.0)
+    runner.tick(ws + 1 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)   # BUY lands (confirmed)
+    runner.tick(ws + 4 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)   # env exits -> SELL signs
+    sides = [(c["from"], c["to"]) for c in ex.calls]
+    assert ("USDT", "AAA") in sides and ("AAA", "USDT") in sides   # the buy AND the BACKED sell both signed
