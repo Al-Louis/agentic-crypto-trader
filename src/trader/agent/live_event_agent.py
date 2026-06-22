@@ -60,15 +60,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--interval-secs", type=int, default=HOUR)
     p.add_argument("--tick-offset-secs", type=int, default=DEFAULT_TICK_OFFSET)
     p.add_argument("--no-refresh", action="store_true", help="skip the network data refresh")
-    p.add_argument("--settle-max-wait", type=float, default=600.0, help="max seconds to re-poll "
-                   "GeckoTerminal WITHIN a tick until the just-closed bar settles for the active "
-                   "pools (the candle-lag fix: without it a bar Gecko publishes late is missed for "
-                   "a FULL hour). 0 = single fetch pass (old behavior).")
-    p.add_argument("--settle-poll", type=float, default=45.0,
-                   help="seconds between settle re-polls of the pools still missing the just-closed bar")
-    p.add_argument("--settle-active-window", type=int, default=6 * 3600, help="a pool is waited on "
-                   "only if its newest cached bar is within this many seconds of now (excludes "
-                   "perma-stale pools that would otherwise hold up every tick)")
     p.add_argument("--capital", type=float, default=10_000.0, help="cold-weekly env capital (the model "
                    "trained at 10000; do NOT change — only the SCALE to the real bankroll varies)")
     p.add_argument("--candle-window", type=int, default=DEFAULT_CANDLE_WINDOW, help="trailing 1h "
@@ -149,15 +140,11 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path = Path(AGENT_LEDGER_PATH)
     publish_target = None if args.dry_run else config.get("APENTIC_PUBLISH_TARGET")
     publisher = build_publisher(ledger_path, publish_target) if publish_target else None
-    # settle-wait config -> live_data.update_live: re-poll Gecko within a tick until the just-closed
-    # bar lands, so a late-published candle is traded THIS hour, not next (the candle-lag fix).
-    live_data_kwargs = {"settle_max_wait": args.settle_max_wait, "settle_poll": args.settle_poll,
-                        "settle_active_window": args.settle_active_window}
     runner = EventRunner(trader, selection=selection, agent_ledger_path=ledger_path,
                          capital=args.capital, publisher=publisher, mode="live",
                          execute_fn=execute_trade, execute_amount_fn=execute_swap_amount,
                          live_bankroll_usd=float(bankroll), min_notional_usd=args.min_notional_usd,
-                         live_dry_run=args.dry_run, live_data_kwargs=live_data_kwargs)
+                         live_dry_run=args.dry_run)
 
     # on-chain wallet reconciliation (trading/wallet.json) — OFF unless --publish-wallet (additive).
     wallet_recon_on = bool(args.publish_wallet) and bool(publish_target) and bool(wallet_addr)
@@ -168,8 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"LIVE event-agent start: run_id={run_id} bankroll=${bankroll:,.2f} "
           f"scale={bankroll / args.capital:.4g} dry_run={args.dry_run} "
           f"min_notional=${args.min_notional_usd} once={args.once} ledger={ledger_path} "
-          f"publish={publish_target or 'off'} wallet_recon={'on' if wallet_recon_on else 'off'} "
-          f"settle={'off' if args.settle_max_wait <= 0 else f'<= {args.settle_max_wait:.0f}s/{args.settle_poll:.0f}s'}",
+          f"publish={publish_target or 'off'} wallet_recon={'on' if wallet_recon_on else 'off'}",
           file=sys.stderr)
 
     def _tick(now_ts: int) -> None:

@@ -48,30 +48,6 @@ def _runner(tmp_path, **kw):
     return EventRunner(trader, selection=[], agent_ledger_path=tmp_path / "agent.jsonl", **kw)
 
 
-def test_tick_forwards_live_data_kwargs(tmp_path, monkeypatch):
-    """The cross-boundary seam: tick must pass live_data_kwargs (e.g. the settle-wait config)
-    VERBATIM into update_live. A sentinel raise inside the fake stops before the panel load."""
-    captured = {}
-
-    def fake_update_live(selection, now_ts, **kw):
-        captured["now_ts"], captured["kw"] = now_ts, kw
-        raise RuntimeError("stop after update_live")
-
-    monkeypatch.setattr("trader.agent.live_data.update_live", fake_update_live)
-    runner = _runner(tmp_path, live_data_kwargs={"settle_max_wait": 600.0, "settle_poll": 45.0,
-                                                 "settle_active_window": 21600})
-    with pytest.raises(RuntimeError, match="stop after update_live"):
-        runner.tick(123_456, refresh_data=True)        # panels=None -> the update_live path
-    assert captured["now_ts"] == 123_456
-    assert captured["kw"] == {"settle_max_wait": 600.0, "settle_poll": 45.0,
-                              "settle_active_window": 21600}
-
-
-def test_live_data_kwargs_defaults_empty(tmp_path):
-    """Default (no live_data_kwargs) -> {} so the paper path calls update_live exactly as before."""
-    assert _runner(tmp_path)._live_data_kwargs == {}
-
-
 class _FakeExec:
     """Stand-in for `execute_trade` — records each call (intent + policy + dry_run) and returns a
     scripted result, so the live-signing WIRING is tested without any network/keychain/real funds."""

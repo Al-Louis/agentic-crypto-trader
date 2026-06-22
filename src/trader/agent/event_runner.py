@@ -142,8 +142,7 @@ class EventRunner:
                  compliance_frac: float = 0.03, bnb_price_fn=None,
                  execute_fn=None, execute_amount_fn=None, live_policy: Policy | None = None,
                  live_compliance_usd: float | None = None, live_dry_run: bool = False,
-                 live_bankroll_usd: float | None = None, min_notional_usd: float = 0.0,
-                 live_data_kwargs: dict | None = None):
+                 live_bankroll_usd: float | None = None, min_notional_usd: float = 0.0):
         self.trader = trader
         self.selection = selection
         # symbol -> TWAK assetId (contract), so live swaps resolve microcap tokens (BNB/USDT pass
@@ -187,10 +186,6 @@ class EventRunner:
         self._live_scale = (self.live_bankroll_usd / self.capital
                             if self.live_bankroll_usd is not None else 1.0)
         self.min_notional_usd = float(min_notional_usd)
-        # forwarded verbatim to live_data.update_live (e.g. the settle-wait config that re-polls
-        # GeckoTerminal until the just-closed bar lands — the candle-lag fix). Empty {} = the
-        # pre-existing single-pass refresh, so paper stays byte-identical.
-        self._live_data_kwargs = dict(live_data_kwargs or {})
         # Live signing with REAL money needs real-money caps: refuse to arm if neither the bankroll
         # (which auto-builds live_forward_policy in tick) NOR an explicit live_policy is given —
         # otherwise _sign_live would fall back to the $10k-scale env-parity policy on a real swap.
@@ -473,7 +468,7 @@ class EventRunner:
         now_ts = int(now_ts)
         if refresh_data and panels is None:
             from trader.agent.live_data import update_live  # noqa: PLC0415 (network path)
-            update_live(self.selection, now_ts, **self._live_data_kwargs)
+            update_live(self.selection, now_ts)
         if panels is None:
             from train_rl import build_volume_panel, load_data  # noqa: PLC0415
             returns, btc, _anchor, liq = load_data()
