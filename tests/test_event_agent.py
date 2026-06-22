@@ -28,6 +28,21 @@ def test_seconds_until_next_tick_skips_the_current_offset_if_passed():
     assert ea.seconds_until_next_tick(now, 3600, 180) == 3600.0
 
 
+def test_default_tick_offset_lets_gecko_settle_within_the_compliance_hour():
+    # v2: offset bumped 180 -> 900 so the single fetch pass lands AFTER GeckoTerminal finalizes the
+    # just-closed candle (the 180s race missed thin-pool bars for a full hour). It MUST stay inside
+    # the hour so the hour-keyed compliance round-trip (01:xx buy / 23:xx sell) still fires.
+    from datetime import datetime, timezone
+
+    from trader.agent.compliance import compliance_action
+    assert 180 < ea.DEFAULT_TICK_OFFSET < 3600
+    day = (1_762_300_800 // 86400) * 86400
+    just_before_buy = day + 1 * 3600 - 10                      # 00:59:50 -> next tick is the 01:00 period
+    target = just_before_buy + ea.seconds_until_next_tick(just_before_buy, 3600, ea.DEFAULT_TICK_OFFSET)
+    assert datetime.fromtimestamp(int(target), timezone.utc).hour == 1   # tick stays in the buy hour
+    assert compliance_action(int(target)) == "buy"             # so Rule-1 still fires
+
+
 # --- mode gate ---------------------------------------------------------------
 
 def test_mode_gate_defaults_to_paper(monkeypatch):
