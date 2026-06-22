@@ -50,6 +50,17 @@ def _exec_summary(res: dict | None) -> dict:
               else "refused" if res.get("refused") else "error" if res.get("error")
               else res.get("status") or "unknown")
     out = {"exec_status": status, "tx_hash": res.get("tx_hash")}
+    # REAL realized amounts, so the dashboard fill tape shows the ACTUAL swap (~$30 -> 120 B) and not the
+    # $10k-book notional `usd_in`/`usd_out`. `exec_usd` = the scaled swap USD the executor signed (or a
+    # dust-skipped fill's would-be size); `exec_out_amount`/`_symbol` = the realized output leg (the token
+    # bought, or the USDT received on a sell). Absent in paper (res is None) -> the row stays byte-identical.
+    if res.get("usd") is not None:
+        out["exec_usd"] = res["usd"]
+    elif res.get("real_usd") is not None:
+        out["exec_usd"] = res["real_usd"]
+    if res.get("out_amount") is not None:
+        out["exec_out_amount"] = res["out_amount"]
+        out["exec_out_symbol"] = res.get("out_symbol")
     if res.get("skipped"):
         out["exec_skipped"] = res["skipped"]
     if res.get("refused"):
@@ -567,11 +578,13 @@ class EventRunner:
         # so it counts toward the daily floor. Off the env book (separate sleeve); idempotent off ledger.
         compliance_n = self._run_compliance(now_ts, equity, spent_today)
 
-        store.append({"kind": "equity", "mode": self.mode, "tick": now_ts,
-                      "equity_usd": equity, "peak_usd": self._week_peak_eq,
-                      "drawdown_pct": dd_pct, "week_start": ws,
-                      "compliance_pnl_usd": self._compliance_pnl,
-                      "below_dust": equity <= 1.0}, self.agent_ledger_path, now=None)
+        eq_row = {"kind": "equity", "mode": self.mode, "tick": now_ts,
+                  "equity_usd": equity, "peak_usd": self._week_peak_eq,
+                  "drawdown_pct": dd_pct, "week_start": ws,
+                  "compliance_pnl_usd": self._compliance_pnl, "below_dust": equity <= 1.0}
+        if self.mode == "live" and self._live_scale:      # bankroll/$10k -> lets the dashboard derive a
+            eq_row["live_scale"] = self._live_scale        # fill's REAL usd from its $10k-book usd_in.
+        store.append(eq_row, self.agent_ledger_path, now=None)
         store.append({"kind": "heartbeat", "mode": self.mode, "tick": now_ts,
                       "equity_usd": equity, "week_start": ws}, self.agent_ledger_path, now=None)
 

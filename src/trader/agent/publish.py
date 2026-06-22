@@ -98,6 +98,8 @@ def project(rows: list[dict]) -> dict[str, dict]:
         "n_fills": len(fills),
         "n_refusals": len(refusals),
     }
+    if last_eq.get("live_scale") is not None:               # live-only; absent in paper (byte-identical).
+        status["live_scale"] = last_eq["live_scale"]        # fill REAL usd = book usd_in * live_scale.
     equity = {
         "generated": generated,
         "mode": mode,

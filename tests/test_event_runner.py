@@ -700,3 +700,17 @@ def test_latest_token_prices_for_wallet_recon(tmp_path):
     px = runner.latest_token_prices(2000)
     assert px["USDT"] == 1.0 and px["UB"] == 2.5 and px["BNB"] == 612.0
     assert "ZEC" not in px            # NaN latest close -> excluded (no fabricated price)
+
+
+def test_exec_summary_records_real_realized_amounts():
+    """The fill tape's REAL trade data: a live swap records exec_usd (the actual ~$30 scaled swap, not
+    the $10k-book usd_in) + the realized output leg; paper stays byte-identical (empty summary)."""
+    from trader.agent.event_runner import _exec_summary
+    landed = _exec_summary({"tx_hash": "0xabc", "status": "confirmed", "usd": 30.1,
+                            "out_amount": 120.0, "out_symbol": "B"})
+    assert landed["exec_status"] == "confirmed" and landed["exec_usd"] == 30.1
+    assert landed["exec_out_amount"] == 120.0 and landed["exec_out_symbol"] == "B"
+    dust = _exec_summary({"skipped": "below_min_notional", "real_usd": 0.3, "tx_hash": None})
+    assert dust["exec_status"] == "skipped" and dust["exec_usd"] == 0.3  # the would-be real size
+    assert "exec_out_amount" not in dust
+    assert _exec_summary(None) == {}                                     # paper: byte-identical

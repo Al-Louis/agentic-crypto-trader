@@ -198,3 +198,12 @@ def test_aux_feeds_is_fail_safe(monkeypatch, capsys):
     publish_aux_feeds("s3://b/trading", [], object(), 0)      # must return cleanly
     err = capsys.readouterr().err
     assert "candle publish warning" in err and "signals publish warning" in err
+
+
+def test_status_surfaces_live_scale_only_in_live():
+    """status.json gains live_scale (bankroll/$10k) in LIVE so the frontend can derive a fill's REAL
+    usd = book usd_in * live_scale; paper status is byte-identical (no live_scale key)."""
+    assert "live_scale" not in project(ROWS)["status.json"]          # paper -> absent
+    live_eq = dict(ROWS[2], mode="live", live_scale=0.0098)          # ROWS[2] is an equity mark
+    files = project([live_eq, ROWS[3]])                              # live equity + a heartbeat mark
+    assert files["status.json"]["live_scale"] == 0.0098
