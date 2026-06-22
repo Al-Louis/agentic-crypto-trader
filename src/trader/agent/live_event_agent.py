@@ -101,10 +101,29 @@ def main(argv: list[str] | None = None) -> int:
     from trader.agent.store import AGENT_LEDGER_PATH
     from trader.execution.execute import execute_swap_amount, execute_trade
 
-    bankroll = args.bankroll_usd if args.bankroll_usd is not None else read_live_bankroll_usdt()
+    selection = load_selection()
+    wallet_addr = config.get("AGENT_WALLET_ADDRESS")
+    # Bankroll anchor = the wallet's TOTAL on-chain USD equity (USDT + token positions + BNB), so the
+    # $10k-book fills re-base to real capital that's PARKED IN TOKENS — not just the USDT balance — and a
+    # mid-week restart self-corrects (no --bankroll-usd pinning). Falls back to the USDT-only read if the
+    # address is unset or the on-chain/price read fails. An explicit --bankroll-usd always wins.
+    if args.bankroll_usd is not None:
+        bankroll = args.bankroll_usd
+    elif wallet_addr:
+        try:
+            from trader.agent.wallet_recon import read_live_equity_usd  # noqa: PLC0415
+            bankroll = read_live_equity_usd(wallet_addr, selection)
+            print(f"bankroll = on-chain wallet equity ${bankroll:,.2f} (USDT + tokens + BNB)",
+                  file=sys.stderr)
+        except Exception as e:  # noqa: BLE001 — a transient read error falls back, never refuses
+            bankroll = read_live_bankroll_usdt()
+            print(f"wallet-equity read failed ({e!r}); bankroll = USDT-only ${bankroll:,.2f}",
+                  file=sys.stderr)
+    else:
+        bankroll = read_live_bankroll_usdt()
     if not bankroll or bankroll <= 0:
-        print(f"refusing: bankroll is {bankroll!r} — fund the wallet with USDT or pass "
-              f"--bankroll-usd", file=sys.stderr)
+        print(f"refusing: bankroll is {bankroll!r} — fund the wallet or pass --bankroll-usd",
+              file=sys.stderr)
         raise SystemExit(2)
 
     prov = load_provenance(args.run_dir, run_id)
@@ -121,16 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path = Path(AGENT_LEDGER_PATH)
     publish_target = None if args.dry_run else config.get("APENTIC_PUBLISH_TARGET")
     publisher = build_publisher(ledger_path, publish_target) if publish_target else None
-    selection = load_selection()
     runner = EventRunner(trader, selection=selection, agent_ledger_path=ledger_path,
                          capital=args.capital, publisher=publisher, mode="live",
                          execute_fn=execute_trade, execute_amount_fn=execute_swap_amount,
                          live_bankroll_usd=float(bankroll), min_notional_usd=args.min_notional_usd,
                          live_dry_run=args.dry_run)
 
-    # on-chain wallet reconciliation (trading/wallet.json) — OFF unless --publish-wallet; needs the
-    # public wallet address. Additive: when off, nothing here runs and every existing feed is unchanged.
-    wallet_addr = config.get("AGENT_WALLET_ADDRESS")
+    # on-chain wallet reconciliation (trading/wallet.json) — OFF unless --publish-wallet (additive).
     wallet_recon_on = bool(args.publish_wallet) and bool(publish_target) and bool(wallet_addr)
     if args.publish_wallet and not wallet_recon_on:
         print(f"wallet recon requested but disabled: publish_target={publish_target!r} "

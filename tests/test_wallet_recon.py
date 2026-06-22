@@ -3,7 +3,8 @@ balanceOf/decimals decoding (fake RPC), and the local put path. No network."""
 
 import json
 
-from trader.agent.wallet_recon import (build_wallet_payload, publish_wallet, read_holdings_onchain)
+from trader.agent.wallet_recon import (build_wallet_payload, publish_wallet, read_holdings_onchain,
+                                       read_live_equity_usd)
 
 
 class _FakeRpc:
@@ -74,3 +75,14 @@ def test_publish_wallet_writes_local_target(tmp_path):
     f = json.loads((tmp_path / "trading" / "wallet.json").read_text(encoding="utf-8"))
     assert f["equity_usd"] == payload["equity_usd"] == 103.0   # 90 + 4*2.5 + 0.005*600
     assert f["pnl_usd"] == 3.0 and f["address"] == "0xabc" and f["source"] == "onchain"
+
+
+def test_read_live_equity_usd_sums_total_not_just_usdt():
+    """The bankroll anchor captures capital PARKED IN TOKENS + BNB, not just USDT (the $67.83 trap)."""
+    sel = [{"symbol": "B", "pair_address": "0xp", "token_address": "0xB"}]
+
+    def holdings(addr, assets):
+        return {"USDT": 67.83, "B": 120.0, "BNB": 0.011}
+
+    eq = read_live_equity_usd("0xW", sel, holdings_fn=holdings, prices={"B": 0.25, "BNB": 600.0})
+    assert abs(eq - 104.43) < 0.01     # 67.83 + 120*0.25 + 0.011*600 -- NOT 67.83 (USDT-only)

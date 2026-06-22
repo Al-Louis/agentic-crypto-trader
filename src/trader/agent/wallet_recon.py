@@ -102,3 +102,56 @@ def publish_wallet(target: str, *, address: str, assets: list[dict], prices: dic
               json.dumps(payload, separators=(",", ":")).encode("utf-8"),
               content_type="application/json", cache_control="no-cache")
     return payload
+
+
+def _bnb_latest_price() -> float | None:
+    """Latest BNB USD close from the anchor parquet — the SAME source the runner's compliance prices BNB."""
+    try:
+        import os  # noqa: PLC0415
+        import pandas as pd  # noqa: PLC0415
+        a = pd.read_parquet(os.path.join("data", "anchor", "BNB_USDT", "1h.parquet"))
+        v = float(a.sort_values("timestamp")["close"].iloc[-1])
+        return v if (v == v and v > 0) else None
+    except Exception:  # noqa: BLE001 — no anchor on this box -> BNB stays unpriced (flagged), not crash
+        return None
+
+
+def latest_prices(selection: list[dict], *, root: str | None = None) -> dict:
+    """`{symbol: latest USD close}` for the universe (from the OHLCV store) + USDT=1.0 + BNB (anchor).
+    Parity: the same store the candle feed + model read. Standalone (no runner) so it can value the
+    wallet at STARTUP, before the first tick builds the runner's close panel."""
+    from trader.agent.live_data import OHLCV_ROOT       # noqa: PLC0415
+    from trader.data.downloader import load_ohlcv       # noqa: PLC0415
+    root = root or OHLCV_ROOT
+    px = {"USDT": 1.0}
+    for s in selection:
+        sym, pool = s.get("symbol"), s.get("pair_address")
+        if not (sym and pool):
+            continue
+        try:
+            df = load_ohlcv(sym, pool, "hour", 1, root=root)
+        except Exception:  # noqa: BLE001
+            continue
+        if not df.empty:
+            v = float(df["close"].iloc[-1])
+            if v == v and v > 0:
+                px[str(sym)] = v
+    bnb = _bnb_latest_price()
+    if bnb:
+        px["BNB"] = bnb
+    return px
+
+
+def read_live_equity_usd(address: str, selection: list[dict], *,
+                         holdings_fn=read_holdings_onchain, prices: dict | None = None) -> float:
+    """The wallet's TOTAL real USD equity = Σ(on-chain qty × OHLCV price) over USDT + every universe
+    token + BNB — the bankroll anchor that CAPTURES capital parked in tokens (not just the USDT
+    balance). Use as the live launcher's startup bankroll so the $10k-book scale self-corrects on a
+    restart. Returns the equity (float)."""
+    assets = [{"symbol": s["symbol"], "contract": s.get("token_address")}
+              for s in selection if s.get("token_address")]
+    assets.append({"symbol": "USDT", "contract": USDT_BSC})
+    holdings = holdings_fn(address, assets)
+    px = prices if prices is not None else latest_prices(selection)
+    payload = build_wallet_payload(holdings, px, baseline_usd=None, address=address)
+    return float(payload["equity_usd"])
