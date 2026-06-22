@@ -37,7 +37,9 @@ the model was validated and the competition scores.
 - **`event_live.py`** — `cold_week_window()` (Monday-open + 168-bar warmup prepad, truncated at
   now), `LiveEventTrader` (holds the checkpoint + provenance, rebuilds the exact `env_kwargs` via
   `env_kwargs_from_provenance`, runs one hourly week-evaluation with a **cold-LSTM-per-week**
-  predictor), and `new_fills()` (the deterministic hourly fill-diff).
+  predictor), and `fills_from_records()` (flattens the env's records into the hourly fill stream; the
+  runner reconciles it against the ledger by identity — see the 2026-06-22 entry, which replaced the old
+  `new_fills()` forward cursor).
 - **`live_data.py`** — the hourly data updater. Keeps the `data/` panels fresh by appending the
   just-closed bar and regenerating `r_alt` via the **exact training producers**
   (`trader.data.anchor.download_anchor`, the OHLCV part-file cache, `trader.features.factor`), so
@@ -48,11 +50,15 @@ the model was validated and the competition scores.
   guardrails (`trader.risk`: allowlist + per-trade/daily caps + slippage + 30% drawdown stop),
   logs every decision to the agent ledger, marks within-week equity/drawdown + heartbeat, tracks
   the ≥1-trade/day floor, and publishes. The env IS the paper book; the runner does not
-  re-simulate. `forward_run_policy` caps are paper placeholders (Phase G sets live caps); the
-  allowlist + DD-stop are binding.
-- **`event_agent.py`** — `python -m trader.agent.event_agent --run-dir <ckpt>`: the hourly loop
-  (ticks on start, then at HH:03), clean SIGTERM shutdown. **PAPER-ONLY** — the event harness has
-  no TWAK signing path yet, so live mode refuses loudly.
+  re-simulate. Fill recording is **IDENTITY-DEDUP** (`(bar_ts, token, side)` vs the ledger — not a
+  forward cursor; see the 2026-06-22 entry for why), and in LIVE mode a strategy SELL is gated on a
+  `confirmed` on-chain buy (`_onchain_held` — no unbacked sells). `forward_run_policy` caps are the
+  $10k-book placeholders; live caps come from `live_forward_policy` (bankroll-scaled); the allowlist +
+  DD-stop are binding.
+- **`event_agent.py`** — `python -m trader.agent.event_agent --run-dir <ckpt>`: the PAPER hourly loop
+  (ticks on start, then at HH:03), clean SIGTERM shutdown. Refuses `TRADER_MODE=live` by design — the
+  gated live-signing path is the SEPARATE **`live_event_agent.py`** (triple env gate; see the
+  2026-06-21 launcher + 2026-06-22 entries), so the box's paper service can never arm the signer.
 
 **Obs-parity gate (offline, `tests/test_live_data.py`):** truncate a recorded token, replay later
 bars forward, prove `r_alt` + volume match recorded EXACTLY (`rtol 1e-9`) on the appended bars and
@@ -366,10 +372,50 @@ needs only the first two (routes the quote-only pre-flight, zero signing). Reads
 wallet's USDT at startup (or `--bankroll-usd`), wires `execute_fn` + `execute_amount_fn` + scaling +
 `min_notional`. Suite **540 passed**.
 
+## 2026-06-22 — WENT LIVE; the fill-diff cursor dropped a lagged ignition → identity-dedup + sell guard
+
+**Live since Mon 00:00 UTC** (the flip + the two go-live snags — a missing `AGENT_LIVE_CONFIRM` gate, and
+the week-open bar not yet closed at the first tick — are in the [[Build Log]]). First real trade: a
+COMPLIANCE_BUY confirmed on BSC at 01:03. Then the real bug surfaced.
+
+**The wallet wasn't deploying.** sbq-s1 made one decision this week — a $1820 (~18% of book) UB IGNITION
+at the week-open bar — the env executed it (signals.json `executed:true`) but the runner never
+recorded/signed it; the real wallet stayed flat USDT. **Root cause:** the old `new_fills(records, after)`
+was a FORWARD-ONLY cursor (`after`→latest bar each tick, `time > after` strict). The env confirms
+ignitions with a LAG and attributes them to the origin bar, so a fill that surfaces LATE on an
+already-passed bar was silently dropped — most acute at the week open, where the first tick(s) are delayed
+(the 00:00 bar isn't closed until 01:00).
+
+**Fix (`62b23b6` → `a7d3683`):**
+- **Identity-dedup recording** replaces the cursor. Each tick: `_recorded_fill_keys(ws)` (the
+  `(bar_ts, token, side)` of strategy fills already in the ledger, excl. compliance), then record/sign any
+  env fill not in that set. A back-dated fill is caught whenever it surfaces; the key check makes
+  double-signing impossible (restart- and week-rollover-safe; reads the ledger on disk).
+- **Sell-side position guard** `_onchain_held(token, ws)`: a strategy SELL signs ONLY if the token has a
+  `confirmed` buy this week — never an UNBACKED sell of a position the wallet never bought (a missed or
+  guardrail-BLOCKED entry the env later exits). Uses "ANY confirmed buy" (not a net count, which would
+  wrongly skip later PARTIAL trims); over-selling beyond holdings reverts on-chain. Mirrors the
+  compliance-SELL discipline.
+- **Don't-chase the missed UB:** seed the ledger with a UB row `exec_status:"missed", tx_hash:null` so
+  dedup treats it as handled (the dashboard shows a transparent miss; the wallet never buys it).
+- +6 regression tests (back-dated caught, idempotent, seeded-missed not re-signed, unbacked-sell skipped,
+  backed-sell + partial-trims sign); 34 runner tests green.
+
+**Adversarial review (principal-engineer):** found C1/C2 (the unbacked-sell — fixed by the guard above),
+verified the dedup key is double-sign-safe for this env's output + closed-bar immutability, and flagged
+**C3 = a PRE-EXISTING sign-before-append double-spend window** (a crash between the on-chain sign and the
+ledger append → restart could re-sign). Open follow-up: a two-phase `pending`→`confirmed` ledger row.
+
+**Operational scars:** (1) NEVER append to the live ledger by pasting raw JSON — a long single-line
+`echo '{…}' | tee -a` line-wrapped on paste into 3 fragments → corrupted the JSONL → `StoreError` every
+tick → agent down ~20 min. Build rows in Python + validate (the repair re-parsed, kept parseable rows,
+rebuilt the seed via `json.dumps`). (2) Pasting multi-line scripts on this box auto-indents + breaks
+heredoc closes → use **base64 one-liners**. → [[live-signing-path-built]].
+
 ## What's NOT built yet
-- **Live deployment (EC2 flip + funding).** The capability is complete; deploying it = (1) fund a wallet
-  with ~$100 USDT + a BNB gas buffer; (2) a **live dry-run** (`--dry-run`, only quote-only) to validate
-  end-to-end on real data; (3) the competition-wallet flip + registration (Phase G/H,
-  [[EC2 Trading Host Runbook]]). The box's `event_agent` stays paper — live runs via the new launcher.
+- ~~**Live deployment (EC2 flip + funding).**~~ **DONE 2026-06-22** — competition wallet funded (~$100
+  USDT + BNB gas buffer), registered, dry-run-validated, then flipped live at the window open; the box's
+  `event_agent` (paper) was disabled and `trader-live-event-agent` enabled. See the 2026-06-22 entry above
+  + [[EC2 Trading Host Runbook]].
 - Richer portfolio / per-trade-reasoning telemetry surface (the fills already carry the trigger +
   obs; [[Trade Reasoning Capture]] is the eventual home).

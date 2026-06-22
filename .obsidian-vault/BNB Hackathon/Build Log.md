@@ -1387,3 +1387,57 @@ separate gated `trader.agent.live_event_agent`. All four corrected to point ther
 one consistent champion name (sbq-s1), MIT-licensed, and no remaining "not built yet" claims. All on
 `main` (`8013980` → `38c6885` → `9406c65` → `200514b` → `a8c04cc`), pushed. → [[Security and Encryption]],
 [[Remote Capabilities]].
+
+## 2026-06-22 — WENT LIVE; the deploy-drop bug (wallet wasn't deploying) found + fixed
+
+The competition window opened (Mon 00:00 UTC) and the live signing loop was flipped on — then a real
+forward-run bug surfaced: **the wallet wasn't deploying capital at all**, despite the env book showing a
+gain. Found because the user questioned why the wallet sat flat while the dashboard rose. Fix details →
+[[Live Forward-Run Harness]]; signing internals → [[live-signing-path-built]].
+
+### The live flip (00:00 UTC) + two snags
+**THE FLIP** = set the 3 env-file gates (`TRADER_MODE=live` + `AGENT_ALLOW_LIVE=1` + `AGENT_LIVE_CONFIRM=1`)
+→ `disable --now trader-event-agent` → `enable --now trader-live-event-agent`. **Snag 1:** the launcher
+refused 5× (`refusing REAL signing: set AGENT_LIVE_CONFIRM=1`) — the 3rd gate was missing; fix = add it +
+`systemctl reset-failed` (clears the start-limit lockout) + start. **Snag 2:** the first tick at 00:06
+threw `week open not present in the panel` — the 00:00 hourly bar hadn't CLOSED yet (closes 01:00); the
+loop CAUGHT it and self-resolved at the 01:03 tick, signing the first real trade: a **COMPLIANCE_BUY
+USDT→BNB confirmed on BSC** (tx `0xdff3622c…`).
+
+### Candle-feed froze at go-live — FIXED (`d165e67`)
+The dashboard `trading/candles/` feed froze at the go-live moment: the per-tick candle + signals-tally
+publish lived ONLY in the paper launcher (`event_agent`); `live_event_agent` never carried it over. Fix =
+extract a shared `publish_aux_feeds()` called by BOTH launchers (+3 regression tests); deploy = surgical
+2-file checkout + restart. Candles flowing again.
+
+### The deploy-drop bug — the wallet wasn't deploying (the core thesis) — FIXED (`62b23b6` → `a7d3683`)
+**Symptom:** the real wallet sat flat in USDT while the env book showed +2–3%. Ground truth via
+signals.json (`executed:true`) + an on-box env dump: sbq-s1 made ONE decision this week — a big
+front-loaded **UB IGNITION at the week-open bar (00:00, $1820 ≈ 18% of the $10k book)** — the env
+"executed" it but the runner **never recorded/signed it**. **ROOT CAUSE:** the runner's forward-only
+fill-diff cursor (`new_fills(records, after)`, `after`→latest bar each tick) DROPPED any env fill the env
+back-dates to a bar already behind the cursor. The env confirms ignitions with a LAG and attributes them
+to the origin bar, so by the time UB surfaced the cursor had passed 00:00 → dropped (`time > after` is
+strict). **FIX:** replace the cursor with **IDENTITY-DEDUP** — each tick record/sign any env strategy fill
+in the week NOT already in the ledger, keyed by `(bar_ts, token, side)`; a late/back-dated fill is caught
+whenever it surfaces; double-signing impossible (restart/rollover-safe). Plus a **sell-side position
+guard** `_onchain_held` (the adversarial review's C1/C2): a strategy SELL signs ONLY if the token has a
+`confirmed` buy this week — never an UNBACKED sell of a phantom position (a missed or guardrail-blocked
+entry the env later exits); uses "any confirmed buy" NOT a net count (which would skip later partial
+trims). +6 regression tests, 34 runner tests green. An **independent principal-engineer adversarial
+review** found C1/C2 (fixed), verified the dedup key is double-sign-safe, and flagged **C3 = a
+PRE-EXISTING sign-before-append double-spend window** (open follow-up: two-phase pending→confirmed row).
+**Don't-chase decision:** UB was +18–20% (since retraced — vindicated), so seed the ledger with a UB row
+`exec_status:"missed"` → dedup treats it as handled (dashboard shows a transparent miss; never bought).
+
+### Ledger-corruption incident (operational scar)
+Seeding the missed-UB row via `echo '{…long json…}' | tee -a` **line-wrapped on paste** into 3 JSON
+fragments → corrupted the JSONL → `StoreError` every tick → agent DOWN ~20 min. Repair = a Python script
+(delivered base64 to dodge paste-mangling) that keeps all PARSEABLE rows + rebuilds the seed via
+`json.dumps`, validated before write (non-destructive — no real trade rows lost). **LESSON: never append
+to the live ledger by pasting raw JSON — build rows in Python + validate. Pasting multi-line scripts on
+this box adds 2-space auto-indent + indents heredoc closes → use base64 one-liners.**
+
+**STATUS (2026-06-22 ~09:16Z): LIVE + GREEN** — ticking clean (no StoreError), UB shows `missed`/no-tx
+(deduped, not chased), compliance fill+tx preserved, candle/signals feeds live; the next genuine ignition
+WILL land on the wallet. Box on `origin/main@a7d3683`. → [[Live Forward-Run Harness]], [[live-signing-path-built]].
