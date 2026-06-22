@@ -64,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
                    "trained at 10000; do NOT change — only the SCALE to the real bankroll varies)")
     p.add_argument("--candle-window", type=int, default=DEFAULT_CANDLE_WINDOW, help="trailing 1h "
                    "candles to publish per token to trading/candles/ (default 168 = 7d)")
+    p.add_argument("--publish-wallet", action="store_true", help="ALSO publish trading/wallet.json — the "
+                   "ACTUAL on-chain wallet equity/PnL (not the $10k env book). OFF by default so the "
+                   "proven loop + existing telemetry stay byte-identical until this is validated.")
+    p.add_argument("--wallet-baseline-usd", type=float, default=None, help="funded cost basis for the "
+                   "wallet PnL (e.g. 101.06); omitted -> equity shown, PnL null")
     p.add_argument("--ledger-path", default=None, help="agent-ledger override; a --dry-run defaults "
                    "to data/agent_ledger.dryrun.jsonl (NEVER the production ledger) and does not publish")
     return p
@@ -123,10 +128,19 @@ def main(argv: list[str] | None = None) -> int:
                          live_bankroll_usd=float(bankroll), min_notional_usd=args.min_notional_usd,
                          live_dry_run=args.dry_run)
 
+    # on-chain wallet reconciliation (trading/wallet.json) — OFF unless --publish-wallet; needs the
+    # public wallet address. Additive: when off, nothing here runs and every existing feed is unchanged.
+    wallet_addr = config.get("AGENT_WALLET_ADDRESS")
+    wallet_recon_on = bool(args.publish_wallet) and bool(publish_target) and bool(wallet_addr)
+    if args.publish_wallet and not wallet_recon_on:
+        print(f"wallet recon requested but disabled: publish_target={publish_target!r} "
+              f"address={'set' if wallet_addr else 'MISSING (set AGENT_WALLET_ADDRESS)'}", file=sys.stderr)
+
     print(f"LIVE event-agent start: run_id={run_id} bankroll=${bankroll:,.2f} "
           f"scale={bankroll / args.capital:.4g} dry_run={args.dry_run} "
           f"min_notional=${args.min_notional_usd} once={args.once} ledger={ledger_path} "
-          f"publish={publish_target or 'off'}", file=sys.stderr)
+          f"publish={publish_target or 'off'} wallet_recon={'on' if wallet_recon_on else 'off'}",
+          file=sys.stderr)
 
     def _tick(now_ts: int) -> None:
         r = runner.tick(now_ts, refresh_data=not args.no_refresh)
@@ -138,6 +152,21 @@ def main(argv: list[str] | None = None) -> int:
         # resume the dashboard's candle + signals feeds (these froze at go-live until ported from
         # the paper launcher). publish_target is None on a --dry-run, so this no-ops there.
         publish_aux_feeds(publish_target, selection, trader, now_ts, candle_window=args.candle_window)
+        # ACTUAL on-chain wallet equity/PnL (flag-gated, additive). Fail-safe — a recon error here
+        # must never stop a trading tick.
+        if wallet_recon_on:
+            try:
+                from trader.agent.wallet_recon import USDT_BSC, publish_wallet  # noqa: PLC0415
+                assets = [{"symbol": s["symbol"], "contract": s.get("token_address")}
+                          for s in selection if s.get("token_address")]
+                assets.append({"symbol": "USDT", "contract": USDT_BSC})
+                wp = publish_wallet(publish_target, address=wallet_addr, assets=assets,
+                                    prices=runner.latest_token_prices(now_ts),
+                                    baseline_usd=args.wallet_baseline_usd)
+                print(f"[wallet] real equity=${wp['equity_usd']:,.2f} pnl_usd={wp['pnl_usd']} "
+                      f"stale={wp['stale']} -> {publish_target}/wallet.json", file=sys.stderr)
+            except Exception as e:  # noqa: BLE001
+                print(f"wallet recon warning: {e!r}", file=sys.stderr)
 
     if args.once:
         _tick(int(args.now if args.now is not None else _now()))

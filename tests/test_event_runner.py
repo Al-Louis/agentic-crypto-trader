@@ -689,3 +689,14 @@ def test_partial_exits_all_sign_after_a_confirmed_buy_live(tmp_path):
     runner.tick(ws + 1 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
     runner.tick(ws + 5 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
     assert len([c for c in ex.calls if c["from"] == "AAA"]) == 2   # BOTH trims signed, not just the first
+
+
+def test_latest_token_prices_for_wallet_recon(tmp_path):
+    """The wallet-recon price source: USDT=1.0, each token's LATEST close, NaN excluded, BNB from anchor."""
+    runner = EventRunner(_FakeTrader(0, {}), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                         compliance_frac=0.0, bnb_price_fn=lambda ts: 612.0)
+    runner._close_panel = pd.DataFrame({"UB": [1.0, 2.5], "ZEC": [10.0, float("nan")]},
+                                       index=[1000, 2000])
+    px = runner.latest_token_prices(2000)
+    assert px["USDT"] == 1.0 and px["UB"] == 2.5 and px["BNB"] == 612.0
+    assert "ZEC" not in px            # NaN latest close -> excluded (no fabricated price)

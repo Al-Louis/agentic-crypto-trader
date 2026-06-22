@@ -312,6 +312,27 @@ class EventRunner:
         except Exception as e:  # noqa: BLE001 — a swap failure must not crash the loop
             return {"error": f"{type(e).__name__}: {e}"[:300], "tx_hash": None}
 
+    def latest_token_prices(self, now_ts: int) -> dict:
+        """Latest real USD price per symbol the wallet could hold — USDT=1.0, each universe token's most
+        recent close (the `_close_panel` this tick built), and BNB from the anchor. For the wallet
+        reconciliation ([[wallet_recon]]); read-only, derived from data the tick already loaded, so it
+        adds nothing to the signing path."""
+        prices = {"USDT": 1.0}
+        cp = self._close_panel
+        if cp is not None and len(cp):
+            last = cp.iloc[-1]
+            for sym in cp.columns:
+                try:
+                    v = float(last[sym])
+                except (TypeError, ValueError):
+                    continue
+                if v == v and v > 0:                      # reject NaN / non-positive
+                    prices[str(sym)] = v
+        bnb = self._bnb_price(int(now_ts))
+        if bnb and bnb > 0:
+            prices["BNB"] = float(bnb)
+        return prices
+
     # -- daily >=1-trade/day compliance overlay -------------------------------
     def _bnb_price(self, now_ts: int) -> float | None:
         """BNB USD close at/just-before `now_ts`, from the BNB anchor parquet (same source the harness
