@@ -50,6 +50,15 @@ def finalized_bars(bars: list[list], now_wall: int, bar_secs: int = BAR_SECS) ->
     return sorted(closed, key=lambda r: int(r[0]))
 
 
+def just_closed_open(now_wall: int, bar_secs: int = BAR_SECS) -> int:
+    """Open ts of the most-recently CLOSED bar at `now_wall`: the bar whose close is the last hour
+    boundary <= now. This is the bar a tick firing just after the hour should be deciding on — and
+    the one GeckoTerminal is slowest to finalize, so the `settle` wait in `update_live` re-polls
+    until the active pools carry it (else the agent misses it for a WHOLE hour: the HH:03 fetch
+    races Gecko's candle finalization, the bar is absent, and the next attempt is HH+1:03)."""
+    return (int(now_wall) // bar_secs) * bar_secs - bar_secs
+
+
 # --- append (pure, filesystem only) -----------------------------------------
 
 def cached_newest_ts(symbol: str, pool: str, root: str = OHLCV_ROOT) -> int | None:
@@ -161,31 +170,90 @@ def _stderr(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+def _refresh_pool(s: dict, now_wall: int, *, root: str, fetch_fn, logger) -> int:
+    """Fetch one pool's latest page and append its just-closed bars. Returns the appended count
+    (0 on ANY error — one bad pool must never abort the hourly refresh). Shared by the initial
+    pass and the settle re-poll so both finalize against the SAME `now_wall`."""
+    sym, pool = s["symbol"], s["pair_address"]
+    try:
+        page = fetch_fn(pool)
+        return append_alt_bars(sym, pool, finalized_bars(page, now_wall), root=root)
+    except Exception as e:  # noqa: BLE001 — one bad token must not abort the hourly refresh
+        logger(f"  live-data WARN {sym}: {e!r}")
+        return 0
+
+
 def update_live(selection: list[dict], now_wall: int, *, ohlcv_root: str = OHLCV_ROOT,
                 anchor_root: str = ANCHOR_ROOT, features_out: str = FEATURES_OUT,
-                anchor_days: int = 10, min_interval: float = 3.0, logger=_stderr) -> dict:
+                anchor_days: int = 10, min_interval: float = 3.0,
+                settle_max_wait: float = 0.0, settle_poll: float = 45.0,
+                settle_active_window: int = 6 * 3600, fetch_fn=fetch_alt_latest,
+                sleep=None, logger=_stderr) -> dict:
     """One hourly refresh of all three surfaces, then the factor regen. `now_wall` (unix seconds,
     injectable for tests) gates bar finalization. Returns a per-token appended-bar count + the
-    anchor totals. The caller (the loop) then runs the validated loaders/driver UNCHANGED.
+    anchor totals + a `settle` diagnostics block. The caller runs the validated loaders UNCHANGED.
 
     Token fetches are PACED by `min_interval` seconds: GeckoTerminal rate-limits hard (HTTP 429
     after a handful of rapid calls), so 20 back-to-back fetches would 429 most of them. ~2.5s ×
-    20 tokens ≈ 50s/refresh — well inside the hourly cadence."""
-    import time  # noqa: PLC0415
+    20 tokens ≈ 50s/refresh — well inside the hourly cadence.
+
+    SETTLE WAIT (the candle-lag fix, OFF by default -> byte-identical single pass): the HH:03 tick
+    often fetches before GeckoTerminal has finalized the just-closed bar for a pool, so the env
+    misses that bar for a FULL hour (the +5% slip the live B trade ate). When `settle_max_wait>0`,
+    after the initial pass re-poll ONLY the *active* pools still missing the just-closed bar, every
+    `settle_poll`s, until they all carry it or the deadline — so the agent decides on the bar THIS
+    tick. A pool is "active" if its newest cached bar (before this tick) is within
+    `settle_active_window`s of now, so a perma-stale pool (e.g. inactive XAUt, never in the
+    vol-top-8) does NOT hold up the tick. The bars are identical GeckoTerminal candles (append-
+    immutable), so this changes only WHEN a decision lands, never WHICH (no train/serve skew).
+    `fetch_fn`/`sleep` are injectable for offline tests."""
+    if sleep is None:
+        import time  # noqa: PLC0415
+        sleep = time.sleep
+    now_wall = int(now_wall)
+    target = just_closed_open(now_wall)
+
+    # classify the pools that SHOULD settle the just-closed bar (only when the wait is enabled —
+    # the disabled path stays exactly the pre-existing single pass). Snapshot newest cached bars
+    # BEFORE any appends: a pool producing bars (newest within the active window) is expected to
+    # get the just-closed bar; a stale one is not waited on.
+    active: list[dict] = []
+    if settle_max_wait > 0.0 and settle_poll > 0.0:
+        active = [s for s in selection
+                  if (nt := cached_newest_ts(s["symbol"], s["pair_address"], root=ohlcv_root)) is not None
+                  and nt >= now_wall - settle_active_window]
 
     anchors = refresh_anchors(days=anchor_days, root=anchor_root)
     appended: dict[str, int] = {}
     for i, s in enumerate(selection):
-        sym, pool = s["symbol"], s["pair_address"]
         if i and min_interval > 0:
-            time.sleep(min_interval)               # pace GeckoTerminal (skip before the first)
-        try:
-            page = fetch_alt_latest(pool)
-            n = append_alt_bars(sym, pool, finalized_bars(page, now_wall), root=ohlcv_root)
-            appended[sym] = n
-        except Exception as e:  # noqa: BLE001 — one bad token must not abort the hourly refresh
-            logger(f"  live-data WARN {sym}: {e!r}")
-            appended[sym] = 0
+            sleep(min_interval)                    # pace GeckoTerminal (skip before the first)
+        appended[s["symbol"]] = _refresh_pool(s, now_wall, root=ohlcv_root,
+                                              fetch_fn=fetch_fn, logger=logger)
+
+    settle = {"enabled": settle_max_wait > 0.0, "target": target, "active": len(active),
+              "waited": 0.0, "polls": 0, "still_missing": []}
+    if settle_max_wait > 0.0 and settle_poll > 0.0 and active:
+        def _missing() -> list[dict]:
+            return [s for s in active
+                    if (cached_newest_ts(s["symbol"], s["pair_address"], root=ohlcv_root) or -1) < target]
+        waited, polls = 0.0, 0
+        miss = _missing()
+        while miss and waited < settle_max_wait:
+            sleep(settle_poll)
+            waited += settle_poll
+            polls += 1
+            for j, s in enumerate(miss):
+                if j and min_interval > 0:
+                    sleep(min_interval)
+                appended[s["symbol"]] = appended.get(s["symbol"], 0) + _refresh_pool(
+                    s, now_wall, root=ohlcv_root, fetch_fn=fetch_fn, logger=logger)
+            miss = _missing()
+        settle.update(waited=waited, polls=polls, still_missing=[s["symbol"] for s in miss])
+        logger(f"  live-data settle: target={target} active={len(active)} waited={waited:.0f}s "
+               f"polls={polls} still_missing={settle['still_missing']}")
+
     refreshed = refresh_factor_features(selection, ohlcv_root=ohlcv_root,
                                         anchor_root=anchor_root, out=features_out)
-    return {"appended": appended, "anchors": anchors, "factors_refreshed": len(refreshed)}
+    return {"appended": appended, "anchors": anchors,
+            "factors_refreshed": len(refreshed), "settle": settle}
