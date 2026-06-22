@@ -235,21 +235,20 @@ class EventRunner:
         return keys
 
     def _onchain_held(self, token: str, ws: int) -> bool:
-        """Did a strategy BUY of `token` actually LAND on-chain this week — a `confirmed` leg, net of
-        confirmed sells? Gates a strategy SELL so the runner never signs an UNBACKED sell: the env
-        book can be long a token the wallet never bought (a `missed` entry, or one the guardrails
-        BLOCKED), and signing that exit would swap funds the wallet doesn't hold. Only
-        `exec_status=="confirmed"` legs count — a missed/skipped/blocked buy does not."""
-        net = 0
+        """Did a strategy BUY of `token` actually LAND on-chain this week (any `confirmed` buy leg)?
+        Gates a strategy SELL so the runner never signs an UNBACKED sell — the env book can be long a
+        token the wallet never bought (a `missed` entry, or one the guardrails BLOCKED). A token WITH
+        a confirmed buy may sell freely: the env trims a position in MULTIPLE partial sells, so a
+        net-count would wrongly skip later trims; over-selling beyond the held qty just reverts
+        on-chain (fails closed). Only an entry with ZERO confirmed buys this week is blocked."""
         for r in store.read_rows(self.agent_ledger_path):
-            if (r.get("kind") != "fill" or r.get("compliance")
-                    or str(r.get("token")) != token or r.get("exec_status") != "confirmed"):
-                continue
-            bt = r.get("bar_ts")
-            if not isinstance(bt, int) or int(bt) < ws:
-                continue
-            net += 1 if r.get("to") == token else -1
-        return net > 0
+            if (r.get("kind") == "fill" and not r.get("compliance")
+                    and str(r.get("token")) == token and r.get("to") == token
+                    and r.get("exec_status") == "confirmed"):
+                bt = r.get("bar_ts")
+                if isinstance(bt, int) and int(bt) >= ws:
+                    return True
+        return False
 
     def _real_price(self, token: str, bar_ts: int) -> float | None:
         """The token's real USD close at the fill's bar (for display) — None if unavailable, in

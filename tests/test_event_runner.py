@@ -671,3 +671,21 @@ def test_sell_signs_when_the_buy_actually_landed_live(tmp_path):
     runner.tick(ws + 4 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)   # env exits -> SELL signs
     sides = [(c["from"], c["to"]) for c in ex.calls]
     assert ("USDT", "AAA") in sides and ("AAA", "USDT") in sides   # the buy AND the BACKED sell both signed
+
+
+def test_partial_exits_all_sign_after_a_confirmed_buy_live(tmp_path):
+    """A position bought on-chain can be trimmed in MULTIPLE partial sells — EVERY trim signs. The
+    guard checks 'has a confirmed buy', not a net count that would wrongly skip later trims."""
+    ws = 1782086400
+    ex = _FakeExec()                                          # confirmed
+    buy = ws + 1 * 3600
+    by_now = {ws + 1 * 3600 + 200: [_rec(buy, "AAA", 600.0)],
+              ws + 5 * 3600 + 200: [_rec(buy, "AAA", 600.0),
+                                    _rec(ws + 3 * 3600, "AAA", -200.0, "TP1"),
+                                    _rec(ws + 5 * 3600, "AAA", -200.0, "TP2")]}
+    runner = EventRunner(_FakeTrader(ws, by_now), selection=[], agent_ledger_path=tmp_path / "a.jsonl",
+                         mode="live", execute_fn=ex, live_policy=_WIDE, live_bankroll_usd=100.0,
+                         min_notional_usd=0.0, compliance_frac=0.0)
+    runner.tick(ws + 1 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    runner.tick(ws + 5 * 3600 + 200, panels=_DUMMY_PANELS, refresh_data=False)
+    assert len([c for c in ex.calls if c["from"] == "AAA"]) == 2   # BOTH trims signed, not just the first
