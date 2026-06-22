@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
                 assets.append({"symbol": "USDT", "contract": USDT_BSC})
                 wp = publish_wallet(publish_target, address=wallet_addr, assets=assets,
                                     prices=runner.latest_token_prices(now_ts),
-                                    baseline_usd=args.wallet_baseline_usd)
+                                    baseline_usd=args.wallet_baseline_usd, ledger_path=ledger_path)
                 print(f"[wallet] real equity=${wp['equity_usd']:,.2f} pnl_usd={wp['pnl_usd']} "
                       f"stale={wp['stale']} -> {publish_target}/wallet.json", file=sys.stderr)
             except Exception as e:  # noqa: BLE001

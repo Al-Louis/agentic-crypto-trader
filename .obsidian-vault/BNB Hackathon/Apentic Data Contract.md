@@ -321,7 +321,8 @@ trading/candles/index.json  { generated, interval_seconds, tokens: [{ symbol, sl
 trading/candles/<slug>.json { token, slug, generated, interval_seconds, candles: [{ t,o,h,l,c,v }] }
 trading/signals.json    { generated, week_start, totals:{seen,executed,ignored,…}, days, events }
 trading/wallet.json     { generated, address, source:"onchain", stale, equity_usd, baseline_usd,
-                          pnl_usd, pnl_pct, holdings: [{ token, qty, price_usd, value_usd }] }
+                          pnl_usd, pnl_pct, holdings: [{ token, qty, price_usd, value_usd }],
+                          series: [{ ts, equity_usd, pnl_usd }] }
 ```
 
 - **BOOK vs WALLET (live, 2026-06-22).** `heartbeat`/`status`/`equity`/`trades` all report the **$10k env
@@ -330,6 +331,8 @@ trading/wallet.json     { generated, address, source:"onchain", stale, equity_us
   price)` over USDT + universe tokens + BNB, published by `trader.agent.wallet_recon` (flag-gated
   `--publish-wallet`, read-only, fail-safe; `stale:true` if any holding couldn't be priced). The
   frontend's equity/PnL panel should read `wallet.json`; keep the book as a labeled "strategy notional".
+  The **equity-curve graphic** should read **`wallet.json.series`** (the REAL equity over time — one
+  ledger-backed `wallet_equity` point per tick, restart-safe); `equity.json` is the `$10k`-book curve.
 - **REAL fill amounts (live, 2026-06-22).** Each signed live fill carries the realized swap: `exec_usd`
   (the actual ~$30 scaled swap, NOT the $10k-book `usd_in`), `exec_out_amount` + `exec_out_symbol` (the
   token bought / USDT received). For fills recorded before that field existed, derive `usd_in ×

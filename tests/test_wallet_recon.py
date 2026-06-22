@@ -86,3 +86,24 @@ def test_read_live_equity_usd_sums_total_not_just_usdt():
 
     eq = read_live_equity_usd("0xW", sel, holdings_fn=holdings, prices={"B": 0.25, "BNB": 600.0})
     assert abs(eq - 104.43) < 0.01     # 67.83 + 120*0.25 + 0.011*600 -- NOT 67.83 (USDT-only)
+
+
+def test_publish_wallet_accumulates_ledger_backed_equity_series(tmp_path):
+    """With a ledger_path, each tick appends a wallet_equity row and wallet.json carries the real
+    equity CURVE (restart-safe, rebuilt from the ledger)."""
+    target = str(tmp_path / "trading")
+    ledger = tmp_path / "agent.jsonl"
+    ticks = iter([{"USDT": 100.0}, {"USDT": 103.0}])   # two ticks, equity rises
+
+    def holdings(addr, assets):
+        return next(ticks)
+
+    p1 = publish_wallet(target, address="0xabc", assets=[], prices={}, baseline_usd=100.0,
+                        holdings_fn=holdings, ledger_path=ledger)
+    assert [pt["equity_usd"] for pt in p1["series"]] == [100.0]
+    p2 = publish_wallet(target, address="0xabc", assets=[], prices={}, baseline_usd=100.0,
+                        holdings_fn=holdings, ledger_path=ledger)
+    assert [pt["equity_usd"] for pt in p2["series"]] == [100.0, 103.0]   # accumulates, restart-safe
+    assert p2["series"][-1]["pnl_usd"] == 3.0
+    f = json.loads((tmp_path / "trading" / "wallet.json").read_text(encoding="utf-8"))
+    assert len(f["series"]) == 2 and f["equity_usd"] == 103.0

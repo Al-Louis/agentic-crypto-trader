@@ -88,16 +88,33 @@ def build_wallet_payload(holdings: dict, prices: dict, *, baseline_usd: float | 
             "holdings": sorted(rows, key=lambda r: -(r["value_usd"] or 0.0))}
 
 
+def wallet_equity_series(ledger_path, *, limit: int = 800) -> list[dict]:
+    """The REAL-wallet equity curve = the `wallet_equity` rows in the ledger (one per published tick),
+    most-recent `limit` points. Ledger-backed so it's restart-safe + rebuilt deterministically; `project()`
+    ignores this row kind, so the $10k-book equity.json/status.json are untouched."""
+    from trader.agent import store   # noqa: PLC0415
+    pts = [{"ts": r.get("ts"), "equity_usd": r.get("equity_usd"), "pnl_usd": r.get("pnl_usd")}
+           for r in store.read_rows(ledger_path) if r.get("kind") == "wallet_equity"]
+    return pts[-int(limit):]
+
+
 def publish_wallet(target: str, *, address: str, assets: list[dict], prices: dict,
                    baseline_usd: float | None, holdings_fn=read_holdings_onchain,
-                   generated: str | None = None) -> dict:
+                   generated: str | None = None, ledger_path=None) -> dict:
     """Read on-chain holdings, build the payload, and PUT `<target>/wallet.json` (no-cache, same
-    put-only path as the other feeds). Returns the payload. Raises on a read/put failure — the caller
-    wraps it fail-safe (a wallet-recon error must never stop a trading tick)."""
+    put-only path as the other feeds). With `ledger_path`, also append this tick's real equity as a
+    `wallet_equity` row and attach the accumulated `series` (the real equity CURVE for the frontend).
+    Returns the payload. Raises on a read/put failure — the caller wraps it fail-safe."""
     from remote_train.publish import join, put_bytes   # noqa: PLC0415 — boto3 stays optional
     holdings = holdings_fn(address, assets)
     payload = build_wallet_payload(holdings, prices, baseline_usd=baseline_usd, address=address,
                                    generated=generated)
+    if ledger_path is not None:
+        from trader.agent import store   # noqa: PLC0415
+        store.append({"kind": "wallet_equity", "equity_usd": payload["equity_usd"],
+                      "pnl_usd": payload["pnl_usd"], "baseline_usd": baseline_usd},
+                     ledger_path, now=None)
+        payload["series"] = wallet_equity_series(ledger_path)
     put_bytes(join(target, "wallet.json"),
               json.dumps(payload, separators=(",", ":")).encode("utf-8"),
               content_type="application/json", cache_control="no-cache")
