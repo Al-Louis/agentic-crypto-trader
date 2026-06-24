@@ -112,13 +112,14 @@ class EventRungEnv:
         self.stop_k, self.cooldown, self.max_entry_frac = stop_k, cooldown, max_entry_frac
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
         self.reward_mode = reward_mode                      # absolute|relative|residual|residual_ranked
-        self.act_last_bar = bool(act_last_bar)              # LIVE: also scan the terminal (just-closed) bar so
-        #   a signal on it acts THIS tick, not next (removes the env's terminal-bar exclusion = the +1-bar
-        #   live lag). Default OFF => training / simulate_weekly / the sbq-s1 frozen cert are byte-identical.
-        #   Lookahead-safe (the bar is finalized; _scan_bar reads only [bar], never [bar+1]); UNSAFE only with
-        #   forward-maturation reward (it reads bar+horizon) — guarded:
-        if self.act_last_bar and self.reward_mode == "entry_forward":
-            raise ValueError("act_last_bar is unsafe with reward_mode='entry_forward' (forward maturation reads bar+horizon)")
+        self.act_last_bar = bool(act_last_bar)              # LIVE / INFERENCE-ONLY: also scan the terminal
+        #   (just-closed) bar so a signal on it acts THIS tick, not next (removes the env's terminal-bar
+        #   exclusion = the +1-bar live lag). Default OFF => training / simulate_weekly / the sbq-s1 cert
+        #   stay byte-identical. ACTION-safe regardless of reward_mode: _obs + _scan_bar read only [bar] and
+        #   trailing [bar-n], NEVER forward (verified). The ONLY forward read is entry_forward's reward
+        #   maturation (bar+fwd_horizon) — and the reward is DISCARDED at inference, so under act_last_bar we
+        #   SKIP it (see _advance_to_event) and a terminal-bar entry can't OOB-read past the data. This zeros
+        #   the entry_forward reward, so act_last_bar must stay inference-only — no training path sets it.
         self.r4_beta = r4_beta                              # residual: foregone-opportunity penalty weight
         self.res_gamma = res_gamma                          # residual_ranked: quadratic deviation-budget weight
         self.fwd_horizon = int(fwd_horizon)                 # entry_forward: forward-return window (bars)
@@ -480,8 +481,11 @@ class EventRungEnv:
                 self._set_pending(("none", None))
                 return
             self.peak_eq = max(self.peak_eq, eqb)
-            if self.reward_mode == "entry_forward":            # mature entries whose forward window elapsed
-                self._mature_entries(self.bar)
+            if self.reward_mode == "entry_forward" and not self.act_last_bar:  # mature entries whose forward
+                self._mature_entries(self.bar)                                 # window elapsed (reward-only).
+                #   SKIPPED under act_last_bar: the reward is discarded at inference and the just-scanned
+                #   terminal bar has no bar+fwd_horizon to read (would OOB). Actions/fills are reward-
+                #   independent and _obs is causal, so skipping cannot change what the policy does.
             self._queue = self._scan_bar(self.bar)
             # re-arm entry edges where ignite has dropped (so a future ignite prompts again)
             for t in self.universe:

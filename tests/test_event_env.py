@@ -729,10 +729,11 @@ def test_markers_are_byte_identical_recording_only():
     assert len(eq) == 202
 
 
-def test_act_last_bar_scans_terminal_no_oob_and_guards_forward():
+def test_act_last_bar_scans_terminal_no_oob_and_runs_entry_forward():
     """LIVE fix: act_last_bar extends the scan window by exactly one bar (the just-closed terminal bar)
     so its signal acts THIS tick; the bar>=n_bars guard prevents the terminal _equity() OOB; default OFF
-    is unchanged; and forward-maturation reward is refused (lookahead protection)."""
+    is unchanged; and it runs cleanly under the DEPLOYED champion's reward mode (entry_forward) — the
+    forward-maturation read (bar+horizon) is SKIPPED (reward is discarded at inference), so no OOB."""
     # window whose terminal bar IS the final data bar (n_bars-1) -> exercises the OOB guard
     off = _env(episode_bars=229, act_last_bar=False); off.reset(start=30)
     on = _env(episode_bars=229, act_last_bar=True); on.reset(start=30)
@@ -747,6 +748,14 @@ def test_act_last_bar_scans_terminal_no_oob_and_guards_forward():
             if done:
                 break
         assert env._done                                     # terminated cleanly (no OOB, no hang)
-    # forward-maturation reward + act_last_bar would read bar+horizon at the terminal -> must refuse
-    with pytest.raises(ValueError):
-        _env(act_last_bar=True, reward_mode="entry_forward")
+    # entry_forward (sbq-s1's reward mode) + act_last_bar: the bar+horizon maturation is SKIPPED so the
+    # terminal bar can't OOB-read; the episode runs to done and the (unused) reward stream stays zero.
+    ef = _env(episode_bars=229, act_last_bar=True, reward_mode="entry_forward")
+    ef.reset(start=30)
+    for _ in range(3000):
+        if ef._pending[0] == "none":
+            break
+        _o, _r, done, _i = ef.step([1.0])
+        if done:
+            break
+    assert ef._done and ef._matured_reward == 0.0            # ran clean; maturation skipped (reward unused)
