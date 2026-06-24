@@ -101,7 +101,7 @@ class EventRungEnv:
                  candle_lw_max: float = 0.25, candle_doji_max: float = 0.10,
                  cycle_obs: bool = False, universe_lookback: int = 0, no_btc_obs: bool = False,
                  fixed_universe: list | None = None,
-                 record_trace: bool = False, seed: int | None = None):
+                 record_trace: bool = False, act_last_bar: bool = False, seed: int | None = None):
         self.returns = returns.sort_index()
         self.btc = btc_close.reindex(self.returns.index).ffill().bfill()
         self.btc_ema = self.btc.ewm(span=ema_span, adjust=False).mean()
@@ -112,6 +112,13 @@ class EventRungEnv:
         self.stop_k, self.cooldown, self.max_entry_frac = stop_k, cooldown, max_entry_frac
         self.dd_soft, self.dd_gate, self.dd_lambda = dd_soft, dd_gate, dd_lambda
         self.reward_mode = reward_mode                      # absolute|relative|residual|residual_ranked
+        self.act_last_bar = bool(act_last_bar)              # LIVE: also scan the terminal (just-closed) bar so
+        #   a signal on it acts THIS tick, not next (removes the env's terminal-bar exclusion = the +1-bar
+        #   live lag). Default OFF => training / simulate_weekly / the sbq-s1 frozen cert are byte-identical.
+        #   Lookahead-safe (the bar is finalized; _scan_bar reads only [bar], never [bar+1]); UNSAFE only with
+        #   forward-maturation reward (it reads bar+horizon) — guarded:
+        if self.act_last_bar and self.reward_mode == "entry_forward":
+            raise ValueError("act_last_bar is unsafe with reward_mode='entry_forward' (forward maturation reads bar+horizon)")
         self.r4_beta = r4_beta                              # residual: foregone-opportunity penalty weight
         self.res_gamma = res_gamma                          # residual_ranked: quadratic deviation-budget weight
         self.fwd_horizon = int(fwd_horizon)                 # entry_forward: forward-return window (bars)
@@ -317,6 +324,8 @@ class EventRungEnv:
         self.start = int(start) if start is not None else int(
             self.rng.integers(self._min_start, max(self._max_start, self._min_start + 1)))
         self.end = self.start + self.episode_bars
+        if self.act_last_bar:                                    # LIVE: extend by one so the terminal
+            self.end += 1                                        # (just-closed) bar is scanned, not dropped
         self.bar = self.start
         self.universe = self._pick_universe(self.start)          # causal vol-ranked, fixed for episode
         self._uni_ix = np.array([self.col_ix[t] for t in self.universe])  # for the breadth regime feature
@@ -451,6 +460,11 @@ class EventRungEnv:
                 return
             self.bar += 0 if first else 1
             first = False
+            if self.bar >= self.n_bars:                     # past the data: only reachable when act_last_bar
+                self.bar = self.n_bars - 1                  # clamp to the last valid bar so post-done marks
+                self._done = True                           # (step info equity, _obs) never index OOB; we're
+                self._set_pending(("none", None))           # done so the final mark IS the last bar's
+                return
             if self.intrabar_floor and self.pos:            # the RESTING-STOP floor: fill where the
                 for t in list(self.pos):                    # bar's LOW crossed entry*(1-floor) —
                     p = self.pos[t]                         # not at the next close (the Q hole)

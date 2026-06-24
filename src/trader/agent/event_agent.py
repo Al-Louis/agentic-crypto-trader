@@ -86,6 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
                    "(ef-s2 trained at 10000; changing it breaks AMM-cost/fill parity)")
     p.add_argument("--candle-window", type=int, default=168, help="trailing 1h candles to publish "
                    "per token to trading/candles/ (default 168 = 7d, quick-glance)")
+    p.add_argument("--act-last-bar", action="store_true", help="LIVE: act on the just-closed (terminal) "
+                   "bar at THIS tick instead of next — removes the +1-bar execution lag. Pair with a fast "
+                   "feed + a low --tick-offset-secs. Default off = offline-cold-weekly-identical.")
     return p
 
 
@@ -143,7 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     prov = load_provenance(args.run_dir, run_id)
     trader = LiveEventTrader(prov,
                              policy_path=os.path.join(args.run_dir, "policy.zip"),
-                             vecnorm_path=os.path.join(args.run_dir, "vecnormalize.pkl"))
+                             vecnorm_path=os.path.join(args.run_dir, "vecnormalize.pkl"),
+                             act_last_bar=args.act_last_bar)
     publish_target = config.get("APENTIC_PUBLISH_TARGET")
     publisher = build_publisher(AGENT_LEDGER_PATH, publish_target) if publish_target else None
     selection = load_selection()

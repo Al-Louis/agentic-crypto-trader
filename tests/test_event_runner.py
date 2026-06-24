@@ -714,3 +714,35 @@ def test_exec_summary_records_real_realized_amounts():
     assert dust["exec_status"] == "skipped" and dust["exec_usd"] == 0.3  # the would-be real size
     assert "exec_out_amount" not in dust
     assert _exec_summary(None) == {}                                     # paper: byte-identical
+
+
+def test_act_last_bar_records_terminal_fill_once_and_removes_the_lag(tmp_path, panels):
+    """The exec-lag fix end-to-end through the runner: with act_last_bar the just-closed (terminal)
+    bar's fill is recorded on the SAME tick it closes (no +1-bar wait), is NOT duplicated on the next
+    tick (identity dedup), and the default (OFF) runner does NOT yet see that fill at the same now —
+    proving the behavior change is real and flag-gated."""
+    returns, btc, liq, vol = panels
+    ws, ek = _week_with_fills(returns, btc, liq, vol)
+    # full-week ON replay -> a fill bar with at least one following bar left in the week
+    on_full = LiveEventTrader(_prov(), act_last_bar=True).evaluate_week(
+        returns, btc, liq, vol, ws + 167 * 3600, ek, predict_fn=RULE)
+    cand = [f for f in on_full["fills"] if f.time <= ws + 165 * 3600]
+    assert cand, "need a fill with room for a following tick"
+    bt, tok, side = cand[-1].time, cand[-1].token, cand[-1].side
+
+    # ON: tick exactly at the just-closed bar -> the fill is recorded THIS tick
+    on = EventRunner(LiveEventTrader(_prov(), act_last_bar=True), selection=[],
+                     agent_ledger_path=tmp_path / "on.jsonl")
+    on.tick(bt, panels=panels, predict_fn=RULE, refresh_data=False)
+    _fills = lambda p: [(r["bar_ts"], r["token"], "buy" if r["from"] == "USDT" else "sell")  # noqa: E731
+                        for r in store.read_rows(p) if r["kind"] == "fill"]
+    assert (bt, tok, side) in _fills(tmp_path / "on.jsonl")          # acted on the just-closed bar
+
+    on.tick(bt + 3600, panels=panels, predict_fn=RULE, refresh_data=False)   # bar now interior
+    assert _fills(tmp_path / "on.jsonl").count((bt, tok, side)) == 1  # identity dedup -> exactly once
+
+    # OFF (default): the SAME now does not yet surface the terminal bar's fill (the lag we remove)
+    off = EventRunner(LiveEventTrader(_prov(), act_last_bar=False), selection=[],
+                      agent_ledger_path=tmp_path / "off.jsonl")
+    off.tick(bt, panels=panels, predict_fn=RULE, refresh_data=False)
+    assert (bt, tok, side) not in _fills(tmp_path / "off.jsonl")     # terminal bar excluded -> +1-bar lag

@@ -148,6 +148,26 @@ def fetch_alt_latest(pool: str, *, network: str = "bsc", limit: int = 300,
             raise
 
 
+def fetch_alt_latest_cmc(token: str, *, limit: int = 1000) -> list[list]:
+    """Most-recent 1h OHLCV for a TOKEN from CMC k-line (the by-token DEX aggregate). `[ts_sec, o, h, l,
+    c, v]` rows. CMC finalizes the just-closed bar in ~30-60s (vs Gecko's ~5min) AND covers thin pools
+    Gecko leaves stale — the basis for acting on the just-closed bar at ~HH:02. Keyed by token address
+    (CMC resolves the pool), not the trading pool; validated ~0.1-1.5% close / ~1.0x volume vs Gecko."""
+    import json as _json  # noqa: PLC0415
+    import urllib.parse   # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    from trader import config  # noqa: PLC0415
+    q = {"platform": "bsc", "address": token, "interval": "1h", "unit": "usd", "limit": str(limit)}
+    url = "https://pro-api.coinmarketcap.com/v1/k-line/candles?" + urllib.parse.urlencode(q)
+    req = urllib.request.Request(url, headers={"X-CMC_PRO_API_KEY": config.get("CMC_API_KEY"),
+                                              "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        data = _json.loads(r.read()).get("data") or []       # candle = [o,h,l,c,v,time_ms,count]
+    return [[int(c[5]) // 1000, float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4])]
+            for c in data]
+
+
 def refresh_anchors(days: int = 10, root: str = ANCHOR_ROOT) -> dict:
     """Forward-incremental BTC/BNB 1h anchor refresh (ccxt/binanceus; appends only newer bars)."""
     from trader.data.anchor import download_anchor  # noqa: PLC0415
@@ -163,7 +183,8 @@ def _stderr(msg: str) -> None:
 
 def update_live(selection: list[dict], now_wall: int, *, ohlcv_root: str = OHLCV_ROOT,
                 anchor_root: str = ANCHOR_ROOT, features_out: str = FEATURES_OUT,
-                anchor_days: int = 10, min_interval: float = 3.0, logger=_stderr) -> dict:
+                anchor_days: int = 10, min_interval: float = 3.0, feed: str | None = None,
+                logger=_stderr) -> dict:
     """One hourly refresh of all three surfaces, then the factor regen. `now_wall` (unix seconds,
     injectable for tests) gates bar finalization. Returns a per-token appended-bar count + the
     anchor totals. The caller (the loop) then runs the validated loaders/driver UNCHANGED.
@@ -173,14 +194,21 @@ def update_live(selection: list[dict], now_wall: int, *, ohlcv_root: str = OHLCV
     20 tokens ≈ 50s/refresh — well inside the hourly cadence."""
     import time  # noqa: PLC0415
 
-    anchors = refresh_anchors(days=anchor_days, root=anchor_root)
+    from trader import config  # noqa: PLC0415
+    feed = (feed or config.get("CANDLE_FEED") or "gecko").lower()   # "cmc" cuts the alt feed over; default Gecko
+    pace = (0.3 if feed == "cmc" else min_interval)                  # CMC rate limits are generous; Gecko isn't
+    anchors = refresh_anchors(days=anchor_days, root=anchor_root)    # BTC/BNB anchor stays on the deep-major source
     appended: dict[str, int] = {}
     for i, s in enumerate(selection):
         sym, pool = s["symbol"], s["pair_address"]
-        if i and min_interval > 0:
-            time.sleep(min_interval)               # pace GeckoTerminal (skip before the first)
+        if i and pace > 0:
+            time.sleep(pace)                       # pace the feed (skip before the first)
         try:
-            page = fetch_alt_latest(pool)
+            if feed == "cmc":
+                tok = s.get("token_address")
+                page = fetch_alt_latest_cmc(tok) if tok else []
+            else:
+                page = fetch_alt_latest(pool)
             n = append_alt_bars(sym, pool, finalized_bars(page, now_wall), root=ohlcv_root)
             appended[sym] = n
         except Exception as e:  # noqa: BLE001 — one bad token must not abort the hourly refresh

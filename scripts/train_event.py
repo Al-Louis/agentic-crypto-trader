@@ -34,13 +34,15 @@ HOURS_PER_YEAR = 24 * 365
 WARMUP = 168
 
 
-def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs):
+def evaluate_event_policy(predict_fn, eval_r, btc, liq, vol, env_kwargs, *, act_last_bar=False):
     """Run one long episode over `eval_r` with `predict_fn(obs)->action`; collect per-event markers
-    and the per-bar equity trace. Torch-free — works with a PPO policy or a heuristic (for tests)."""
+    and the per-bar equity trace. Torch-free — works with a PPO policy or a heuristic (for tests).
+    `act_last_bar` (LIVE only) lets the env act on the just-closed terminal bar at THIS tick instead of
+    next; default OFF keeps the offline cold-weekly metric / frozen cert byte-identical."""
     from trader.train.event_env import EventRungEnv
     kw = {k: v for k, v in env_kwargs.items() if k != "episode_bars"}
     env = EventRungEnv(eval_r, btc, liq, volume=vol, episode_bars=len(eval_r) - WARMUP - 1,
-                       record_trace=True, **kw)
+                       record_trace=True, act_last_bar=act_last_bar, **kw)
     obs = env.reset(start=WARMUP)
     records, fees, raw = [], 0.0, []
     if env._trades:                                    # basket_default buys the WHOLE basket in reset();

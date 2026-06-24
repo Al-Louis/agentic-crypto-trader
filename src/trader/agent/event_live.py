@@ -135,8 +135,9 @@ class LiveEventTrader:
     """
 
     def __init__(self, prov: dict, *, policy_path: str | None = None, vecnorm_path: str | None = None,
-                 model=None, vn=None):
+                 model=None, vn=None, act_last_bar: bool = False):
         self.prov = prov
+        self.act_last_bar = bool(act_last_bar)   # LIVE: act on the just-closed bar at this tick (no +1-bar lag)
         self.recurrent = bool(prov.get("recurrent"))
         self._policy_path, self._vecnorm_path = policy_path, vecnorm_path
         self._model, self._vn = model, vn
@@ -180,7 +181,8 @@ class LiveEventTrader:
         from train_event import evaluate_event_policy  # noqa: PLC0415 — the validated loop
         win, ws, _i0 = cold_week_window(returns, now_ts)
         pf = predict_fn if predict_fn is not None else self._predict_fn()
-        eq, records, universe, fees, raw, token_pnl = evaluate_event_policy(pf, win, btc, liq, vol, env_kwargs)
+        eq, records, universe, fees, raw, token_pnl = evaluate_event_policy(
+            pf, win, btc, liq, vol, env_kwargs, act_last_bar=self.act_last_bar)
         return {"week_start": ws, "equity": eq, "records": records, "universe": universe,
                 "token_pnl": token_pnl, "fills": fills_from_records(records),
                 "win_index": [int(t) for t in win.index], "raw_actions": raw, "fees": fees}

@@ -727,3 +727,26 @@ def test_markers_are_byte_identical_recording_only():
     assert maxdd == pytest.approx(0.11876140553437244, rel=0, abs=1e-9)
     assert ntrades == 103
     assert len(eq) == 202
+
+
+def test_act_last_bar_scans_terminal_no_oob_and_guards_forward():
+    """LIVE fix: act_last_bar extends the scan window by exactly one bar (the just-closed terminal bar)
+    so its signal acts THIS tick; the bar>=n_bars guard prevents the terminal _equity() OOB; default OFF
+    is unchanged; and forward-maturation reward is refused (lookahead protection)."""
+    # window whose terminal bar IS the final data bar (n_bars-1) -> exercises the OOB guard
+    off = _env(episode_bars=229, act_last_bar=False); off.reset(start=30)
+    on = _env(episode_bars=229, act_last_bar=True); on.reset(start=30)
+    assert off.end == 259 and on.end == 260 == on.n_bars     # ON includes the terminal (just-closed) bar
+    # both run to done with NO exception (ON drives self.bar to n_bars -> the guard must catch it)
+    for env in (off, on):
+        env.reset(start=30)
+        for _ in range(3000):
+            if env._pending[0] == "none":
+                break
+            _o, _r, done, _i = env.step([1.0])
+            if done:
+                break
+        assert env._done                                     # terminated cleanly (no OOB, no hang)
+    # forward-maturation reward + act_last_bar would read bar+horizon at the terminal -> must refuse
+    with pytest.raises(ValueError):
+        _env(act_last_bar=True, reward_mode="entry_forward")

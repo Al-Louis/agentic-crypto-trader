@@ -59,6 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--now", type=int, default=None, help="override wall-clock 'now' (unix sec) for --once")
     p.add_argument("--interval-secs", type=int, default=HOUR)
     p.add_argument("--tick-offset-secs", type=int, default=DEFAULT_TICK_OFFSET)
+    p.add_argument("--act-last-bar", action="store_true", help="LIVE: act on the just-closed bar at THIS "
+                   "tick instead of next (removes the +1-bar exec lag). Pair with the fast CMC feed + a "
+                   "low --tick-offset-secs (e.g. 120).")
     p.add_argument("--no-refresh", action="store_true", help="skip the network data refresh")
     p.add_argument("--capital", type=float, default=10_000.0, help="cold-weekly env capital (the model "
                    "trained at 10000; do NOT change — only the SCALE to the real bankroll varies)")
@@ -128,7 +131,8 @@ def main(argv: list[str] | None = None) -> int:
 
     prov = load_provenance(args.run_dir, run_id)
     trader = LiveEventTrader(prov, policy_path=os.path.join(args.run_dir, "policy.zip"),
-                             vecnorm_path=os.path.join(args.run_dir, "vecnormalize.pkl"))
+                             vecnorm_path=os.path.join(args.run_dir, "vecnormalize.pkl"),
+                             act_last_bar=args.act_last_bar)
     # A dry-run is a VALIDATION — it must NEVER touch the production ledger or publish to the live
     # dashboard. Isolate to a separate ledger + disable publishing unless an explicit --ledger-path.
     from pathlib import Path  # noqa: PLC0415

@@ -177,3 +177,56 @@ def test_regenerated_panels_match_recorded(tmp_path):
     for t in replayed:
         assert np.isclose(float(live_oh.loc[t]), float(rec_oh.loc[t]), equal_nan=True), \
             f"volume diverged on appended bar {t}"
+
+
+# --- CMC feed (the cutover: fast just-closed-bar finalization, keyed by token) ----
+
+def test_fetch_alt_latest_cmc_parses_kline(monkeypatch):
+    """CMC k-line candle [o,h,l,c,v,time_ms,count] -> our [ts_sec,o,h,l,c,v] rows, by token."""
+    import urllib.request
+    payload = {"data": [[1.0, 2.0, 0.5, 1.5, 100.0, 1_700_000_000_000, 7],
+                        [1.5, 3.0, 1.0, 2.0, 200.0, 1_700_003_600_000, 9]]}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return json.dumps(payload).encode()
+
+    cap = {}
+
+    def fake_urlopen(req, **kw):
+        cap["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setattr("trader.config.get", lambda k, *a, **kw: "TESTKEY")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    out = ld.fetch_alt_latest_cmc("0xToKeN")
+    assert out == [[1_700_000_000, 1.0, 2.0, 0.5, 1.5, 100.0],
+                   [1_700_003_600, 1.5, 3.0, 1.0, 2.0, 200.0]]
+    assert "address=0xToKeN" in cap["url"] and "platform=bsc" in cap["url"] and "interval=1h" in cap["url"]
+
+
+def test_update_live_feed_selector_routes_cmc_vs_gecko(monkeypatch):
+    """feed='cmc' fetches by token_address via the CMC path; default/unset -> Gecko by pool."""
+    import time
+    sel = [{"symbol": "AAA", "pair_address": "0xpoolA", "token_address": "0xtokA"},
+           {"symbol": "BBB", "pair_address": "0xpoolB", "token_address": "0xtokB"}]
+    calls = {"cmc": [], "gecko": []}
+    monkeypatch.setattr(ld, "refresh_anchors", lambda **kw: {"BTC": 1})
+    monkeypatch.setattr(ld, "refresh_factor_features", lambda *a, **kw: [])
+    monkeypatch.setattr(ld, "finalized_bars", lambda page, now, *a, **kw: page)
+    monkeypatch.setattr(ld, "append_alt_bars", lambda sym, pool, bars, **kw: len(bars))
+    monkeypatch.setattr(ld, "fetch_alt_latest_cmc",
+                        lambda tok, **kw: (calls["cmc"].append(tok) or [[1, 1, 1, 1, 1, 1]]))
+    monkeypatch.setattr(ld, "fetch_alt_latest",
+                        lambda pool, **kw: (calls["gecko"].append(pool) or [[1, 1, 1, 1, 1, 1]]))
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+
+    out = ld.update_live(sel, 1_700_000_000, feed="cmc")          # explicit cmc -> token-keyed
+    assert calls["cmc"] == ["0xtokA", "0xtokB"] and calls["gecko"] == []
+    assert out["appended"] == {"AAA": 1, "BBB": 1}
+
+    calls["cmc"].clear(); calls["gecko"].clear()
+    monkeypatch.setattr("trader.config.get", lambda k, *a, **kw: None)  # CANDLE_FEED unset -> gecko
+    ld.update_live(sel, 1_700_000_000)                            # default -> pool-keyed Gecko
+    assert calls["gecko"] == ["0xpoolA", "0xpoolB"] and calls["cmc"] == []
