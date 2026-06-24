@@ -206,6 +206,52 @@ def test_fetch_alt_latest_cmc_parses_kline(monkeypatch):
     assert "address=0xToKeN" in cap["url"] and "platform=bsc" in cap["url"] and "interval=1h" in cap["url"]
 
 
+def test_fetch_alt_latest_cmc_retries_on_429_then_succeeds(monkeypatch):
+    """Transient 429 (CMC per-IP throttle) is retried with bounded backoff, then succeeds."""
+    import time
+    import urllib.error
+    import urllib.request
+    payload = {"data": [[1.0, 2.0, 0.5, 1.5, 100.0, 1_700_000_000_000, 7]]}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return json.dumps(payload).encode()
+
+    n = {"c": 0}
+
+    def fake_urlopen(req, **kw):
+        n["c"] += 1
+        if n["c"] < 3:
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", None, None)
+        return _Resp()
+
+    monkeypatch.setattr("trader.config.get", lambda k, *a, **kw: "TESTKEY")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)               # no real backoff in the test
+    out = ld.fetch_alt_latest_cmc("0xtok")
+    assert n["c"] == 3 and out == [[1_700_000_000, 1.0, 2.0, 0.5, 1.5, 100.0]]
+
+
+def test_fetch_alt_latest_cmc_fails_fast_on_timeout(monkeypatch):
+    """A hung/slow connection must NOT retry — it raises after the timeout so update_live continues to
+    the next token (the restart-wedge fix; a throttled token can't compound a stall across 20 tokens)."""
+    import time
+    import urllib.request
+    n = {"c": 0}
+
+    def fake_urlopen(req, **kw):
+        n["c"] += 1
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr("trader.config.get", lambda k, *a, **kw: "TESTKEY")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    with pytest.raises(TimeoutError):
+        ld.fetch_alt_latest_cmc("0xtok")
+    assert n["c"] == 1                                                # NO retry on timeout/connection
+
+
 def test_update_live_feed_selector_routes_cmc_vs_gecko(monkeypatch):
     """feed='cmc' fetches by token_address via the CMC path; default/unset -> Gecko by pool."""
     import time

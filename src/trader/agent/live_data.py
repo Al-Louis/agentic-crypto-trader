@@ -148,24 +148,41 @@ def fetch_alt_latest(pool: str, *, network: str = "bsc", limit: int = 300,
             raise
 
 
-def fetch_alt_latest_cmc(token: str, *, limit: int = 1000) -> list[list]:
+def fetch_alt_latest_cmc(token: str, *, limit: int = 300, timeout: float = 20.0,
+                         max_retries: int = 3) -> list[list]:
     """Most-recent 1h OHLCV for a TOKEN from CMC k-line (the by-token DEX aggregate). `[ts_sec, o, h, l,
     c, v]` rows. CMC finalizes the just-closed bar in ~30-60s (vs Gecko's ~5min) AND covers thin pools
     Gecko leaves stale — the basis for acting on the just-closed bar at ~HH:02. Keyed by token address
-    (CMC resolves the pool), not the trading pool; validated ~0.1-1.5% close / ~1.0x volume vs Gecko."""
+    (CMC resolves the pool), not the trading pool; validated ~0.1-1.5% close / ~1.0x volume vs Gecko.
+
+    Resilience (the restart-wedge fix): retries transient HTTP 429/5xx with bounded backoff (CMC
+    throttles per-IP), but does NOT retry on a timeout / connection error — a hung connection fails fast
+    (after `timeout`s) so the per-tick refresh loop CONTINUES to the next token instead of compounding a
+    stall. With the per-token bound, one throttled token can never wedge the startup tick; `update_live`
+    logs it and moves on (0 bars that tick)."""
     import json as _json  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+    import urllib.error   # noqa: PLC0415
     import urllib.parse   # noqa: PLC0415
     import urllib.request  # noqa: PLC0415
 
     from trader import config  # noqa: PLC0415
     q = {"platform": "bsc", "address": token, "interval": "1h", "unit": "usd", "limit": str(limit)}
     url = "https://pro-api.coinmarketcap.com/v1/k-line/candles?" + urllib.parse.urlencode(q)
-    req = urllib.request.Request(url, headers={"X-CMC_PRO_API_KEY": config.get("CMC_API_KEY"),
-                                              "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=40) as r:
-        data = _json.loads(r.read()).get("data") or []       # candle = [o,h,l,c,v,time_ms,count]
-    return [[int(c[5]) // 1000, float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4])]
-            for c in data]
+    headers = {"X-CMC_PRO_API_KEY": config.get("CMC_API_KEY"), "Accept": "application/json"}
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
+                data = _json.loads(r.read()).get("data") or []   # candle = [o,h,l,c,v,time_ms,count]
+            return [[int(c[5]) // 1000, float(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4])]
+                    for c in data]
+        except urllib.error.HTTPError as e:                  # transient server/throttle -> bounded retry
+            if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                _time.sleep(min(4 * (2 ** attempt), 20))
+                attempt += 1
+                continue
+            raise                                            # 4xx (non-429) or retries exhausted -> caller WARNs
 
 
 def refresh_anchors(days: int = 10, root: str = ANCHOR_ROOT) -> dict:
